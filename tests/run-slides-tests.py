@@ -58,6 +58,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -460,6 +461,16 @@ def deck(path, slides, default_lang="en-US", core_title="A Deck", sections=None,
         for name, data in parts:
             z.writestr(name, data)
     return path
+
+
+def put_python(tools):
+    """A python3 in tools that runs this Python. A script, not a link: a
+    virtual environment's Python run through a link outside the
+    environment starts without the environment's packages."""
+    path = os.path.join(tools, "python3")
+    with open(path, "w") as fh:
+        fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
+    os.chmod(path, 0o755)
 
 
 def read_part(path, part):
@@ -3737,7 +3748,7 @@ def case_no_pandoc(work):
     its decks itself, and a book says what it needs."""
     tools = os.path.join(work, "bin")
     os.makedirs(tools)
-    os.symlink(sys.executable, os.path.join(tools, "python3"))
+    put_python(tools)
 
     def bare_run(where):
         return subprocess.run([os.path.join(tools, "python3"), os.path.join(BIN, "convert.py"),
@@ -6118,7 +6129,7 @@ def case_minus_signs(work):
         "its copy" in clashed.stdout + clashed.stderr, (texts(slide), clashed.stderr[-600:])
     tools = os.path.join(work, "bin")
     os.makedirs(tools)
-    os.symlink(sys.executable, os.path.join(tools, "python3"))
+    put_python(tools)
     bare = os.path.join(work, "bare")
     os.makedirs(bare)
     minus_deck(os.path.join(bare, "Minus.pptx"))
