@@ -1773,6 +1773,91 @@ def case_adopt(work):
     ]
 
 
+def case_adopt_part(work):
+    """A target's pages in a project laid out with src/, adopted as a
+    part of a new project and as a second part of that one."""
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def tool(*arguments):
+        return subprocess.run(["python3", os.path.join(BIN, "adopt-pages.py"), *arguments],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def build(folder):
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+                              cwd=folder, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+
+    def listed(*parts):
+        folder = os.path.join(*parts)
+        return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+
+    write("src/book/ch1.md", "# Chapter One\n\nOpening.\n\n## First Part\n\nSee "
+          "[the second](#second-part).\n\n## Second Part\n\nEnd.\n")
+    write("src/book/_pt/about.html", HAND.replace("Front Matter", "About"))
+    write("sidecars/book/image-alt.csv", "Image,Alt\n")
+    write("project.yaml", "project:\n  identifier: org.example.whole\n  title: The Project\n"
+          "  parts:\n    book:\n      kind: book\n      title: The Part\n")
+    write("conversion.yaml", "defaults:\n  pages:\n    split_level: 2\n"
+          "targets:\n  html:\n    format: html\n")
+    first = build(work)
+    pages = os.path.join(work, "output", "html")
+    built = listed(pages)
+    beside = os.path.join(os.path.dirname(work), os.path.basename(work) + "-beside.txt")
+    with open(beside, "w", encoding="utf-8") as fh:
+        fh.write("not the book's\n")
+    if os.path.isdir(pages):
+        os.symlink(beside, os.path.join(pages, "linked.txt"))
+    out = work + "-adopted"
+    adopted = tool(pages, "-o", out, "--part", "book")
+    import yaml
+    project = yaml.safe_load(read(out, "project.yaml"))["project"] if exists(
+        out, "project.yaml") else {}
+    sources = listed(out, "src", "book")
+    again = build(out)
+    rebuilt = listed(out, "output", "html")
+    twice = tool(pages, "-o", out, "--part", "book")
+    second = tool(pages, "-o", out, "--part", "second")
+    kept_project = read(out, "project.yaml") if exists(out, "project.yaml") else ""
+    return [
+        ("a page finished by hand, in src/<part>/_pt/, is built into the target",
+         lambda: first.returncode in (0, 1) and "about.html" in built
+         and "ch1--first-part.html" in built or fail_text(first, built)),
+        ("the pages are found from the target's folder alone, and written to src/<part>/ of "
+         "the new project, the pieces renamed, the finished page in its _pt/, the sidecar "
+         "in sidecars/<part>/, and a link among the target's files left out",
+         lambda: adopted.returncode == 0
+         and sources == ["_pt", "ch1-first-part.html", "ch1-second-part.html", "ch1.html"]
+         and listed(out, "src", "book", "_pt") == ["about.html"]
+         and listed(out, "sidecars", "book") == ["image-alt.csv"]
+         or fail_text(adopted, sources)),
+        ("project.yaml names the part, and takes the part's own title over the project's",
+         lambda: project.get("parts") == {"book": {"kind": "book"}}
+         and project.get("title") == "The Part"
+         and project.get("identifier") == "org.example.whole"
+         or fail_text(adopted, project)),
+        ("the adopted project builds, its pages under their new names",
+         lambda: again.returncode in (0, 1)
+         and {"about.html", "ch1-first-part.html", "ch1-second-part.html"} <= set(rebuilt)
+         or fail_text(again, rebuilt)),
+        ("a part's folder that holds sources isn't written into, and a second part goes "
+         "beside the first with project.yaml left as it is and the lines to add printed",
+         lambda: twice.returncode != 0 and "not empty" in twice.stderr
+         and "Nothing was written" in twice.stderr
+         and second.returncode == 0 and "ch1.html" in listed(out, "src", "second")
+         and "second:" in second.stdout and "second:" not in kept_project
+         and exists(out, "output", "reports", "second", "project-unpacked.yaml")
+         or fail_text(second, twice.stderr[-200:])),
+    ]
+
+
+def fail_text(done, seen):
+    raise AssertionError(str(seen) + " " + (done.stdout + done.stderr)[-300:])
+
+
 HEADED = """<!DOCTYPE html><html lang="en"><head><title>Data</title></head>
 <body><main><h1>Data</h1>
 <table><tr><td><b>Set</b></td><td><b>Hours</b></td></tr>
@@ -11184,6 +11269,7 @@ CASES = [
      case_white_marks),
     ("a link to a file in another case, or with backslashes", case_linked_paths),
     ("adopting a split book's pages", case_adopt),
+    ("a target's pages adopted as a part of a project", case_adopt_part),
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("layout tables, marked and decided", case_layout_tables),
     ("a Word layout table with a repeating header row", case_layout_word_head),

@@ -349,6 +349,11 @@ class Placed:
                   f"{os.path.dirname(self.copy[1])}/, the part's upstream file.")
         if self.unrecorded:
             print(self.unrecorded)
+        self.say_kept()
+
+    def say_kept(self):
+        """Say what of the project's was left as it was, and the lines
+        that add the part where its project.yaml was."""
         for name, sample in self.kept:
             if self.from_run:
                 continue

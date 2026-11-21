@@ -3184,8 +3184,11 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
     out = []
     for stem in hand:
         target = os.path.join(pages_dir, stem + INTERMEDIATE)
-        source = variants.get(stem) if str(variants.get(stem, "")).endswith(
-            ".html") else os.path.relpath(hand_path(base, stem), P(base).sources())
+        # Named from the folder Pandoc runs in, which isn't the sources'
+        # in the layout with src/.
+        source = os.path.relpath(
+            os.path.abspath(variants.get(stem) if str(variants.get(stem, "")).endswith(
+                ".html") else hand_path(base, stem)), os.path.abspath(P(base).run_dir()))
         # raw_html, or the reader fetches every <iframe> over the network
         # to read it into the page (Readers/HTML.hs, pIframe).
         run([*pandocrun.PANDOC, "-f", "html+raw_html", "-t", "json", source,
