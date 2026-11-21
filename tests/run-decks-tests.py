@@ -932,8 +932,9 @@ def case_pieces(work):
     linked = decks.talkify("\\begin{frame}{A}\n\\protect\\phantomsection\\label{a-b.c}\n"
                            "See \\hyperlink{a-b.c}{this} and \\hyperlink{t}{that}."
                            "\\hypertarget{t}{}\\label{both}\\hypertarget{both}{}"
-                           "\\hyperlink{both}{too}\n\\begin{verbatim}\n\\hyperlink{a-b.c}{x}\n"
-                           "\\end{verbatim}\n\\end{frame}\n")[0]
+                           "\\hyperlink{both}{too}\n\\begin{verbatim}\n"
+                           "\\hyperlink{a-b.c}{x}\\label{v}\n"
+                           "\\end{verbatim}\n\\label<2>{later}\\labelenumi\n\\end{frame}\n")[0]
     doc = {"meta": {}, "blocks": [header(1), para(), header(1), para()]}
     declared = {"meta": {"slide-level": {"t": "MetaString", "c": "2"}},
                 "blocks": [header(1), para()]}
@@ -1017,7 +1018,7 @@ def case_pieces(work):
          and "\\begin{enumerate}[<+->]\n\\def\\labelenumi{\\arabic{enumi})}\n"
              "\\setcounter{enumi}{2}" in lists and "[a.]" not in lists),
         ("a section's short title is a key, so an = in its title is text",
-         lambda: "\\section[shorttitle={Profit: MR = MC}]{Profit: MR = MC}\\label{p}" in sections
+         lambda: "\\section[shorttitle={Profit: MR = MC}]{Profit: MR = MC}\\label<1>{p}" in sections
          and "\\subsection*[shorttitle={Short}]{Long\\footnote{n}}" in sections
          and "\\subsubsection[toc={X}]{Y}" in sections
          and "\\section[shorttitle={{A ]}}]{B}" in sections),
@@ -1043,6 +1044,14 @@ def case_pieces(work):
          " is left alone",
          lambda: "See \\hyperref[a-b.c]{this} and \\hyperlink{t}{that}" in linked
          and "\\hyperlink{both}{too}" in linked and "\\hyperlink{a-b.c}{x}" in linked),
+        # ltx-talk 0.6.14's \\label writes on the current step by default,
+        # and so on none in a frame without steps or outside a frame.
+        ("a label is written on its frame's first step, one given a step keeps it, and code"
+         " and \\labelenumi are left alone",
+         lambda: "\\phantomsection\\label<1>{a-b.c}" in linked and "\\label<1>{both}" in linked
+         and "\\label<2>{later}\\labelenumi" in linked
+         and linked.count("\\label{") == 1 and "{x}\\label{v}" in linked
+         and "\\label<1>{p}" in sections),
     ]
 
 
