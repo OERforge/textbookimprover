@@ -83,6 +83,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+import projectpaths  # noqa: E402
 import sidecars  # noqa: E402
 import tablecensus as tc  # noqa: E402
 
@@ -685,12 +686,13 @@ def main():
     else:
         remove_if_present(sample_path)
     if old_format:
+        use = projectpaths.adopt(sample_path, args.sidecar)
         print("table-headers: %s has no drafted-by or reviewed column, so its rows "
               "read as a person's decisions. %s is %s with them added: drafted-by "
               "TI on the %d row(s) that say what the guess says now, blank on the "
-              "others, which a person changed. Rename it to %s once you've looked."
+              "others, which a person changed. %s once you've looked."
               % (args.sidecar, sample_path, args.sidecar, guessed,
-                 os.path.basename(args.sidecar)), file=sys.stderr)
+                 use[0].upper() + use[1:]), file=sys.stderr)
     return 0
 
 

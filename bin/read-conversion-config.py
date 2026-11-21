@@ -135,10 +135,19 @@ def main():
     inline = oerconfig.inline_project(config_path)
     oerconfig.write_config(
         schema, project_schema, resolved, targets, out,
-        notes=["Written by --init."], include_project=inline or False)
+        notes=["Written by --init."] + ([
+            "The sidecars and reports settings aren't here: in this layout a",
+            "part's sidecars are in sidecars/<part>/ under their standard",
+            "names, and its drafts and reports are written to",
+            "output/reports/<part>/."]
+            if projectpaths.is_tree(base) else []),
+        include_project=inline or False,
+        # With a folder for each part, a sidecar and a report each have
+        # one place, and a run stops at a setting that names another.
+        omit=("sidecars", "reports") if projectpaths.is_tree(base) else ())
+    use = projectpaths.adopt(out, P(base).config_file())
     print(f"Wrote {out}: every conversion setting with its description, "
-          f"your own where you set one. Rename it to {CONFIG_NAME} to use "
-          "it.")
+          f"your own where you set one. {use[0].upper() + use[1:]} to use it.")
     return 0
 
 

@@ -741,6 +741,18 @@ def builds_beside():
     return _BESIDE[0]
 
 
+def adopt(sample, place, verb=None):
+    """What a person does to use a sample a run wrote, as a message says
+    it: "rename it to project.yaml" where the sample lies beside the file
+    it stands for, and "move it to ./project.yaml" where it's in a folder
+    of the run's own, which nothing reads a setting from. verb, the same
+    as the message's last words on it ("renaming it", "moving it there")."""
+    beside = os.path.dirname(os.path.abspath(sample)) == os.path.dirname(os.path.abspath(place))
+    if verb:
+        return "renaming it" if beside else "moving it there"
+    return f"rename it to {os.path.basename(place)}" if beside else f"move it to {place}"
+
+
 def placed(path):
     """A path in a target's or a package's folder as a message names it:
     where it will be once the folder is in place, not where it's built."""

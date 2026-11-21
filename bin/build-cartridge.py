@@ -1441,6 +1441,11 @@ def main():
         settled, sample_targets = sample_inputs(
             resolved, documents, target, sample["contents"])
         project_sample_path = P(base).report(PROJECT_SAMPLE_NAME)
+        # A sample beside the file it stands for is renamed; one among
+        # the run's reports is moved to where the settings are read.
+        use_project = projectpaths.adopt(project_sample_path, P(base).project_file())
+        use_packaging = projectpaths.adopt(sample_path, P(base).packaging_file())
+        use_packaging = use_packaging[0].upper() + use_packaging[1:]
         for problem in fatal:
             print(f"ERROR: {problem}", file=sys.stderr)
         if args.init:
@@ -1452,20 +1457,19 @@ def main():
                         schema, project_schema, settled, sample_targets,
                         include_project=inline or False)
             print(f"Wrote {sample_path}: every packaging setting with its "
-                  f"description, your own where you set one. Rename it to "
-                  f"{CONFIG_NAME} to use it.")
+                  f"description, your own where you set one. {use_packaging} "
+                  "to use it.")
             if not has_project_file and not inline:
                 if os.path.exists(project_sample_path):
                     print(f"Kept {project_sample_path}, which a run wrote: "
-                          f"edit it and rename it to {PROJECT_NAME}.")
+                          f"edit it and {use_project}.")
                 else:
                     project_sample(project_schema, settled, documents, hint,
                                    bool(declared_contents), args.toc,
                                    project_sample_path, notes)
                     print(f"Wrote {project_sample_path}: the book's identifier, "
                           "title, language, and contents, with every other "
-                          f"project setting. Edit it and rename it to "
-                          f"{PROJECT_NAME}.")
+                          f"project setting. Edit it and {use_project}.")
         elif unnamed:
             used = project_sample(project_schema, settled, documents, hint,
                                   bool(declared_contents), args.toc,
@@ -1473,10 +1477,11 @@ def main():
             print(f"\nWrote {project_sample_path}"
                   + (f", with {', '.join(used)} from {hint.get('source')}"
                      if used else "") + ".", file=sys.stderr)
-            print(f"Edit it, rename it to {PROJECT_NAME}, and run again.",
-                  file=sys.stderr)
+            print(f"Edit it, {use_project}, and run again.", file=sys.stderr)
             print("Every project setting is in there with its description, so "
-                  "nothing you had set is lost by renaming it. The packaging "
+                  "nothing you had set is lost by "
+                  f"{projectpaths.adopt(project_sample_path, P(base).project_file(), True)}. "
+                  "The packaging "
                   "and conversion settings have samples of their own:",
                   file=sys.stderr)
             for line in sample_commands(base, pages_dir):
@@ -1488,10 +1493,12 @@ def main():
                             inline, sample["contents"], hint,
                             bool(declared_contents), args.toc))
             print(f"\nWrote {sample_path}.", file=sys.stderr)
-            print(f"Edit it, rename it to {CONFIG_NAME}, and run again.",
+            print(f"Edit it, {use_packaging[0].lower() + use_packaging[1:]}, and run again.",
                   file=sys.stderr)
             print("Every setting is in there with its description, so nothing "
-                  "you had set is lost by renaming it.", file=sys.stderr)
+                  "you had set is lost by "
+                  f"{projectpaths.adopt(sample_path, P(base).packaging_file(), True)}.",
+                  file=sys.stderr)
         return 0 if args.init else 1
 
     opener_types(tree, TITLES)

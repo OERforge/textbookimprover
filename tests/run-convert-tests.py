@@ -1944,6 +1944,119 @@ def case_packages(work):
     ]
 
 
+def case_samples_moved(work):
+    """In a project laid out with src/, a sample is written among the
+    run's reports, so each message says to move it to the file it stands
+    for, and moved there it's read; beside that file, as in a project
+    with its sources at its top, it's renamed."""
+    # Each project in a folder of its own, since one can't hold another.
+    outer, work = work, os.path.join(work, "laid")
+
+    def write(name, text):
+        path = os.path.join(outer, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def tool(name, *arguments, folder=None):
+        return subprocess.run(["python3", os.path.join(BIN, name), "-d", folder or work,
+                               *arguments],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def convert(folder=None):
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+                              cwd=folder or work, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+
+    def said(done):
+        return " ".join((done.stdout + done.stderr).split())
+
+    reports = os.path.join("output", "reports", "book")
+    write("laid/src/book/data.html", HEADED)
+    unnamed = convert()
+    project_sample = os.path.join(work, reports, "project-sample.yaml")
+    with open(project_sample, encoding="utf-8") as fh:
+        filled = re.sub(r"(?m)^  identifier:.*$", "  identifier: org.example.samples",
+                        fh.read(), count=1)
+    os.remove(project_sample)
+    write("laid/project.yaml", filled)
+    named = convert()
+    packaging = tool("build-cartridge.py", "--init")
+    conversion = tool("read-conversion-config.py", "--init")
+    shutil.move(os.path.join(work, reports, "conversion-sample.yaml"),
+                os.path.join(work, "conversion.yaml"))
+    shutil.move(os.path.join(work, reports, "packaging-sample.yaml"),
+                os.path.join(work, "packaging.yaml"))
+    # A sidecar from before drafted-by and reviewed, whose sample has them.
+    with open(os.path.join(work, reports, "table-headers-new.csv"), encoding="utf-8-sig",
+              newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    columns = [c for c in rows[0] if c not in ("drafted-by", "reviewed")]
+    sidecar = os.path.join(work, "sidecars", "book", "table-headers.csv")
+    os.makedirs(os.path.dirname(sidecar))
+    with open(sidecar, "w", newline="", encoding="utf-8") as fh:
+        out = csv.writer(fh)
+        out.writerow(columns)
+        out.writerows([row[c] for c in columns] for row in rows[:2])
+    old_sidecar = convert()
+    headers_sample = os.path.join(work, reports, "table-headers-sample.csv")
+    had_sample = os.path.isfile(headers_sample)
+    if had_sample:
+        shutil.move(headers_sample, sidecar)
+    settled = convert()
+    # A macro texmath can't read, for the sample of definitions.
+    tex = os.path.join(outer, "tex")
+    write("tex/src/book/main.tex", "\\documentclass{book}\n"
+          "\\newcommand{\\odd}[1]{\\ensuremath{\\mathchoice{#1}{#1}{#1}{#1}"
+          "\\kern-1pt\\raise2pt\\hbox{x}}}\n\\begin{document}\n\\chapter{One}\n"
+          "Text $\\odd{a}+1$ here.\n\\end{document}\n")
+    write("tex/project.yaml", "project:\n  identifier: org.example.tex\n  title: Tex\n")
+    macros = convert(tex)
+    macros_sample = os.path.join("output", "reports", "book",
+                                 "latex-conversion-macros-sample.tex")
+    flat = os.path.join(outer, "flat")
+    write("flat/ch1.md", "# Chapter One\n\nText.\n")
+    flat_run = convert(flat)
+    flat_init = tool("read-conversion-config.py", "--init", folder=flat)
+    return [
+        ("a run that needs the book's name says to move project-sample.yaml from "
+         "the reports to the project's top, and the sample moved there names the book",
+         lambda: unnamed.returncode != 0
+         and "move it to " + os.path.join(work, "project.yaml") + ", and run again"
+         in said(unnamed)
+         and "lost by moving it there" in said(unnamed)
+         and "rename it" not in said(unnamed).lower()
+         and named.returncode == 0 and "project-sample.yaml." not in said(named)
+         or fail_text(unnamed, named.stderr[-300:])),
+        ("--init says where each of the packaging and conversion samples goes, and a "
+         "run reads them there",
+         lambda: packaging.returncode == 0 and conversion.returncode == 0
+         and "Move it to " + os.path.join(work, "packaging.yaml") in said(packaging)
+         and "Move it to " + os.path.join(work, "conversion.yaml") in said(conversion)
+         and old_sidecar.returncode == 0
+         or fail_text(packaging, said(conversion) + said(old_sidecar)[-300:])),
+        ("a sidecar's sample is moved over the sidecar, in sidecars/, after which the "
+         "run writes none",
+         lambda: had_sample and "Move it to " + sidecar in said(old_sidecar)
+         and settled.returncode == 0 and not os.path.isfile(headers_sample)
+         and "no drafted-by" not in said(settled)
+         or fail_text(old_sidecar, said(settled)[-300:])),
+        ("the sample of a LaTeX book's definitions is named where it is, and saved "
+         "as the definitions' file in the project's folder",
+         lambda: "Wrote " + macros_sample + ":" in said(macros)
+         and "save it as latex-conversion-macros.tex in the project's folder." in said(macros)
+         and "latex-conversion-macros.tex in the project's folder" in read(tex, macros_sample)
+         or fail_text(macros, None)),
+        ("with its sources at its top, a project's samples lie beside the files they "
+         "stand for and are renamed",
+         lambda: "rename it to project.yaml, and run again" in said(flat_run)
+         and "lost by renaming it" in said(flat_run)
+         and "Rename it to conversion.yaml" in said(flat_init)
+         and "move it" not in (said(flat_run) + said(flat_init)).lower()
+         or fail_text(flat_run, said(flat_init))),
+    ]
+
+
 def fail_text(done, seen):
     raise AssertionError(str(seen) + " " + (done.stdout + done.stderr)[-300:])
 
@@ -11361,6 +11474,7 @@ CASES = [
     ("adopting a split book's pages", case_adopt),
     ("a target's pages adopted as a part of a project", case_adopt_part),
     ("packages of a project, each from its target's pages", case_packages),
+    ("samples of a project, and where each goes to be used", case_samples_moved),
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("layout tables, marked and decided", case_layout_tables),
     ("a Word layout table with a repeating header row", case_layout_word_head),

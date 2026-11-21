@@ -9984,6 +9984,15 @@ def alt_arguments(texts, definitions_text=""):
     return found
 
 
+def saved_as(base, macros_file):
+    """The definitions' file as a message names it: by its name alone
+    where the sample is written beside it, and otherwise as the file in
+    the project's folder, since the sample is among the run's reports."""
+    beside = os.path.dirname(os.path.abspath(P(base).report(SAMPLE))) == os.path.dirname(
+        os.path.abspath(P(base).top(macros_file)))
+    return macros_file if beside else f"{macros_file} in the project's folder"
+
+
 def macro_sample(base, preps, filter_path, macros_file, say):
     """Write latex-conversion-macros-sample.tex: the book's macros whose
     formulas texmath still can't read, a definition for each whose drawing
@@ -10050,7 +10059,8 @@ def macro_sample(base, preps, filter_path, macros_file, say):
         "% Written by convert.py: the book's macros whose formulas texmath",
         "% can't make MathML of, so they reach the pages as TeX, and its",
         "% macros for an image with an argument that may be alt text. Check",
-        "% it, then save it as " + macros_file + " (or merge it into yours).",
+        "% it, then save it as " + saved_as(base, macros_file),
+        "% (or merge it into yours).",
         "% Definitions there are read after the book's preamble, so they",
         "% win; the book's own files never change, and a source target",
         "% writes them into its copy unless its latex_definitions is off.", ""]

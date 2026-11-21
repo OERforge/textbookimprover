@@ -2299,7 +2299,8 @@ def read_latex_to_json(base, masters, env, work, titles=None):
     suggested, left, alt = latexsource.macro_sample(base, preps, LATEX_FILTER,
                                                     LATEX_MACROS, say)
     if suggested or left or alt:
-        say(f"Wrote {latexsource.SAMPLE}: "
+        sample = os.path.relpath(P(base).report(latexsource.SAMPLE))
+        say(f"Wrote {sample}: "
             + (f"{suggested + left} macro(s) whose formulas texmath can't make "
                f"MathML of, with a definition suggested for {suggested} and {left} "
                "for a person to define" if suggested or left else "")
@@ -2308,7 +2309,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
                + ", ".join("\\" + n for n in alt) + ") with an argument they don't "
                "use, which most calls give a phrase in, as alt text might be, and the "
                "definition that would pass it on" if alt else "")
-            + f". Check it, then save it as {LATEX_MACROS}.")
+            + f". Check it, then save it as {latexsource.saved_as(base, LATEX_MACROS)}.")
     return stems, order, header, parts
 
 
@@ -6549,6 +6550,17 @@ def book_tree(project, pages, numbered=None):
 PROJECT_SAMPLE = "project-sample.yaml"
 
 
+def project_sample_path():
+    """Where a run writes project-sample.yaml, as a message names it."""
+    return os.path.relpath(P(os.getcwd()).report(PROJECT_SAMPLE))
+
+
+def use_project_sample(verb=None):
+    """What to do with project-sample.yaml to use it (projectpaths.adopt)."""
+    return projectpaths.adopt(project_sample_path(),
+                              os.path.relpath(P(os.getcwd()).project_file()), verb)
+
+
 def write_project_sample(project, contents, notes=(), hint_contents=False):
     """project-sample.yaml, every project setting with its description, as
     the packager writes it (oerconfig.project_sample_values): the project as
@@ -6558,7 +6570,7 @@ def write_project_sample(project, contents, notes=(), hint_contents=False):
         os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
     values, extra, used = oerconfig.project_sample_values(
         project, DECLARED_PROJECT, BOOK_HINT, contents, hint_contents, notes)
-    path = P(os.getcwd()).report(PROJECT_SAMPLE)
+    path = project_sample_path()
     oerconfig.write_project(project_schema, values, path, notes=extra)
     return path, used
 
@@ -6656,7 +6668,7 @@ def name_book_target(target, base, pages):
             f"{PROJECT_NAME}: its identifier and title.")
         return True, guess
     where = (f"Set title in {PROJECT_NAME}" if has_project else
-             f"{PROJECT_NAME} names it, with its identifier: {PROJECT_SAMPLE} "
+             f"{PROJECT_NAME} names it, with its identifier: {project_sample_path()} "
              "has every project setting to fill in" if not packaged else
              f"Set title in {PACKAGING_NAME}'s project: block and name the "
              f"book where conversion reads it too: in {PROJECT_NAME}, which "
@@ -6681,8 +6693,8 @@ def write_contents_sample(project, tree):
     write_project_sample(project, contents_from_tree(tree), [
         "contents names a page the split cut, so the page stood for its "
         "pieces. The contents below are what it resolved to."])
-    say(f"contents names a page the split cut; {PROJECT_SAMPLE} has the "
-        "contents it resolved to, to rename to project.yaml if you mean to "
+    say(f"contents names a page the split cut; {project_sample_path()} has the "
+        f"contents it resolved to: {use_project_sample()} if you mean to "
         "arrange the pieces yourself.")
 
 
@@ -8003,7 +8015,7 @@ def main():
                 project, contents, hint_contents=not project.get("contents"))
             say(f"Wrote {path}" + (f", with {', '.join(used)} from "
                                    f"{BOOK_HINT.get('source')}" if used else "")
-                + ". Edit it, rename it to project.yaml, and run again. The "
+                + f". Edit it, {use_project_sample()}, and run again. The "
                 "conversion settings have a sample of their own: python3 "
                 f"{os.path.join(HERE, 'read-conversion-config.py')} -d . --init "
                 "writes conversion-sample.yaml.")

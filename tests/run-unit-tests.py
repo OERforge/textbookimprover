@@ -1103,6 +1103,13 @@ def check_project_paths():
                      oerconfig_.pages_target(two, [], "answers", "book"),
                      oerconfig_.pages_target(os.path.join(settings, "none.yaml"), [],
                                              "book", "book")]
+    adopted = [paths.adopt(os.path.join("b", "project-sample.yaml"),
+                           os.path.join("b", "project.yaml")),
+               paths.adopt(os.path.join("b", "output", "reports", "book", "project-sample.yaml"),
+                           os.path.join("b", "project.yaml")),
+               paths.adopt(os.path.join("b", "x-sample.csv"), os.path.join("b", "x.csv"), True),
+               paths.adopt(os.path.join("b", "output", "x-sample.csv"),
+                           os.path.join("b", "sidecars", "book", "x.csv"), True)]
     package_refused = [
         _stops(lambda text=text: oerconfig_.pages_target(conversion(text), [], "book", "book"),
                oerconfig_.ConfigError)
@@ -1301,6 +1308,11 @@ def check_project_paths():
          lambda: package_pages == [("handout", "", "slides"), ("html", "pages", "book"),
                                    ("handout", "", "slides"), None, ("html", "", "book")]
          and package_refused == [True, True]),
+        ("a sample beside the file it stands for is renamed to it, and one in another "
+         "folder is moved to it, by the path given",
+         lambda: adopted == ["rename it to project.yaml",
+                             "move it to " + os.path.join("b", "project.yaml"),
+                             "renaming it", "moving it there"]),
         ("a target built beside its folder is written under output/work/staging/, a "
          "message names the file where it will be, and the earlier folder is as it was "
          "until the new one replaces it whole, nothing left of the swap; a target nothing "

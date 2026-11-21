@@ -1403,7 +1403,7 @@ def reference_docs(path):
 
 
 def write_config(schema, project_schema, resolved_defaults, targets, path,
-                 notes=(), include_project=True):
+                 notes=(), include_project=True, omit=()):
     """Write a complete configuration file.
 
     Complete is the point: every declared setting appears, at its resolved
@@ -1414,6 +1414,11 @@ def write_config(schema, project_schema, resolved_defaults, targets, path,
 
     Targets carry only what differs from the defaults, so the defaults
     block keeps meaning something and the file stays readable.
+
+    omit: sections a project's layout gives no say (sidecars and reports,
+    where each has its one place), left out of the defaults and of every
+    target: a sample put to use is read by a run, which stops at a
+    setting it can't follow.
     """
     lines = _sample_header(schema, notes)
 
@@ -1447,7 +1452,8 @@ def write_config(schema, project_schema, resolved_defaults, targets, path,
     lines.append("")
     lines.append("defaults:")
     _write_tree(schema.root, resolved_defaults.settings, lines, 1,
-                skip_target_only=True)
+                skip_target_only=True,
+                only={k for k in schema.root.keys if k not in omit} if omit else None)
 
     lines.append("")
     lines.append("targets:")
@@ -1458,7 +1464,8 @@ def write_config(schema, project_schema, resolved_defaults, targets, path,
     for name, overrides in targets.items():
         lines.append("")
         lines.append(f"  {name}:")
-        _write_target(schema.root, overrides or {}, name, lines, 2)
+        _write_target(schema.root, {k: v for k, v in (overrides or {}).items()
+                                    if k not in omit}, name, lines, 2)
 
     text = "\n".join(lines).rstrip() + "\n"
     with open(path, "w", encoding="utf-8") as handle:
