@@ -68,6 +68,7 @@ import os
 import csv
 import re
 import shutil
+import signal
 import copy
 import subprocess
 import sys
@@ -8016,7 +8017,7 @@ def main():
             f"{PROJECT_NAME}, or a {PACKAGING_NAME} with a project: block, "
             "would build the cartridge.")
         return unnamed
-    command = ["python3", CARTRIDGE_TOOL, "-d", base, *PART_ARGS]
+    command = ["python3", CARTRIDGE_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS]
     if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(P(base).sources()):
         command += ["--pages", html_targets[0].output_dir]
     # What the sources said about the book, for the packager's sample.
@@ -8034,5 +8035,39 @@ def main():
     return result.returncode or unnamed
 
 
+def stopped(signum, frame):
+    raise Stopped(signum)
+
+
+class Stopped(KeyboardInterrupt):
+    """The run told to end by a signal other than the keyboard's."""
+
+
+def stoppable():
+    """main(), but for a run a person or a program stops (Ctrl-C, or a
+    signal to end): one line and no traceback, the status a shell gives
+    for the signal. What the run was building is in output/work/, which
+    the next run clears, in the layout with src/. A run of one part that
+    a project's run started says nothing; the project's does."""
+    for name in ("SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), stopped)
+    try:
+        return main()
+    except KeyboardInterrupt as exc:
+        signum = exc.args[0] if isinstance(exc, Stopped) and exc.args else signal.SIGINT
+        if isinstance(exc, Stopped) and hasattr(os, "killpg") and os.getpgrp() == os.getpid():
+            # Told alone, where the keyboard tells every program the run
+            # started: pass it on to them, the run's own group.
+            signal.signal(signum, signal.SIG_IGN)
+            os.killpg(os.getpgrp(), signum)
+        if "--locked" not in sys.argv[1:]:
+            say("\nStopped at your request. " + (
+                "What was being built is discarded; each target's folder is as its last "
+                "finished build left it." if projectpaths.builds_beside() else
+                "What was being written may be incomplete."))
+        return 128 + int(signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(stoppable())

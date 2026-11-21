@@ -200,6 +200,11 @@ class Project:
         files, the cartridge itself."""
         return self._in(str(name))
 
+    def put_package_in_place(self, package=None):
+        """A package's folder as built put where it's kept, and that
+        place; nothing to do where it's built there."""
+        return self._in()
+
     def temp_dir(self, prefix="ti-", suffix=""):
         """A new temporary folder, the caller's to delete."""
         return mkdtemp(prefix=prefix, suffix=suffix)
@@ -362,39 +367,35 @@ class Tree(Project):
         isn't left in it, and a build that stops leaves the earlier
         folder as it was. A folder that isn't empty can't be replaced in
         one step, so it's two: the earlier folder to output/work/replaced/,
-        then the new one into its place, and the earlier one deleted. A
+        then the new one into its place, and the earlier one deleted (it
+        isn't kept: replaced/ holds it for the moment of the swap). A
         run stopped between the two is put right by the next (settle).
         Nothing was built (no folder in staging): nothing is done."""
         folder = str(output_dir or name)
-        place = self.target_place(name, output_dir)
-        built = self._in(*STAGING, folder)
-        if not _BESIDE[0] or not os.path.isdir(built) or os.path.islink(built):
-            return place
-        kept = self._in(*REPLACED, folder)
-        try:
-            _delete(kept)
-            os.makedirs(os.path.dirname(kept), exist_ok=True)
-            if os.path.lexists(place):
-                os.rename(place, kept)       # a link is moved, never followed
-            os.rename(built, place)
-            _delete(kept)
-            for emptied in (os.path.dirname(kept), os.path.dirname(built),
-                            os.path.dirname(os.path.dirname(built))):
-                if not os.listdir(emptied):
-                    os.rmdir(emptied)
-        except OSError as exc:
-            raise Refused(f"{place} couldn't be replaced by what this run built ({exc}). "
-                          f"What was built is in {built}; an earlier folder, where there "
-                          f"was one, is there still or in {kept}, and the next run puts "
-                          "it back.") from None
-        return place
+        return _swap(self._in(*STAGING, folder), self.target_place(name, output_dir),
+                     self._in(*REPLACED, folder))
 
-    def package_file(self, name, package=None):
-        """A file of a package's; the package no file names is the
-        book's cartridge, or another part's, named for the part."""
+    def _package(self, package=None):
+        """The package no file names is the book's cartridge, or another
+        part's, named for the part."""
         if not package:
             part = self.part()
             package = "cartridge" if part == BOOK else f"cartridge-{part}"
+        return str(package)
+
+    def put_package_in_place(self, package=None):
+        """A package's folder as this run built it put in the place of
+        the one an earlier run left, as a target's is (put_in_place)."""
+        package = self._package(package)
+        return _swap(self._in(*PACKAGE_STAGING, package), self._in("output", "packages", package),
+                     self._in(*REPLACED, "packages", package))
+
+    def package_file(self, name, package=None):
+        """A file of a package's, in its folder, or, in a run that
+        builds beside (build_beside), in the folder it's built in."""
+        package = self._package(package)
+        if _BESIDE[0]:
+            return os.path.join(self._made(*PACKAGE_STAGING, package), str(name))
         return os.path.join(self._made("output", "packages", package), str(name))
 
     def run_dir(self, part=None):
@@ -566,11 +567,12 @@ def refused_link(folder, parts=()):
     """The first of a project's own folders that is a link, as a message,
     or None: src/, sidecars/, output/, originals/, and upstream/, a part's
     folder in each of the first two, output/work/, and under it tmp/,
-    staging/, staging/targets/, and replaced/. A project in today's
+    staging/ and replaced/ and their folders for targets and packages. A project in today's
     layout has none of them."""
     names = list(OWN_FOLDERS) + [os.path.join("output", "work")] + [
         os.path.join("output", "work", *below)
-        for below in (("tmp",), ("staging",), ("staging", "targets"), ("replaced",))]
+        for below in (("tmp",), ("staging",), ("staging", "targets"), ("staging", "packages"),
+                      ("replaced",), ("replaced", "packages"))]
     for part in parts:
         names += [os.path.join("src", part), os.path.join("sidecars", part)]
     for name in names:
@@ -717,8 +719,10 @@ def forget(folder):
 # a target's folder holds one build's files and no earlier one's.
 
 STAGING = ("output", "work", "staging", "targets")
+PACKAGE_STAGING = ("output", "work", "staging", "packages")
 REPLACED = ("output", "work", "replaced")
-_STAGED_IN = os.path.join(*STAGING) + os.sep
+_STAGED_IN = ((os.path.join(*STAGING) + os.sep, "output"),
+              (os.path.join(*PACKAGE_STAGING) + os.sep, os.path.join("output", "packages")))
 _BESIDE = [False]
 
 
@@ -732,13 +736,46 @@ def build_beside(folder, on=True):
     return _BESIDE[0]
 
 
+def builds_beside():
+    """Whether this process builds each target beside its folder."""
+    return _BESIDE[0]
+
+
 def placed(path):
-    """A path in a target's folder as a message names it: where it will
-    be once the folder is in place, not where it's built."""
-    head, found, rest = str(path).partition(_STAGED_IN)
-    if found and (not head or head.endswith(os.sep)):
-        return os.path.join(head, "output", rest)
+    """A path in a target's or a package's folder as a message names it:
+    where it will be once the folder is in place, not where it's built."""
+    for built, kept in _STAGED_IN:
+        head, found, rest = str(path).partition(built)
+        if found and (not head or head.endswith(os.sep)):
+            return os.path.join(head, kept, rest)
     return path
+
+
+def _swap(built, place, kept):
+    """built put in place's stead by two renames, what was there held in
+    kept between them and then deleted; place. Nothing where nothing was
+    built, or the process doesn't build beside."""
+    if not _BESIDE[0] or not os.path.isdir(built) or os.path.islink(built):
+        return place
+    try:
+        _delete(kept)
+        os.makedirs(os.path.dirname(kept), exist_ok=True)
+        os.makedirs(os.path.dirname(place), exist_ok=True)
+        if os.path.lexists(place):
+            os.rename(place, kept)       # a link is moved, never followed
+        os.rename(built, place)
+        _delete(kept)
+        for emptied in (os.path.dirname(kept), os.path.dirname(os.path.dirname(kept)),
+                        os.path.dirname(built), os.path.dirname(os.path.dirname(built))):
+            if os.path.basename(emptied) != "work" and os.path.isdir(emptied) \
+                    and not os.listdir(emptied):
+                os.rmdir(emptied)
+    except OSError as exc:
+        raise Refused(f"{place} couldn't be replaced by what this run built ({exc}). "
+                      f"What was built is in {built}; an earlier folder, where there "
+                      f"was one, is there still or in {kept}, and the next run puts "
+                      "it back.") from None
+    return place
 
 
 def _delete(path):
@@ -754,8 +791,10 @@ def settle(folder):
     with src/, before this run builds anything: a folder in
     output/work/replaced/ goes back to output/ when the target's folder
     is missing there (the run stopped between a swap's two steps), and is
-    deleted when it isn't (it stopped after them); every unfinished build
-    in output/work/staging/ is deleted. The names put back, as a list.
+    deleted when it isn't (it stopped after them), a package's folder
+    under replaced/packages/ likewise; every unfinished build in
+    output/work/staging/ is deleted. The names put back, as a list (a
+    package's as packages/<name>).
     The marker and the lock come first, as for the temporary folder; only
     a folder's name that a target's can be is put back."""
     project = of(folder)
@@ -767,17 +806,23 @@ def settle(folder):
         if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
             raise Refused(f"{os.path.abspath(path)} is a link or a file, where a run keeps "
                           "the folders it's building. Move it away and run this again.")
-    if os.path.isdir(kept):
-        for name in sorted(os.listdir(kept)):
-            was = os.path.join(kept, name)
-            place = project.top("output", name)
-            if PART_NAME.match(name) and len(name) <= 64 and name not in OUTPUT_OWN \
-                    and os.path.isdir(was) and not os.path.islink(was) \
-                    and not os.path.lexists(place):
+    def restore(held, place_in, label):
+        for name in sorted(os.listdir(held)):
+            was = os.path.join(held, name)
+            place = project.top(*place_in, name)
+            if PART_NAME.match(name) and len(name) <= 64 and os.path.isdir(was) \
+                    and not os.path.islink(was) and not os.path.lexists(place) \
+                    and (place_in != ("output",) or name not in OUTPUT_OWN):
+                os.makedirs(os.path.dirname(place), exist_ok=True)
                 os.rename(was, place)
-                back.append(name)
+                back.append(label + name)
             else:
                 _delete(was)
+    if os.path.isdir(kept):
+        packages = os.path.join(kept, "packages")
+        if os.path.isdir(packages) and not os.path.islink(packages):
+            restore(packages, ("output", "packages"), "packages/")
+        restore(kept, ("output",), "")
     _delete(project.top("output", "work", "staging"))
     return back
 

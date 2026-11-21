@@ -39,9 +39,11 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 
 # Pandoc 3.14 looks in the folders PANDOC_DATA_DIRS names for templates,
@@ -705,6 +707,55 @@ def case_built_beside(work):
               os.path.join(work, "output", "work", "replaced", "html"))
     checked = build("--check-only")
     back = (listed("output", "html"), listed("output", "work", "replaced"))
+    # The package: built beside its folder too, so a run that makes no
+    # cartridge leaves none from an earlier run beside its manifest.
+    zipped = build("--zip")
+    with_cartridge = listed("output", "packages", "cartridge")
+    plain = build()
+    without = listed("output", "packages", "cartridge")
+    # A run stopped by the keyboard's signal to it and every program it
+    # started, and one told alone to end: a stand-in Pandoc that waits
+    # while it writes the html target's page says when.
+    waiting = os.path.join(stand_in, "waiting")
+    with open(os.path.join(stand_in, "pandoc"), "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\ncase \"$*\" in\n  *staging/targets/html/*) "
+                 f": > {shlex.quote(waiting)}; sleep 60 ;;\nesac\n"
+                 f"exec {shlex.quote(shutil.which('pandoc'))} \"$@\"\n")
+    write("src/book/one.md", "# One\n\nThird wording.\n")
+    stops = {}
+    for name, signum, to_group in (("keyboard", signal.SIGINT, True),
+                                   ("told", signal.SIGTERM, False)):
+        if os.path.exists(waiting):
+            os.remove(waiting)
+        run = subprocess.Popen(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            cwd=work, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+            env=dict(os.environ, PATH=stand_in + os.pathsep + os.environ["PATH"]))
+        for _ in range(600):
+            if os.path.exists(waiting) or run.poll() is not None:
+                break
+            time.sleep(0.1)
+        if run.poll() is None:
+            (os.killpg if to_group else os.kill)(run.pid, signum)
+        held = []
+        try:
+            out, err = run.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            # A program it started outlived it, holding its output open.
+            held = ["its output was still held open after 20 s"]
+            os.killpg(run.pid, signal.SIGKILL)
+            out, err = run.communicate()
+        time.sleep(0.5)
+        # What's left of its process group, but for one that has ended
+        # and waits to be reaped.
+        still = subprocess.run(["ps", "-o", "stat=,comm=", "-g", str(run.pid)],
+                               capture_output=True, text=True).stdout.split("\n") \
+            if shutil.which("ps") else []
+        still = held + [line.strip() for line in still
+                        if line.strip() and not line.strip().startswith("Z")]
+        stops[name] = (run.returncode, out + err, page("output", "html", "one.html"),
+                       page("output", "md", "one.md"), still)
     return [
         ("each target's folder holds its build",
          lambda: first.returncode == 0 and both[0] is not None and both[1] is not None
@@ -735,6 +786,28 @@ def case_built_beside(work):
          lambda: checked.returncode == 0 and back[0] and "one.html" in back[0]
          and not back[1] and "output/html/ is put back" in checked.stderr
          or fail(str((checked.returncode, back)) + checked.stderr[-300:])),
+        ("a package's folder holds its build: the cartridge of a run with --zip, and none "
+         "after a run without, its messages naming the package's folder",
+         lambda: zipped.returncode == 0 and plain.returncode == 0
+         and any(n.endswith(".imscc") for n in with_cartridge or [])
+         and without == ["cartridge-files.txt", "imsmanifest.xml"]
+         and "staging" not in zipped.stdout + zipped.stderr
+         and os.path.join("output", "packages", "cartridge", "imsmanifest.xml") in zipped.stdout
+         or fail(str((with_cartridge, without)) + zipped.stdout[-300:] + plain.stderr[-200:])),
+        ("a run stopped from the keyboard ends with one line saying so and no traceback, "
+         "the shell's status for the signal, the target it was building as it was and the "
+         "one built before it new, and no program of its left running",
+         lambda: stops["keyboard"][0] == 130 and "Traceback" not in stops["keyboard"][1]
+         and "Stopped at your request" in stops["keyboard"][1]
+         and "Second wording" in stops["keyboard"][2] and "Third wording" in stops["keyboard"][3]
+         and not stops["keyboard"][4]
+         or fail(str(stops["keyboard"][:1] + stops["keyboard"][4:]) + stops["keyboard"][1][-400:])),
+        ("and so does a run told alone to end, which passes the word to the programs it "
+         "started",
+         lambda: stops["told"][0] == 143 and "Traceback" not in stops["told"][1]
+         and "Stopped at your request" in stops["told"][1]
+         and "Second wording" in stops["told"][2] and not stops["told"][4]
+         or fail(str(stops["told"][:1] + stops["told"][4:]) + stops["told"][1][-400:])),
     ]
 
 

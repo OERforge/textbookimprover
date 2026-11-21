@@ -1075,7 +1075,9 @@ def check_project_paths():
                  os.path.join("output", "work", "tmp"),
                  os.path.join("output", "work", "staging"),
                  os.path.join("output", "work", "staging", "targets"),
-                 os.path.join("output", "work", "replaced")):
+                 os.path.join("output", "work", "staging", "packages"),
+                 os.path.join("output", "work", "replaced"),
+                 os.path.join("output", "work", "replaced", "packages")):
         os.makedirs(os.path.dirname(os.path.join(links, name)), exist_ok=True)
         os.symlink(os.path.join(links, "elsewhere"), os.path.join(links, name))
         linked[name] = paths.refused_link(links, ["book", "slides"]) or ""
@@ -1123,11 +1125,24 @@ def check_project_paths():
         put("x", "output", "work", "replaced", "Odd Name", "x.txt")
         put("x", "output", "work", "replaced", "reports", "x.txt")
         put("half", "output", "work", "staging", "targets", "epub", "book.epub")
+        # A package likewise: built beside, swapped in, and put right.
+        package_file = swap.package_file("imsmanifest.xml", "course")
+        put("new", package_file)
+        package_shown = paths.placed(package_file)
+        put("old", "output", "packages", "course", "old.imscc")
+        package_at = swap.put_package_in_place("course")
+        package_swapped = tree_of("output", "packages")
+        os.makedirs(os.path.join(swapped, "output", "work", "replaced", "packages"))
+        os.rename(os.path.join(swapped, "output", "packages", "course"),
+                  os.path.join(swapped, "output", "work", "replaced", "packages", "course"))
+        put("x", "output", "work", "replaced", "packages", "No Name", "x.txt")
+        put("half", "output", "work", "staging", "packages", "course", "imsmanifest.xml")
         put_back = paths.settle(swapped)
         settled = (tree_of("output", "html"), tree_of("output", "pdf"), tree_of("output", "work"),
                    open(os.path.join(swapped, "output", "pdf", "book.pdf"),
                         encoding="utf-8").read(),
                    sorted(os.listdir(os.path.join(swapped, "output"))))
+        package_settled = tree_of("output", "packages")
         os.symlink(os.path.join(swapped, "src"),
                    os.path.join(swapped, "output", "work", "staging"))
         staging_linked = _stops(lambda: paths.settle(swapped), paths.Refused)
@@ -1252,7 +1267,7 @@ def check_project_paths():
          "sidecars/ and a part's in it, output/, originals/, upstream/, and under "
          "output/work/ tmp/, staging/, staging/targets/, and replaced/), and a project "
          "with none isn't",
-         lambda: no_link is None and len(linked) == 10
+         lambda: no_link is None and len(linked) == 12
          and all(os.path.join(links, name) + " is a link" in why
                  for name, why in linked.items())),
         ("a target built beside its folder is written under output/work/staging/, a "
@@ -1271,9 +1286,19 @@ def check_project_paths():
          "where its target's is missing and is deleted where it isn't, one whose name "
          "no target's folder has is deleted, and so is an unfinished build; a staging "
          "folder that is a link stops it",
-         lambda: put_back == ["html"]
-         and settled == (["a.html"], ["book.pdf"], [], "new", ["html", "pdf", "work"])
+         lambda: put_back == ["packages/course", "html"]
+         and settled == (["a.html"], ["book.pdf"], [], "new",
+                         ["html", "packages", "pdf", "work"])
          and staging_linked),
+        ("a package is built beside its folder and swapped in as a target is, a message "
+         "naming its file where it will be, and one a stopped run moved aside is put back",
+         lambda: package_file == os.path.join(swapped, "output", "work", "staging", "packages",
+                                              "course", "imsmanifest.xml")
+         and package_shown == os.path.join(swapped, "output", "packages", "course",
+                                           "imsmanifest.xml")
+         and package_at == os.path.join(swapped, "output", "packages", "course")
+         and package_swapped == [os.path.join("course", "imsmanifest.xml")]
+         and package_settled == [os.path.join("course", "imsmanifest.xml")]),
         ("a target's folder that is a link is replaced itself, what it leads to left "
          "alone",
          lambda: over_link == (False, ["a.html"], [os.path.join("book", "kept.md")])),

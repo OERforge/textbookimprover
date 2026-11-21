@@ -1010,8 +1010,12 @@ def main():
                              "convert.py to read, then stop. Writes only into "
                              "DIR, never into the content directory.")
     projectpaths.add_part_option(parser)
+    # From convert.py, in a run that builds each package beside its
+    # folder and swaps it in: write it there.
+    parser.add_argument("--beside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     projectpaths.set_part(args.part, args.dir)
+    projectpaths.build_beside(args.dir, args.beside)
     if args.include_all_html_old:
         print("WARNING: --includeallhtml is deprecated and goes after 1.0: use "
               "--include-all-html, the same option.", file=sys.stderr)
@@ -1489,8 +1493,8 @@ def main():
                 "# Build the archive with --zip instead.\n")
         handle.write("\n".join(file_list) + "\n")
 
-    print(f"Wrote {output_path}: {pages} page(s), {assets} asset(s).")
-    print(f"Wrote {list_path}.")
+    print(f"Wrote {projectpaths.placed(output_path)}: {pages} page(s), {assets} asset(s).")
+    print(f"Wrote {projectpaths.placed(list_path)}.")
 
     # Validate before building anything from it. A manifest that does not
     # conform still gets written, so it can be looked at, but the archive
@@ -1502,6 +1506,11 @@ def main():
             print("", file=sys.stderr)
             print("The manifest was written so you can inspect it, but no "
                   "archive was built from it.", file=sys.stderr)
+            if projectpaths.placed(output_path) != output_path:
+                # Built beside the package's folder, which keeps what an
+                # earlier run left: say where this one is.
+                print(f"  It's {output_path}, until the next run; the package's "
+                      "folder is as it was.", file=sys.stderr)
             print("  Re-run with --no-validate to build one anyway.",
                   file=sys.stderr)
             return 1
@@ -1536,7 +1545,8 @@ def main():
                 archive.write(os.path.join(pages_dir, ref),
                               under_prefix(prefix, ref))
         size = os.path.getsize(cartridge) / 1048576
-        print(f"Wrote {cartridge} ({size:.1f} MB, {len(file_list)} entries).")
+        print(f"Wrote {projectpaths.placed(cartridge)} ({size:.1f} MB, "
+              f"{len(file_list)} entries).")
     else:
         print("\nTo build the cartridge:")
         if prefix:
@@ -1550,6 +1560,9 @@ def main():
                   f"{config['manifest']['cartridge']} -@ < {FILE_LIST_NAME}")
             print("  (or re-run this script with --zip)")
 
+    # Built beside the package's folder, in a run that does: put in its
+    # place whole, now that the build is done.
+    P(base).put_package_in_place()
     return 0
 
 
@@ -1558,4 +1571,7 @@ def shell_quote(value):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)       # stopped by the person: no traceback
