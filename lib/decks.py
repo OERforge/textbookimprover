@@ -538,6 +538,20 @@ def hyperlinks(tex):
                          else m.group(0), tex)
 
 
+# ltx-talk's \label takes an overlay, and writes the label only on the
+# steps it names. From 0.6.14 (2026-11-20) it names the current step, "."
+# by default, where it had named the first: measured with 0.6.14, a label
+# in a frame without steps, or outside a frame, was written on none, so
+# every \hyperref to it was undefined and made no link. Each label names
+# the first step, as before 0.6.14, which the earlier releases read alike.
+LABEL_CALL = re.compile(r"\\label(?=\{)")
+
+
+def first_step_labels(tex):
+    """Each \\label{…} as \\label<1>{…}; one with an overlay stays."""
+    return LABEL_CALL.sub(lambda m: "\\label<1>", tex)
+
+
 def talkify(tex):
     """Pandoc's beamer LaTeX as ltx-talk with frame-title-arg builds it.
     ltx-talk reads a frame's options as keys only when they hold an =, and
@@ -553,7 +567,8 @@ def talkify(tex):
     their totalwidth its width; a footnote loses beamer's overlay and
     [frame]; a numbered list's style is LaTeX's \\labelenumi; a
     section's short title is given as a key; beamer's modes are
-    ltx-talk's; and a link to a label is a \\hyperref (hyperlinks). Code
+    ltx-talk's; a link to a label is a \\hyperref (hyperlinks); and a
+    label is written on a frame's first step (first_step_labels). Code
     is set aside first, so none of this touches it.
     Returns the LaTeX and counts: verbatim frames, untitled frames, and
     the options dropped."""
@@ -584,7 +599,7 @@ def talkify(tex):
         "projector" if any(mode.strip() in SHOWN_MODES for mode in m.group(1).split("|"))
         else "article"), tex)
     tex = re.sub(r"\\mode\*", "", tex)
-    tex = hyperlinks(tex)
+    tex = first_step_labels(hyperlinks(tex))
     out, pos = [], 0
     while True:
         m = FRAME.search(tex, pos)
