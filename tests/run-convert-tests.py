@@ -731,6 +731,10 @@ def case_built_beside(work):
             ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
             cwd=work, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             stdin=subprocess.DEVNULL, start_new_session=True,
+            # The keyboard's signal as a terminal's programs have it: a
+            # suite started in the background by a shell inherits it
+            # ignored, and the run would never hear of it.
+            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL),
             env=dict(os.environ, PATH=stand_in + os.pathsep + os.environ["PATH"]))
         for _ in range(600):
             if os.path.exists(waiting) or run.poll() is not None:
