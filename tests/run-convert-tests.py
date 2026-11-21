@@ -102,6 +102,16 @@ def convert(work, config=None, project=True, arguments=(), fixtures=NEEDED):
         stdin=subprocess.DEVNULL)
 
 
+def put_python(tools):
+    """A python3 in tools that runs this Python. A script, not a link: a
+    virtual environment's Python run through a link outside the
+    environment starts without the environment's packages."""
+    path = os.path.join(tools, "python3")
+    with open(path, "w") as fh:
+        fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
+    os.chmod(path, 0o755)
+
+
 def walk_json(node):
     """Every element of a Pandoc JSON document, depth first."""
     if isinstance(node, dict):
@@ -4655,18 +4665,14 @@ def case_pdf_without_latex(work):
     with open(os.path.join(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     # A path holding Pandoc and Python and nothing else, so LuaLaTeX
-    # can't be found wherever it's installed. Python is a script that runs
-    # this one: a venv's python run through a link starts without the
-    # venv's packages.
+    # can't be found wherever it's installed.
     tools = work + "-bin"
     os.makedirs(tools)
     for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
             os.symlink(found, os.path.join(tools, program))
-    with open(os.path.join(tools, "python3"), "w") as fh:
-        fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
-    os.chmod(os.path.join(tools, "python3"), 0o755)
+    put_python(tools)
     result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
@@ -4742,10 +4748,11 @@ def case_pdf_svg_without_converter(work):
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     tools = work + "-bin"
     os.makedirs(tools)
-    for program in ("pandoc", "python3", "file"):
+    for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
             os.symlink(found, os.path.join(tools, program))
+    put_python(tools)
     fake = os.path.join(tools, "lualatex")
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2026-06-01'\n")
@@ -4774,10 +4781,11 @@ def case_pdf_with_old_latex(work):
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     tools = work + "-bin"
     os.makedirs(tools)
-    for program in ("pandoc", "python3", "file"):
+    for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
             os.symlink(found, os.path.join(tools, program))
+    put_python(tools)
     fake = os.path.join(tools, "lualatex")
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2023-11-01'\n")
@@ -4807,10 +4815,11 @@ def case_pdf_with_newer_latex(work):
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     tools = work + "-bin"
     os.makedirs(tools)
-    for program in ("pandoc", "python3", "file"):
+    for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
             os.symlink(found, os.path.join(tools, program))
+    put_python(tools)
     fake = os.path.join(tools, "lualatex")
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\n"
@@ -4862,10 +4871,11 @@ def case_pdf_capacity(work):
             fh.write("targets:\n  pdf:\n    format: pdf\n")
         tools = book + "-bin"
         os.makedirs(tools)
-        for program in ("pandoc", "python3", "file"):
+        for program in ("pandoc", "file"):
             found = shutil.which(program)
             if found:
                 os.symlink(found, os.path.join(tools, program))
+        put_python(tools)
         # The shell's own commands only: the path holds nothing else.
         fake = os.path.join(tools, "lualatex")
         with open(fake, "w") as fh:
