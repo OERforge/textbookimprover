@@ -1868,6 +1868,82 @@ def case_adopt_part(work):
     ]
 
 
+def case_packages(work):
+    """In a project laid out with src/, each package is built from the
+    pages of the html target its includes names, found by the target's
+    name, into a folder of the package's own name."""
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def packager(*arguments):
+        return subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"), "-d", work,
+                               *arguments], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+
+    def listed(*parts):
+        folder = os.path.join(work, *parts)
+        return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+
+    def files_of(package):
+        return read(work, "output", "packages", package, "cartridge-files.txt") if exists(
+            work, "output", "packages", package, "cartridge-files.txt") else ""
+
+    write("src/book/ch1.md", "# Chapter One\n\nOpening.\n\n## First Part\n\nText.\n")
+    write("project.yaml", "project:\n  identifier: org.example.packages\n  title: Packages\n")
+    conversion = ("targets:\n  html:\n    format: html\n  pieces:\n    format: html\n"
+                  "    pages:\n      split_level: 2\n")
+    write("conversion.yaml", conversion)
+    write("packaging.yaml", "targets:\n  course:\n    format: common-cartridge\n"
+          "    includes: [pieces]\n  plain:\n    format: zip\n")
+    built = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
+                            "--zip"], cwd=work, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+    packages = listed("output", "packages")
+    course, plain = files_of("course"), files_of("plain")
+    archives = (listed("output", "packages", "course"), listed("output", "packages", "plain"))
+    by_hand = packager("--package", "course", "--check")
+    unchosen = packager("--check")
+    old_name = packager("--target", "plain", "--check")
+    unknown = packager("--package", "nothing", "--check")
+    pages_given = packager("--package", "course", "--pages", os.path.dirname(work), "--check")
+    output_given = packager("--package", "course", "-o", os.path.join(work, "m.xml"))
+    # A target's folder named out of the project, which a run refuses,
+    # isn't read by the packager run by hand either.
+    write("conversion.yaml", conversion.replace(
+        "  pieces:\n    format: html\n", "  pieces:\n    format: html\n    output_dir: ../..\n"))
+    escaped = packager("--package", "course", "--check")
+    return [
+        ("a run builds each package into output/packages/<its name>/, the one whose "
+         "includes names a target from that target's pages and the other from the "
+         "project's first html target's",
+         lambda: built.returncode == 0 and packages == ["course", "plain"]
+         and "ch1--first-part.html" in course and "ch1--first-part.html" not in plain
+         and "ch1.html" in plain
+         and any(n.endswith(".imscc") for n in archives[0])
+         and any(n.endswith(".zip") for n in archives[1])
+         or fail_text(built, (packages, course, plain, archives))),
+        ("run by hand, --package names the package, several and none named stops it "
+         "naming --package, --target still names one with a warning, and a package the "
+         "settings don't declare is refused",
+         lambda: by_hand.returncode == 0 and "2 page(s)" in by_hand.stdout
+         and unchosen.returncode != 0 and "--package" in unchosen.stderr
+         and old_name.returncode == 0 and "--target is --package now" in old_name.stderr
+         and unknown.returncode != 0 and "course, plain" in unknown.stderr
+         or fail_text(by_hand, [(r.returncode, r.stderr[-160:])
+                                for r in (unchosen, old_name, unknown)])),
+        ("--pages and -o aren't taken, and a target whose folder is named out of the "
+         "project stops the packager, nothing read from there",
+         lambda: pages_given.returncode != 0 and "--pages and -o" in pages_given.stderr
+         and output_given.returncode != 0 and not exists(work, "m.xml")
+         and escaped.returncode != 0 and "output_dir" in escaped.stderr
+         or fail_text(escaped, [(r.returncode, r.stderr[-160:])
+                                for r in (pages_given, output_given)])),
+    ]
+
+
 def fail_text(done, seen):
     raise AssertionError(str(seen) + " " + (done.stdout + done.stderr)[-300:])
 
@@ -11284,6 +11360,7 @@ CASES = [
     ("a link to a file in another case, or with backslashes", case_linked_paths),
     ("adopting a split book's pages", case_adopt),
     ("a target's pages adopted as a part of a project", case_adopt_part),
+    ("packages of a project, each from its target's pages", case_packages),
     ("an HTML source's tables and the header sidecar", case_html_headers),
     ("layout tables, marked and decided", case_layout_tables),
     ("a Word layout table with a repeating header row", case_layout_word_head),

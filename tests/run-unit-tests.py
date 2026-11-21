@@ -1086,6 +1086,30 @@ def check_project_paths():
             os.rmdir(os.path.join(links, "sidecars"))
         if name.startswith(os.path.join("output", "work", "")):
             shutil.rmtree(os.path.join(links, "output"))
+    # Which target's pages a package holds.
+    oerconfig_ = load(os.path.join(ROOT, "lib", "oerconfig.py"), "oerconfig_for_packages")
+    settings = scratch("package-pages-")
+
+    def conversion(text):
+        path = os.path.join(settings, "conversion.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+    two = conversion("targets:\n  epub:\n    format: epub3\n  html:\n    format: html\n"
+                     "    output_dir: pages\n  handout:\n    format: html\n    part: slides\n")
+    package_pages = [oerconfig_.pages_target(two, ["epub", "handout", "html"], "book", "book"),
+                     oerconfig_.pages_target(two, ["epub"], "book", "book"),
+                     oerconfig_.pages_target(two, [], "slides", "book"),
+                     oerconfig_.pages_target(two, [], "answers", "book"),
+                     oerconfig_.pages_target(os.path.join(settings, "none.yaml"), [],
+                                             "book", "book")]
+    package_refused = [
+        _stops(lambda text=text: oerconfig_.pages_target(conversion(text), [], "book", "book"),
+               oerconfig_.ConfigError)
+        for text in ("targets:\n  html:\n    format: html\n    output_dir: ../..\n",
+                     # A capital, put together here so that the check of
+                     # the names the suites use doesn't read it as one.
+                     "targets:\n  " + "W" + "ork:\n    format: html\n")]
     # A target built beside its folder and swapped in, and what a stopped
     # run left of a swap put right.
     swapped = scratch("project-paths-swap-")
@@ -1270,6 +1294,13 @@ def check_project_paths():
          lambda: no_link is None and len(linked) == 12
          and all(os.path.join(links, name) + " is a link" in why
                  for name, why in linked.items())),
+        ("a package's pages are the first html target its includes names, from whichever "
+         "part; with none named, the first made from the part asked for; with no target "
+         "declared, the implied html; and a name or output_dir that can't be a folder "
+         "under output/ is refused",
+         lambda: package_pages == [("handout", "", "slides"), ("html", "pages", "book"),
+                                   ("handout", "", "slides"), None, ("html", "", "book")]
+         and package_refused == [True, True]),
         ("a target built beside its folder is written under output/work/staging/, a "
          "message names the file where it will be, and the earlier folder is as it was "
          "until the new one replaces it whole, nothing left of the swap; a target nothing "

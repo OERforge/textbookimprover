@@ -8021,8 +8021,35 @@ def main():
             "would build the cartridge.")
         return unnamed
     command = ["python3", CARTRIDGE_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS]
-    if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(P(base).sources()):
-        command += ["--pages", html_targets[0].output_dir]
+    # Each package, one run of the packager. In the layout with src/ the
+    # packager finds a package's pages itself, in the folder of the html
+    # target its includes names (or the project's first), so this run
+    # builds the packages whose pages it made; a package the command line
+    # names (--package) is the one asked for. In today's layout there's
+    # one, from the first html target's folder.
+    packages = [None]
+    if parts is None:
+        if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(P(base).sources()):
+            command += ["--pages", html_targets[0].output_dir]
+    elif not any(a in ("--package", "--target") or a.startswith(("--package=", "--target="))
+                 for a in passthrough):
+        declared = oerconfig.declared_targets(P(base).packaging_file())
+        if declared:
+            packages, made = [], {t.name for t in html_targets}
+            for name, block in declared.items():
+                includes = block.get("includes")
+                try:
+                    found = oerconfig.pages_target(
+                        P(base).config_file(), includes if isinstance(includes, list) else [],
+                        DEFAULT_PART, DEFAULT_PART)
+                except oerconfig.ConfigError as exc:
+                    die(str(exc))
+                if found and found[2] == PART and found[0] in made:
+                    packages.append(name)
+            if not packages:
+                say(f"No package in {PACKAGING_NAME} is made from this part's pages, so "
+                    "nothing is packaged here.")
+                return unnamed
     # What the sources said about the book, for the packager's sample.
     hint = None
     if BOOK_HINT:
@@ -8030,12 +8057,16 @@ def main():
         with os.fdopen(handle, "w", encoding="utf-8") as fh:
             json.dump(BOOK_HINT, fh)
         command += ["--project-hint", hint]
+    worst = 0
     try:
-        result = run(command + passthrough, check=False)
+        for package in packages:
+            result = run(command + (["--package", package] if package else []) + passthrough,
+                         check=False)
+            worst = max(worst, result.returncode)
     finally:
         if hint:
             os.remove(hint)
-    return result.returncode or unnamed
+    return worst or unnamed
 
 
 def stopped(signum, frame):

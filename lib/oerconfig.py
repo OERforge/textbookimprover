@@ -891,6 +891,51 @@ def target_names(documents):
 # names
 # --------------------------------------------------------------------------
 
+def declared_targets(path):
+    """The targets a settings file declares, {name: its block}, in the
+    file's order, as written and unresolved; {} for a file that isn't
+    there, can't be read, or declares none."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    declared = data.get("targets") if isinstance(data, dict) else None
+    if not isinstance(declared, dict):
+        return {}
+    return {str(name): (block if isinstance(block, dict) else {})
+            for name, block in declared.items()}
+
+
+def pages_target(conversion_path, includes, part, default_part):
+    """The html target whose pages a package holds, as (its name, its
+    output_dir or "", its part), or None when there's none: the first
+    target the package's includes names that conversion.yaml declares
+    with format html, from whichever part; where includes names none, the
+    first html target made from part. With no target declared at all, a
+    run has one implied, html, from the project's own part. The name and
+    the output_dir become a folder under output/, so each is held to the
+    rule for one (ConfigError)."""
+    declared = declared_targets(conversion_path) or {"html": {"format": "html"}}
+    html = [(name, block) for name, block in declared.items()
+            if str(block.get("format") or "") == "html"]
+
+    def made_from(block):
+        return str(block.get("part") or "").strip() or default_part
+    chosen = next(((name, block) for wanted in includes or ()
+                   for name, block in html if name == str(wanted)), None) \
+        or next(((name, block) for name, block in html if made_from(block) == part), None)
+    if chosen is None:
+        return None
+    name, block = chosen
+    folder = str(block.get("output_dir") or "")
+    for value, what in ((name, "a target"), (folder, f"target {name}'s output_dir")):
+        problem = name_problem(value, f"{conversion_path}: {what}") if value else None
+        if problem:
+            raise ConfigError(problem)
+    return name, folder, made_from(block)
+
+
 def suggest_name(text):
     """A name the rule takes, made from one it doesn't, or "" if none can
     be: lowercase, each run of other characters a hyphen, a letter first."""

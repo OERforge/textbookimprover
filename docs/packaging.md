@@ -18,6 +18,8 @@ python3 $T/bin/build-cartridge.py --pages html --toc book.pdf  # order from the 
 
 `convert.py` runs the packager with `--pages html/` (the first HTML target's directory) so it reads the pages there and keeps its configuration, sample, manifest, and archive in the book's directory; run by hand, `--pages` does the same. `--toc book.pdf` reads the PDF's bookmark outline, and `--toc book.epub` the EPUB's navigation document (or `toc.ncx` in an EPUB 2), which is the table of contents in the order the book actually uses: better than any guess from the file names, and it supplies the real chapter titles. Pages are matched by deriving a file name from each heading ("Key Concepts and Summary" to `key-concepts-and-summary`), so it works for any book whose files are named after its headings rather than only for known section names. A PDF needs `pypdf` (`sudo apt install python3-pypdf`); an EPUB needs nothing.
 
+In a project laid out with `src/`, the packager takes neither `--pages` nor `-o`. It finds a package's pages itself, in `output/<target>/` of the first `html` target the package's `includes` names (or the project's first `html` target when it names none), and writes the manifest, the list of files, and the archive to `output/packages/<package>/`, or to `output/packages/cartridge/` when no package is declared. A run builds every package `packaging.yaml` declares whose pages it made; `--package NAME` after `convert.py`'s own options builds that one.
+
 It supplies the order for pages that `contents`, the book's structure in `project.yaml`, doesn't already place; it doesn't replace a structure you've arranged. Anything you listed stays exactly where you put it, the outline orders the rest, and only pages in neither the configuration nor the outline go into a group titled `Unsorted`. With no `contents` at all, the outline orders everything.
 
 That last case is the one you want on a first pass, and it's easy to miss by doing things in the wrong order: the sample a first run writes already places every page in a guessed order, so a `project.yaml` adopted from it leaves the outline nothing to do, and `--toc` says so and changes nothing.
@@ -31,7 +33,7 @@ Note that it follows the book faithfully. If the PDF puts per-chapter answer pag
 | `-d`, `--dir` | `.` | The book's directory: the configuration, the sample, the manifest, and the archive, and the pages and media too unless `--pages` names another |
 | `--pages` | `--dir` | Directory holding the pages and media, when it isn't `--dir`: `html` for a book `convert.py` converted |
 | `-c`, `--config` | `<dir>/packaging.yaml` | Packaging configuration |
-| `--target` | the only one | Which package to build, when several are defined |
+| `--package` | the only one | Which package to build, when several are defined. `--target` is its old name, which warns and goes after 1.0 |
 | `--allow-unknown-keys` | off | Report unrecognized settings instead of refusing them |
 | `-o`, `--output` | `<dir>/imsmanifest.xml` | Manifest to write |
 | `--toc PDF-OR-EPUB` | — | Order from a PDF's bookmark outline or an EPUB's table of contents |

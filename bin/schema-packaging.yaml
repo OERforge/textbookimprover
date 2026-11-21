@@ -74,10 +74,12 @@ keys:
       parts: a package is where a book and its decks come together, since
       no target reads another part's files. Order doesn't matter:
       anything listed is built first. A package of HTML pages that also
-      ships an EPUB and a print PDF lists all three. Not acted on yet:
-      the packager builds from the first html target's pages alone, and
-      a package listing more holds those pages without the rest (see
-      ROADMAP.md).
+      ships an EPUB and a print PDF lists all three. Acted on in part:
+      in a project laid out with src/, the package's pages are those of
+      the first html target listed, or of the project's first html
+      target when none is; elsewhere the packager builds from the first
+      html target's pages. Either way a package listing more holds
+      those pages without the rest (see ROADMAP.md).
 
   organization:
     description: >
