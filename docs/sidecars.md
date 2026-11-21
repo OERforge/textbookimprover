@@ -6,6 +6,8 @@ A run writes reports naming what still needs a person, and reads sidecar files h
 
 The work goes in a loop: a run writes a report, you fill in its rows, you append them to the sidecar the report is for, and the next run applies them and reports what's left. A book with no sidecars yet converts all the same: nothing has been decided for it, and the reports say what there is to decide.
 
+A part's reports and drafts are written to `output/reports/<part>/` (`output/reports/book/` for a book), and its sidecars are kept in `sidecars/<part>/`, each under the name this page gives it, so "append them to the sidecar" means to the file there ([A project's folders](layout.md)). Where this page says a file is beside the sources, it means one of those two folders: that wording is from the layout before, in which a book was one folder.
+
 | Sidecar | Holds | Its rows come from | Described |
 |---|---|---|---|
 | `image-alt.csv` | Alt text for an image, or that it's decorative | `image-alt-missing.csv` | [Sidecar files](#sidecar-files) |

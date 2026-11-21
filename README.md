@@ -30,32 +30,34 @@ You need Pandoc 3.9 or later, Python 3.9 or later, and PyYAML; see [Installation
 
 ```bash
 T=/path/to/tools                       # where you cloned this
-cd /path/to/your/docx/files
+mkdir -p ~/books/my-book/src/book      # a project, and its book's sources
+cp /path/to/your/docx/files/* ~/books/my-book/src/book/
+cd ~/books/my-book
 
-python3 $T/bin/convert.py                 # 1. convert: html/, one page per source, plus reports
+python3 $T/bin/convert.py                 # 1. convert: output/html/, one page per source, plus reports
 ```
 
-The first run converts everything, then stops and writes `project-sample.yaml`, because the cartridge's manifest (`imsmanifest.xml`, the list of its pages) needs two things only you can supply. Set `identifier` and `title` near the top of that file and rename it:
+The first run converts everything, then stops and writes `project-sample.yaml` among its reports, because the cartridge's manifest (`imsmanifest.xml`, the list of its pages) needs two things only you can supply. Set `identifier` and `title` near the top of that file and move it into place:
 
 ```bash
-mv project-sample.yaml project.yaml
+mv output/reports/book/project-sample.yaml project.yaml
 python3 $T/bin/convert.py                 # 2. builds imsmanifest.xml
 python3 $T/bin/convert.py --zip           # 3. ... and the .imscc archive
 ```
 
-If you have the book's PDF or EPUB, run `python3 $T/bin/convert.py --toc book.pdf` (or `--toc book.epub`) *before* renaming the sample: it orders the pages from the book's own table of contents, with chapters as modules. To build more than one output, declare targets in `conversion.yaml`:
+If you have the book's PDF or EPUB, run `python3 $T/bin/convert.py --toc book.pdf` (or `--toc book.epub`) *before* moving the sample: it orders the pages from the book's own table of contents, with chapters as modules. To build more than one output, declare targets in `conversion.yaml`:
 
 ```yaml
 targets:
   html:
-    format: html              # writes html/
+    format: html              # writes output/html/
   epub:
-    format: epub3             # writes epub/<identifier>.epub
-  src:
-    format: markdown          # writes src/, the book as Markdown source
+    format: epub3             # writes output/epub/<identifier>.epub
+  markdown:
+    format: markdown          # writes output/markdown/, the book as Markdown source
 ```
 
-Each target, one output a run builds, writes into a directory of its own; the book's directory, where you ran `convert.py`, keeps the sources, the intermediates (each page as Pandoc read it, kept between steps), the sidecars (CSV files holding what you decided: alt text, table headers), and the reports. See [Configuration](docs/configuration.md) for targets, editions, and the book's structure, [Markdown sources](docs/markdown.md) for Markdown in and out, and [Terms these pages use](docs/glossary.md) for any word here that's new.
+A project is one folder: the settings at its top, the sources in `src/book/`, the sidecars (CSV files holding what you decided: alt text, table headers) in `sidecars/book/`, and everything a run writes in `output/`, each target in a folder of its own beside the packages, the reports, and the run's working files. [A project's folders](docs/layout.md) says what goes where, and how `util/move-to-src.py` moves a book kept in one folder, as versions before this one kept it. See [Configuration](docs/configuration.md) for targets, editions, and the book's structure, [Markdown sources](docs/markdown.md) for Markdown in and out, and [Terms these pages use](docs/glossary.md) for any word here that's new.
 
 ## Documentation
 
@@ -63,6 +65,7 @@ Each target, one output a run builds, writes into a directory of its own; the bo
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites and how to check them |
 | [Terms these pages use](docs/glossary.md) | What a target, a sidecar, an intermediate, and the other words these pages rely on mean; the other programs and standards they name; and the books they measure on |
+| [A project's folders](docs/layout.md) | Where the settings, each part's sources and sidecars, and everything a run writes are kept; parts; unpacking from `upstream/`; moving a book kept in one folder |
 | [A first run](docs/first-run.md) | Start to finish, what each run writes, exit codes |
 | [Worked examples](docs/examples.md) | Three real books from start to finish: an OpenStax book from its Word files to a course cartridge, a book website from a WARC to an EPUB and an HTML round trip, and a LaTeX book from its repository to a tagged PDF. |
 | [Formats and packaging](docs/formats.md) | Every input, every way it can arrive, every output, how far each path is tested and what it loses, and how the output is packaged |

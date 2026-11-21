@@ -4,11 +4,13 @@ These pages lean on a small vocabulary of TextbookImprover's own, on the names o
 
 ## TextbookImprover's own words
 
-**The book's directory.** The directory `convert.py` is run in, also called the book's folder or the content directory. It holds the sources, the configuration files, the sidecars, the reports, and the intermediates. Each target writes its output into a subdirectory of its own.
+**Project, the project's folder.** The folder a book is kept in and `convert.py` is run in, which pages here also call the book's directory or the book's folder. The configuration files are at its top, each part's sources in `src/<part>/`, its sidecars in `sidecars/<part>/`, and everything a run writes in `output/`: a folder for each target, the packages, the reports, and the run's own working files ([A project's folders](layout.md)).
+
+**Part.** A book, a set of decks, or another collection with sources of its own, in a folder of its name under `src/`. A project with one part needs to say nothing of it, and its folder is usually `src/book/`; one with more names them under `project.parts` ([Parts](layout.md#parts)).
 
 **Source.** A file the book is converted from: a Word file (`.docx`), a Markdown file (`.md`), an AsciiDoc file (`.adoc`), an HTML page (`.html`), or a LaTeX book's files, read through its master file. A book that arrives another way (an EPUB, a saved website, a course cartridge, an OpenStax repository) is unpacked into sources first.
 
-**Run.** One go of `convert.py` in a book's directory, from reading the sources to checking what it wrote. "The run says" and "the run warns" mean a line it prints on the terminal. A slides run is a run on a folder of decks.
+**Run.** One go of `convert.py` in a project's folder, from reading the sources to checking what it wrote. "The run says" and "the run warns" mean a line it prints on the terminal. A slides run is a run on a folder of decks.
 
 **`$T`.** The directory the tools themselves are in, wherever you unpacked or cloned them, so `python3 $T/bin/convert.py` runs the converter from any book's directory ([Installation](installation.md#getting-the-tools)).
 
@@ -20,13 +22,13 @@ These pages lean on a small vocabulary of TextbookImprover's own, on the names o
 
 **Role, type.** Two things a `contents` entry can say about itself. Its role is the part of the book it's in (`front`, `main`, `appendix`, or `back`), which decides how it's numbered. Its type is what it is (`preface`, `glossary`, `index`, and so on), which an EPUB marks for a reading system ([Contents](configuration.md#contents)).
 
-**Target.** One output a run builds, declared under `targets:` in `conversion.yaml` with a name and a `format`: `html`, `epub3`, `pdf`, `latex`, `docx`, `pptx`, `revealjs`, `markdown`, `asciidoc`, or `source`. A run with no configuration has one target, named `html`. Every target is built from the same sources on every run ([Targets](configuration.md#targets)).
+**Target.** One output a run builds, declared under `targets:` in `conversion.yaml` with a name and a `format`: `html`, `epub3`, `pdf`, `latex`, `docx`, `pptx`, `revealjs`, `markdown`, `asciidoc`, or `source`. A run with no configuration has one target, named `html`. Each writes into `output/`, in a folder of its own name. Every target is built from the same sources on every run ([Targets](configuration.md#targets)).
 
 **Remediate, a `source` target, the copy.** To remediate a file is to fix what keeps a reader with a disability from using it: alt text that's missing, a table whose header cells aren't marked, a link that reads as its address. A target with `format: source` writes a remediated copy of the author's own files: the decisions recorded in the sidecars written into a copy of each Word, Markdown, HTML, LaTeX, or PowerPoint file, and the rest of the file left as the author wrote it. Where a page says "the copy" without saying more, it usually means that copy. A LaTeX book's tagged copy is one also changed so that it builds with LaTeX's own tagging ([Source](formats.md#source)).
 
 **Repaired copy.** A different copy, which you never see: a working copy of a Word file, an HTML page, or a LaTeX book that the run puts right so that Pandoc's reader can take it, and reads in the source's place. The source itself is never changed. Where [LaTeX sources](latex.md#what-is-put-right-before-reading) and [HTML sources](html.md#what-is-read-and-what-isnt) say what "the copy" has that the book's files don't, this is the one they mean, and "the reader" there is Pandoc's reader for that format.
 
-**Intermediate.** A page as Pandoc read it, kept as a `.json` file in Pandoc's own document format beside the sources, and the same page after the filter has run, as `.filtered.json`. Every target is written from the filtered intermediates. They can be deleted; the next run makes them again ([What a run creates](first-run.md#what-a-run-creates)).
+**Intermediate.** A page as Pandoc read it, kept as a `.json` file in Pandoc's own document format under `output/work/parts/<part>/`, and the same page after the filter has run, as `.filtered.json`. Every target is written from the filtered intermediates. They can be deleted; the next run makes them again ([What a run creates](first-run.md#what-a-run-creates)).
 
 **The filter.** `bin/figures-and-tables.lua`, a program Pandoc runs on each page between reading it and writing it, which does most of the accessibility work: figures, table captions and headers, alt text, and the rest ([What conversion does to your pages](architecture.md#what-conversion-does-to-your-pages)). A few smaller filters run with it or after it.
 
@@ -38,9 +40,9 @@ These pages lean on a small vocabulary of TextbookImprover's own, on the names o
 
 **The gate.** The point early in a run where it stops, before writing any page, if an image a page shows isn't on disk or can't be identified. It writes `media-unresolved.csv` naming each one.
 
-**Report.** A CSV file a run writes beside the sources, naming what still needs a person: images with no alt text, tables with no description, links to shorten. Reports are written again on every run, and most exist only while there's something in them ([Reports](sidecars.md#reports)).
+**Report.** A CSV file a run writes in `output/reports/<part>/`, naming what still needs a person: images with no alt text, tables with no description, links to shorten. Reports are written again on every run, and most exist only while there's something in them ([Reports](sidecars.md#reports)).
 
-**Sidecar.** A CSV file you keep beside the sources that holds what you decided about the book and the sources themselves can't say: `image-alt.csv` for alt text, `table-captions.csv` for a table's description, `table-headers.csv` for which cells head a table, and others. Every run reads them, and they outlast a new copy of the sources. You usually make one by filling in a report's rows and appending them to the sidecar ([Sidecars and reports](sidecars.md)).
+**Sidecar.** A CSV file you keep in `sidecars/<part>/` that holds what you decided about the book and the sources themselves can't say: `image-alt.csv` for alt text, `table-captions.csv` for a table's description, `table-headers.csv` for which cells head a table, and others. Every run reads them, and they outlast a new copy of the sources. You usually make one by filling in a report's rows and appending them to the sidecar ([Sidecars and reports](sidecars.md)).
 
 **Drafted, reviewed, `TI`.** The last two columns of a sidecar record where a value came from and whether a person has checked it. `TI` in the first means TextbookImprover guessed the value ([Who drafted a value](sidecars.md#who-drafted-a-value-and-whether-its-been-reviewed)).
 
@@ -54,19 +56,19 @@ These pages lean on a small vocabulary of TextbookImprover's own, on the names o
 
 **Band.** A merged row partway down a table that labels the rows under it ("Year 2", "Higher Income Countries"). By default, an HTML, EPUB, or PDF target gets a table with bands as one table per band, each captioned with its band, and a Markdown, AsciiDoc, or Word target keeps it as one table; `tables.bands` chooses ([What conversion does to your pages](architecture.md#what-conversion-does-to-your-pages)).
 
-**Sample.** A complete configuration file a tool writes for you to rename: `project-sample.yaml`, `conversion-sample.yaml`, `packaging-sample.yaml`. It lists every setting with its description, at your value where you've set one and the default otherwise. Adopting a sample means renaming it to the real name (`project.yaml`) ([Samples](configuration.md#samples)).
+**Sample.** A complete configuration file a tool writes for you to adopt: `project-sample.yaml`, `conversion-sample.yaml`, `packaging-sample.yaml`. It lists every setting with its description, at your value where you've set one and the default otherwise. It's written among the reports, and adopting it means moving it to the project's top under the real name (`project.yaml`), as the message that wrote it says ([Samples](configuration.md#samples)).
 
 **The two halves.** Conversion (`convert.py`, sources into pages and books) and packaging (`build-cartridge.py`, pages into a cartridge). Each has its own configuration file, and either works without the other. `project.yaml` describes the book for both.
 
 **The packager, a package, a cartridge.** The packager is `bin/build-cartridge.py`. A cartridge is an IMS Common Cartridge, a zip file with the extension `.imscc` that a learning management system imports as a course's modules and pages. A package is one such archive as `packaging.yaml` describes it ([Building the cartridge](packaging.md)).
 
-**Pass-through directory.** `_pt/` in the book's directory, unless `project.yaml` names another: the place for a page someone finished by hand. An `.html` file there is copied into each HTML target as it stands, where an `.html` file beside the sources is converted like any other source ([HTML sources](html.md)).
+**Pass-through directory.** `_pt/` among a part's sources (`src/book/_pt/`), unless `project.yaml` names another: the place for a page someone finished by hand. An `.html` file there is copied into each HTML target as it stands, where an `.html` file among the sources is converted like any other source ([HTML sources](html.md)).
 
 **Variant, edition.** A variant is a file named `<page>.<target>.<extension>` (`about.print.md`), which takes the place of that page for the one target named. Editions of a book are targets that differ this way, or in passages marked for some targets only ([Editions](configuration.md#editions)).
 
 **Master file.** The file of a LaTeX or AsciiDoc book that pulls in the others, with `\include` or `include::`, and so gives the book's order.
 
-**Unpack.** To turn a book that arrived as one archive or one repository into a book's directory of sources. Each `unpack-…` tool in `bin/` does it for one kind: an EPUB, a saved website, a course cartridge, an OpenStax repository ([Formats](formats.md)).
+**Unpack.** To turn a book that arrived as one archive or one repository into a part's sources, the archive kept in the project's `upstream/`. Each `unpack-…` tool in `bin/` does it for one kind: an EPUB, a saved website, a course cartridge, an OpenStax repository ([Formats](formats.md)).
 
 **Round trip.** Converting a book to a format and then reading the result back as a source, to see what the format kept. `util/compare-output.py` compares the pages from the two readings.
 

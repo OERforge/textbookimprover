@@ -16,15 +16,17 @@ Every setting is declared in a schema — `lib/schema-project.yaml`, `bin/schema
 
 ### Samples
 
-Each file has a sample written from its schema: every setting with its description, at the value the file gives it or else the default, so a sample renamed over its file loses nothing set there. With `T` the directory the tools are in, run in the book's directory:
+Each file has a sample written from its schema: every setting with its description, at the value the file gives it or else the default, so a sample moved over its file loses nothing set there. A sample is written among the part's reports, in `output/reports/book/`, where nothing reads a setting from, and the message that writes it gives the path to move it to. With `T` the directory the tools are in, run in the project's folder:
 
-| Sample | Written by | Rename it to |
+| Sample | Written by | Move it to |
 |---|---|---|
-| `project-sample.yaml` | a run, when nothing names the book; and `build-cartridge.py -d . --pages html --init`, when nothing names the book and no run has written one | `project.yaml` |
+| `project-sample.yaml` | a run, when nothing names the book; and `build-cartridge.py -d . --init`, when nothing names the book and no run has written one | `project.yaml` |
 | `conversion-sample.yaml` | `python3 $T/bin/read-conversion-config.py -d . --init` | `conversion.yaml` |
 | `packaging-sample.yaml` | `python3 $T/bin/build-cartridge.py -d . --init` | `packaging.yaml` |
 
-A run also writes `project-sample.yaml` for review when it worked out the contents itself: guessed from the file names, taken from a master file's order, read from an outline with `--toc`, or resolved from a page the split cut. For an order the packager works out, guessed or read with `--toc`, a book named in `packaging.yaml`'s own `project:` block gets `packaging-sample.yaml` instead, the contents in its block, since that's where the book is named. `--pages` names the directory the pages are in, `html/` unless an HTML target says otherwise, which `--init` needs only for the contents it guesses into a project sample. [Project settings](project-settings.md), [conversion settings](conversion-settings.md), and [packaging settings](packaging-settings.md) list the same settings.
+`conversion-sample.yaml` has no `sidecars` or `reports` section, since a part's sidecars and reports each have one place ([A project's folders](layout.md)). A book still kept in one folder has its samples beside its settings, to rename.
+
+A run also writes `project-sample.yaml` for review when it worked out the contents itself: guessed from the file names, taken from a master file's order, read from an outline with `--toc`, or resolved from a page the split cut. For an order the packager works out, guessed or read with `--toc`, a book named in `packaging.yaml`'s own `project:` block gets `packaging-sample.yaml` instead, the contents in its block, since that's where the book is named. [Project settings](project-settings.md), [conversion settings](conversion-settings.md), and [packaging settings](packaging-settings.md) list the same settings.
 
 ### Where the book is named
 
