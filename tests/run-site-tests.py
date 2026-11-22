@@ -51,6 +51,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+sys.path.insert(0, HERE)
+import laidout  # noqa: E402
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2"
@@ -196,19 +198,31 @@ def build_mhtml(directory):
               heading(n, t, s) + f'<p><img src="{SCRIBBLE}pict.png" alt="p"></p>')
 
 
-def read(*parts):
-    with open(os.path.join(*parts), encoding="utf-8") as fh:
+def place(out, *names):
+    """Where a project the unpacker made keeps a file: its settings at
+    its top, the report with its reports, and a page or an asset among
+    its part's sources."""
+    paths = laidout.projectpaths.of(out)
+    if names == ("project.yaml",):
+        return paths.project_file()
+    if names == ("unpack-report.csv",):
+        return paths.report(names[0])
+    return paths.source(*names)
+
+
+def read(out, *names):
+    with open(place(out, *names), encoding="utf-8") as fh:
         return fh.read()
 
 
 def unpack(inputs, out, *extra):
     return subprocess.run(["python3", os.path.join(BIN, "unpack-site.py")]
-                          + inputs + ["-o", out] + list(extra),
+                          + inputs + ["-o", out, "--part", "book"] + list(extra),
                           capture_output=True, text=True)
 
 
 def report(out):
-    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
+    with open(place(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
         return list(csv.DictReader(fh))
 
 
@@ -227,26 +241,21 @@ def case_browser_save(work):
     whole = os.path.join(work, "site")
     unpack([saves], whole, "--whole-pages")
     whole_alpha = read(whole, "ch1-alpha.html")
-    proj = os.path.join(work, "project")
-    as_part = unpack([saves], proj, "--part", "book")
     return [
-        ("with --part the pages and their resources are a part's sources in a project, "
-         "the same files as unpacked into one folder, and the folder of saves is copied to "
-         "upstream/ as the part's from",
-         lambda: as_part.returncode == 0
-         and sorted(n for n in os.listdir(os.path.join(proj, "src", "book")))
-         == sorted(n for n in os.listdir(out)
-                   if n not in ("project.yaml", "unpack-report.csv"))
-         and read(proj, "src", "book", "ch1-alpha.html") == alpha
-         and yaml.safe_load(read(proj, "project.yaml"))["project"]["parts"]
+        ("the pages and their resources are a part's sources in a project, the folder of "
+         "saves copied to upstream/ as the part's from, and the report with the part's "
+         "reports",
+         lambda: result.returncode == 0
+         and "ch1-alpha.html" in os.listdir(os.path.join(out, "src", "book"))
+         and yaml.safe_load(read(out, "project.yaml"))["project"]["parts"]
          == {"book": {"kind": "book", "from": {"file": "upstream/saves", "unpacker": "site"}}}
-         and sorted(os.listdir(os.path.join(proj, "upstream", "saves")))
+         and sorted(os.listdir(os.path.join(out, "upstream", "saves")))
          == sorted(os.listdir(saves))
-         and os.path.exists(os.path.join(proj, "output", "reports", "book",
+         and os.path.exists(os.path.join(out, "output", "reports", "book",
                                          "unpack-report.csv"))),
         ("the run succeeds, a page per save, named by its path",
          lambda: result.returncode == 0 and sorted(
-             n for n in os.listdir(out) if n.endswith(".html"))
+             n for n in os.listdir(place(out)) if n.endswith(".html"))
          == ["ch1-alpha.html", "ch1-beta.html", "ch1-index.html",
              "ch2-gamma.html", "colophon.html", "glossary.html",
              "index.html"]),
@@ -268,7 +277,7 @@ def case_browser_save(work):
         ("a link to a page of the book is a link to its file, fragment kept",
          lambda: 'href="ch1-alpha.html#deep"' in alpha),
         ("an image two pages saved is one file, and both point at it",
-         lambda: os.listdir(os.path.join(out, "assets")) == ["figure.png"]
+         lambda: os.listdir(place(out, "assets")) == ["figure.png"]
          and 'src="assets/figure.png"' in read(out, "ch1-beta.html")),
         ("only the content is kept: menu, footer, a page's own toc, heading "
          "icons, and scripts go",
@@ -288,7 +297,7 @@ def case_browser_save(work):
          lambda: "site-nav" in whole_alpha
          and 'href="assets/just-the-docs-default.css"' in whole_alpha
          and 'href="ch1-beta.html"' in whole_alpha
-         and os.path.exists(os.path.join(whole, "assets",
+         and os.path.exists(place(whole, "assets",
                                          "just-the-docs-default.css"))),
     ]
 
@@ -301,14 +310,14 @@ def case_mhtml(work):
     import yaml
     project = yaml.safe_load(read(out, "project.yaml"))["project"]
     tables = read(out, "tables.html") if os.path.exists(
-        os.path.join(out, "tables.html")) else ""
+        place(out, "tables.html")) else ""
     rows = report(out)
     contents = project["contents"]
     return [
         ("the run succeeds and the pages are named without the edition's "
          "directory",
          lambda: result.returncode == 0 and os.path.exists(
-             os.path.join(out, "naming.html"))),
+             place(out, "naming.html"))),
         ("Scribble is recognized with no generator to say so",
          lambda: any(r["Check"] == "profile" and r["Detail"].startswith(
              "scribble") for r in rows)),
@@ -328,7 +337,7 @@ def case_mhtml(work):
          and '<span id="(part._tables)"></span>' in tables),
         ("a resource from the MHTML is a file, and the page points at it",
          lambda: 'src="assets/pict.png"' in tables
-         and os.path.exists(os.path.join(out, "assets", "pict.png"))),
+         and os.path.exists(place(out, "assets", "pict.png"))),
         ("a link into another page keeps its fragment",
          lambda: 'href="naming.html#(part._naming)"' in tables),
         ("a REPL interaction isn't a table: its prompt, code, and result "
@@ -451,18 +460,18 @@ Two</a></li><li><a href="/book/three.html">Three</a></li></ul></nav>
     odd = os.path.join(work, "crawl_warc.gz")          # as an upload renames it
     shutil.copy(warc, odd)
     renamed = unpack([odd], out3)
-    two = read(out, "two.html") if os.path.exists(os.path.join(out, "two.html")) \
+    two = read(out, "two.html") if os.path.exists(place(out, "two.html")) \
         else ""
     return [
         ("a WARC's HTML responses are the pages, gzipped per record, "
          "chunked, and content-encoded",
          lambda: result.returncode == 0 and sorted(
-             n for n in os.listdir(out) if n.endswith(".html"))
+             n for n in os.listdir(place(out)) if n.endswith(".html"))
          == ["one.html", "three.html", "two.html"] and "<h1>Two</h1>" in two),
         ("a link to a URL that redirected goes where the redirect went",
          lambda: 'href="three.html#here"' in two),
         ("a resource is its response's body",
-         lambda: open(os.path.join(out, "assets", "pic.png"), "rb").read()
+         lambda: open(place(out, "assets", "pic.png"), "rb").read()
          == PNG),
         ("the menu gives the order, and \"Home\" is a title like any other",
          lambda: "page: one" in read(out, "project.yaml")
@@ -477,7 +486,7 @@ Two</a></li><li><a href="/book/three.html">Three</a></li></ul></nav>
          and any(r["Check"] == "mathjax-tex" for r in report(out))),
         ("a WARC named anything is still a WARC",
          lambda: renamed.returncode == 0 and os.path.exists(
-             os.path.join(out3, "one.html"))),
+             place(out3, "one.html"))),
         ("a WACZ holding the same WARC gives the same pages",
          lambda: all(read(out, n) == read(out2, n)
                      for n in ("one.html", "two.html", "three.html"))),
@@ -552,20 +561,20 @@ def case_browser_archive(work):
     result = unpack([wacz], out)
     import yaml
     project = yaml.safe_load(read(out, "project.yaml"))["project"] \
-        if os.path.exists(os.path.join(out, "project.yaml")) else {}
+        if os.path.exists(place(out, "project.yaml")) else {}
     one = read(out, "section-1.html") if os.path.exists(
-        os.path.join(out, "section-1.html")) else ""
+        place(out, "section-1.html")) else ""
     rows = report(out) if os.path.exists(
-        os.path.join(out, "unpack-report.csv")) else []
+        place(out, "unpack-report.csv")) else []
     return [
         ("the book is the site the archive says was recorded, not the first "
          "HTML fetched",
          lambda: result.returncode == 0 and sorted(
-             n for n in os.listdir(out) if n.endswith(".html"))
+             n for n in os.listdir(place(out)) if n.endswith(".html"))
          == ["section-0.html", "section-1.html", "section-2.html"]),
         ("sections fetched as JSON are pages; an oEmbed answer isn't",
          lambda: "Section 1." in one and not any(
-             "oembed" in n for n in os.listdir(out))),
+             "oembed" in n for n in os.listdir(place(out)))),
         ("the lesson's own menu gives the order, and names the lesson page "
          "section-0",
          lambda: [c["page"] for c in project["contents"]]
@@ -638,10 +647,10 @@ def case_edtech_books(work):
         z.writestr("archive/data.warc.gz", b"".join(records))
     out = os.path.join(work, "out")
     unpack([wacz], out)
-    project = read(out, "project.yaml") if os.path.exists(os.path.join(out, "project.yaml")) else ""
-    page = read(out, "intro.html") if os.path.exists(os.path.join(out, "intro.html")) else ""
-    pages = sorted(f for f in os.listdir(out) if f.endswith(".html")) if os.path.isdir(out) else []
-    notes = report(out) if os.path.exists(os.path.join(out, "unpack-report.csv")) else ""
+    project = read(out, "project.yaml") if os.path.exists(place(out, "project.yaml")) else ""
+    page = read(out, "intro.html") if os.path.exists(place(out, "intro.html")) else ""
+    pages = sorted(f for f in os.listdir(place(out)) if f.endswith(".html")) if os.path.isdir(out) else []
+    notes = report(out) if os.path.exists(place(out, "unpack-report.csv")) else ""
     return [
         ("the book is made from its records: a cover and a page per chapter, "
          "and neither the shell nor a template", lambda: pages == [
@@ -659,7 +668,7 @@ def case_edtech_books(work):
          and "<h2>A story</h2>" in page and "<h3>Sub</h3>" in page),
         ("an image named with spaces is found under its encoded address, and "
          "saved under its own name", lambda: "resource-not-held" not in notes
-         and any("Exec" in f and "20" not in f for f in os.listdir(os.path.join(out, "assets")))),
+         and any("Exec" in f and "20" not in f for f in os.listdir(place(out, "assets")))),
         ("a section with no text lists what's in it",
          lambda: 'href="inside.html"' in read(out, "section.html")),
     ]
@@ -810,13 +819,13 @@ def case_libretexts(work):
     result = unpack([wacz], out)
 
     def have(name):
-        return os.path.exists(os.path.join(out, name))
+        return os.path.exists(place(out, name))
     project = read(out, "project.yaml") if have("project.yaml") else ""
     alpha_out = read(out, "1.01-Alpha.html") if have("1.01-Alpha.html") else ""
     beta_out = read(out, "1.02-Beta.html") if have("1.02-Beta.html") else ""
     index = read(out, "10-Index.html") if have("10-Index.html") else ""
     notes = report(out) if have("unpack-report.csv") else []
-    pages_out = sorted(f for f in os.listdir(out) if f.endswith(".html")) \
+    pages_out = sorted(f for f in os.listdir(place(out)) if f.endswith(".html")) \
         if os.path.isdir(out) else []
 
     def noted(check, text=""):

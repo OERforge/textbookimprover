@@ -60,7 +60,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+sys.path.insert(0, HERE)
 import bookcontents  # noqa: E402
+import laidout  # noqa: E402
 
 
 def load(path, name):
@@ -625,12 +627,15 @@ def case_links_from_other_pages(work):
 
 def case_readers(work):
     """What the packager and the EPUB assembler make of the pieces."""
-    source = prepare(work)
-    out = Pieces(work, split(work, [source]))
+    paths = laidout.project(work)
+    laidout.projectpaths.claim_output(work)
+    pages = paths.pages()
+    source = prepare(pages)
+    out = Pieces(pages, split(pages, [source]))
     titles, parts = {}, {}
     for stem in out.stems:
         page = out.render(stem)
-        path = os.path.join(work, stem + ".html")
+        path = os.path.join(pages, stem + ".html")
         titles[stem] = cartridge.page_title(path, stem)
         origin = cartridge.page_provenance(path)
         if origin:
@@ -639,14 +644,13 @@ def case_readers(work):
     by_name = bookcontents.guess_contents(
         sorted(out.stems), None, titles)     # no provenance: by name
 
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(paths.project_file(), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.costs\n  title: Costs\n")
-    with open(os.path.join(work, "conversion.yaml"), "w",
-              encoding="utf-8") as fh:
+    with open(paths.config_file(), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  epub:\n    format: epub3\n")
     built = run(["python3", os.path.join(BIN, "build-epub.py"), "-d", work],
                 work, check=False)
-    epub_path = os.path.join(work, "epub", "org.example.costs.epub")
+    epub_path = paths.target_file("epub", "org.example.costs.epub")
     chapters, nav = {}, ""
     if os.path.exists(epub_path):
         with zipfile.ZipFile(epub_path) as archive:
@@ -671,7 +675,7 @@ def case_readers(work):
          and set(by_name) == set(out.stems)),
         ("the EPUB builds from the pieces, and not from the source too",
          lambda: built.returncode == 0 and len(chapters) == 7
-         and not os.path.exists(os.path.join(work, "chapter-7.filtered.json"))),
+         and not os.path.exists(paths.page("chapter-7"))),
         ("and its nav shows the source over its pieces",
          lambda: nav.index("7.5 Costs in the Long Run")
          < nav.index("Choice of Production Technology")),

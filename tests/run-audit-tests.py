@@ -41,7 +41,9 @@ ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+sys.path.insert(0, HERE)
 import findings as fl  # noqa: E402
+import laidout  # noqa: E402
 import outputcheck  # noqa: E402
 import sourcecheck  # noqa: E402
 
@@ -1666,17 +1668,17 @@ def case_validators():
 
 def case_check_only():
     d = os.path.join(WORK, "book")
-    os.makedirs(d, exist_ok=True)
-    shutil.copy(os.path.join(FIXTURES, "tables.docx"), d)
-    with open(os.path.join(d, "project.yaml"), "w") as fh:
+    paths = laidout.project(d)
+    shutil.copy(os.path.join(FIXTURES, "tables.docx"), paths.sources())
+    with open(paths.project_file(), "w") as fh:
         fh.write("project:\n  identifier: org.example.c\n  title: C\n")
     result = run([os.path.join(BIN, "convert.py"), "--quiet", "--check-only"],
                  d)
     return [
         ("convert.py --check-only writes the reports and stops",
          lambda: result.returncode == 0
-         and os.path.exists(os.path.join(d, "table-headers-new.csv"))
-         and not os.path.exists(os.path.join(d, "html"))),
+         and os.path.exists(paths.report("table-headers-new.csv"))
+         and not os.path.exists(paths.target_dir("html"))),
     ]
 
 

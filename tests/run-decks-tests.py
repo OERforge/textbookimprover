@@ -66,6 +66,7 @@ ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+import laidout  # noqa: E402
 import parallel  # noqa: E402
 import pdftext  # noqa: E402
 import decks  # noqa: E402
@@ -759,21 +760,57 @@ def read(path):
         return fh.read()
 
 
+SETTINGS = ("project.yaml", "conversion.yaml", "packaging.yaml")
+REPORTS = ("-new.csv", "-missing.csv", "-report.csv", "-check.csv")
+SOURCES = (".md", ".adoc", ".pptx", ".odp", ".png", ".jpg", ".svg", ".zip")
+PICTURES = ("img", "Img")
+
+
+def place(work, *names):
+    """Where a folder of decks keeps a file, the folder a project laid
+    out with src/ (folder() makes one): its settings at its top, a
+    sidecar and a report with its part's, a deck or a picture among the
+    part's sources, and anything else a target's folder or a file in
+    one. In any other folder, the names joined to it."""
+    if not laidout.projectpaths.is_tree(work):
+        return os.path.join(work, *names)
+    paths = laidout.projectpaths.of(work)
+    first = names[0]
+    if len(names) == 1:
+        if first in SETTINGS:
+            return paths.top(first)
+        if first.endswith(REPORTS):
+            return paths.report(first)
+        if first.endswith(".csv"):
+            return paths.sidecar(first)
+        if first.endswith(SOURCES):
+            return paths.source(first)
+        return paths.target_dir(first)
+    if first in PICTURES:
+        return paths.source(*names)
+    return paths.target_file(first, os.path.join(*names[1:]))
+
+
+def named(work, name):
+    """A file a setting names, at the project's top."""
+    return laidout.projectpaths.of(work).top(name)
+
+
 def folder(work, config, project=True, decks_given=None):
     """A folder of decks: the three above unless decks_given names others,
     a README, a picture, and the configuration given."""
-    os.makedirs(work, exist_ok=True)
+    laidout.project(work, "slides")
     for name, text in (decks_given or {"Flat Deck.md": FLAT, "sectioned.md": SECTIONED,
                                        "untitled.md": UNTITLED}).items():
-        write(os.path.join(work, name), text)
-    write(os.path.join(work, "README.md"), "# About these slides\n\nNot a deck.\n")
-    png(os.path.join(work, "img", "chart.png"), 40, 90, 200)
+        write(place(work, name), text)
+    write(place(work, "README.md"), "# About these slides\n\nNot a deck.\n")
+    png(place(work, "img", "chart.png"), 40, 90, 200)
     if project:
-        write(os.path.join(work, "project.yaml"),
+        write(place(work, "project.yaml"),
               "project:\n  identifier: org.example.decks\n  title: The Decks\n"
               "  language: en-US\n  kind: slides\n")
     if config is not None:
-        write(os.path.join(work, "conversion.yaml"), config)
+        write(place(work, "conversion.yaml"), config)
     return work
 
 
@@ -942,7 +979,7 @@ def case_pieces(work):
     if pikepdf is None:
         print("  skip  pikepdf not found; what tidy does to a deck's PDF isn't checked")
     else:
-        bins, only = os.path.join(work, "bins.pdf"), os.path.join(work, "only-bins.pdf")
+        bins, only = place(work, "bins.pdf"), place(work, "only-bins.pdf")
         os.makedirs(work, exist_ok=True)
         # Nothing of pikepdf's on the terminal: its warning on saving a
         # widget no form reaches came out in the middle of the suite's own.
@@ -1074,25 +1111,25 @@ targets:
 
 def case_folder(work):
     work = folder(work, PAGES)
-    shutil.copy(os.path.join(work, "README.md"), os.path.join(work, "notes.adoc"))
-    write(os.path.join(work, "image-alt.csv"), "Image,Alt\nimg/chart,A line rising to the right\n")
+    shutil.copy(place(work, "README.md"), place(work, "notes.adoc"))
+    write(place(work, "image-alt.csv"), "Image,Alt\nimg/chart,A line rising to the right\n")
     result = convert(work, "--quick")
     out = result.stderr
-    page = lambda name: read(os.path.join(work, "pages", name))  # noqa: E731
+    page = lambda name: read(place(work, "pages", name))  # noqa: E731
     flat = page("Flat-Deck.html")
     sectioned = page("sectioned.html")
-    md = read(os.path.join(work, "md", "Flat-Deck.md"))
-    copy = read(os.path.join(work, "copy", "Flat Deck.md"))
+    md = read(place(work, "md", "Flat-Deck.md"))
+    copy = read(place(work, "copy", "Flat Deck.md"))
     return [
         ("a folder project.kind says is slides makes each Markdown file a deck",
          lambda: result.returncode == 0
          and "Slides: 3 deck(s) written in Markdown (project.kind)" in out),
         ("a README isn't a deck, and a file of another kind is left out and named",
-         lambda: not os.path.exists(os.path.join(work, "pages", "README.html"))
+         lambda: not os.path.exists(place(work, "pages", "README.html"))
          and "left out (notes.adoc)" in out),
         ("an EPUB isn't written for decks, and the run says so",
          lambda: "target book is format epub3, which isn't written for decks" in out
-         and not os.path.exists(os.path.join(work, "book"))),
+         and not os.path.exists(place(work, "book"))),
         ("the page's H1 is the deck's title, a list of one in its YAML, and its slides H2s",
          lambda: headings(flat)[:3] == [(1, "Demand: A Short Deck"), (2, "Value Is Subjective"),
                                         (2, "Specialization => Growth")]
@@ -1131,7 +1168,8 @@ def case_folder(work):
         ("the source copy holds the alt text decided",
          lambda: "A line rising to the right" in copy and "::: notes" in copy),
         ("slides aren't packaged", lambda: "Slides aren't packaged yet" in out
-         and not os.path.exists(os.path.join(work, "imsmanifest.xml"))),
+         and not os.path.exists(
+             laidout.projectpaths.of(work).package_file("imsmanifest.xml"))),
     ]
 
 
@@ -1152,10 +1190,14 @@ def case_shared_alt(work):
                         + ("" if unready else "  show:\n    format: revealjs\n"),
                   decks_given=decks_given)
     for name, color in (("a", 10), ("b", 20), ("c", 30), ("d", 40)):
-        png(os.path.join(work, "img", name + ".png"), color, color, color)
+        png(place(work, "img", name + ".png"), color, color, color)
     result = convert(work, "--quick")
-    rows = sorted((r[0], r[2], r[3]) for r in rows_of(os.path.join(work, "image-alt-missing.csv")))
-    found = sorted((r[0], r[2].split(":")[0]) for r in rows_of(os.path.join(work, "output-check.csv"))
+    rows = sorted((r[0], r[2], r[3]) for r in rows_of(place(work, "image-alt-missing.csv")))
+
+    def written(*names):
+        # A target's file, as a report names it: from the project's folder.
+        return os.path.relpath(place(work, *names), work).replace(os.sep, "/")
+    found = sorted((r[0], r[2].split(":")[0]) for r in rows_of(place(work, "output-check.csv"))
                    if r[1] == "image-alt-shared")
     return [
         ("a deck's pictures sharing alt text each have a row, and two decks' don't",
@@ -1165,9 +1207,10 @@ def case_shared_alt(work):
         ("the output check names them on the deck's pieces" + ("" if unready else
                                                                " and in its presentation")
          + ", and not the other decks'",
-         lambda: found == [("pages/one--part-a.html", "img/a.png"),
-                           ("pages/one--part-b.html", "img/b.png")]
-         + ([] if unready else [("show/one.html", "img/a.png"), ("show/one.html", "img/b.png")])),
+         lambda: found == [(written("pages", "one--part-a.html"), "img/a.png"),
+                           (written("pages", "one--part-b.html"), "img/b.png")]
+         + ([] if unready else [(written("show", "one.html"), "img/a.png"),
+                                (written("show", "one.html"), "img/b.png")])),
     ]
 
 
@@ -1196,7 +1239,7 @@ def case_title_formula(work):
     wanted = "The x\u00b2 law"
 
     def title(folder_name):
-        path = os.path.join(work, folder_name, "law.html")
+        path = place(work, folder_name, "law.html")
         if not os.path.exists(path):
             return None
         with open(path, encoding="utf-8") as fh:
@@ -1204,17 +1247,17 @@ def case_title_formula(work):
         return html.unescape(found.group(1)) if found else None
 
     def slide_title():
-        with open(os.path.join(work, "show", "law.html"), encoding="utf-8") as fh:
+        with open(place(work, "show", "law.html"), encoding="utf-8") as fh:
             return re.search(r'<h1 class="title">(.*?)</h1>', fh.read(), re.S).group(1)
 
     def core_titles():
         import zipfile
-        with zipfile.ZipFile(os.path.join(work, "slides", "law.pptx")) as z:
+        with zipfile.ZipFile(place(work, "slides", "law.pptx")) as z:
             core = z.read("docProps/core.xml").decode("utf-8")
         return [html.unescape(t) for t in re.findall(r"<dc:title>(.*?)</dc:title>", core)]
 
     def pdf_titles():
-        path = os.path.join(work, "print", "law.pdf")
+        path = place(work, "print", "law.pdf")
         with pikepdf.open(path) as pdf:
             return document_info(path, "/Title"), pdf.open_metadata().get("dc:title")
     checks = [("the deck is converted", lambda: result.returncode == 0),
@@ -1262,13 +1305,13 @@ def case_alt_formula(work):
                         + ("" if old_pptx else "  slides:\n    format: pptx\n")
                         + ("" if no_pdf else "  print:\n    format: pdf\n"),
                   decks_given=decks_given)
-    png(os.path.join(work, "square.png"), 90, 90, 200)
+    png(place(work, "square.png"), 90, 90, 200)
     result = convert(work, "--quick")
     wanted = "A square of side x²"
     alts = [wanted, "A circle", "A square of side y²"]
 
     def html_alt(folder_name):
-        path = os.path.join(work, folder_name, "shapes.html")
+        path = place(work, folder_name, "shapes.html")
         markup = read(path) if os.path.exists(path) else ""
         body = markup[markup.find("<body"):]
         alts = [html.unescape(a) for a in re.findall(r'<img\b[^>]*?\balt="([^"]*)"', body)]
@@ -1277,7 +1320,7 @@ def case_alt_formula(work):
                                             r'<math\b', words))) for attrs, words in captions]
 
     def picture(title):
-        slide = slide_titled(pptx_deck(os.path.join(work, "slides", "shapes.pptx")), title)
+        slide = slide_titled(pptx_deck(place(work, "slides", "shapes.pptx")), title)
         shapes = [s for s in slide.shapes if not s.is_title] if slide else []
         return ([s.descr for s in shapes if s.kind == "pic"],
                 [s.decorative for s in shapes if s.kind != "pic"])
@@ -1297,7 +1340,7 @@ def case_alt_formula(work):
                        and picture("A pair (2)") == ([alts[2]], [True])))
     if not no_pdf:
         checks.append(("and its PDF's figure's alt text",
-                       lambda: figures(os.path.join(work, "print", "shapes.pdf")) == alts))
+                       lambda: figures(place(work, "print", "shapes.pdf")) == alts))
     return checks
 
 
@@ -1316,7 +1359,7 @@ def case_noted_caption(work):
         return []
     work = folder(work, PPTX, decks_given={"noted.md": NOTED})
     result = convert(work, "--quick")
-    path = os.path.join(work, "slides", "noted.pptx")
+    path = place(work, "slides", "noted.pptx")
     deck = pptx_deck(path) if os.path.exists(path) else None
 
     def caption(title):
@@ -1358,7 +1401,7 @@ def case_linked_caption(work):
         return []
     work = folder(work, PPTX, decks_given={"linked.md": LINKED})
     result = convert(work, "--quick")
-    path = os.path.join(work, "slides", "linked.pptx")
+    path = place(work, "slides", "linked.pptx")
     deck = pptx_deck(path) if os.path.exists(path) else None
 
     def caption(title):
@@ -1402,7 +1445,7 @@ def case_titles_list(work):
         return []
     work = folder(work, PPTX, decks_given={"titled.md": TITLED})
     result = convert(work, "--quick")
-    path = os.path.join(work, "slides", "titled.pptx")
+    path = place(work, "slides", "titled.pptx")
     parts = pptx_parts(path) if os.path.exists(path) else {}
     app = parts.get("docProps/app.xml", "")
     return [
@@ -1429,15 +1472,15 @@ def case_lowercase_names(work):
                         "    format: html\n" + ("" if unready else "  show:\n    format: revealjs\n"),
                   decks_given={"one.md": "---\ntitle: One\n---\n\n# First\n\n"
                                          "![A rising line](Img/Rising.PNG)\n"})
-    png(os.path.join(work, "Img", "Rising.PNG"), 10, 20, 30)
+    png(place(work, "Img", "Rising.PNG"), 10, 20, 30)
     result = convert(work, "--quick")
-    shown = {name: read(os.path.join(work, name, "one.html"))
-             if os.path.exists(os.path.join(work, name, "one.html")) else ""
+    shown = {name: read(place(work, name, "one.html"))
+             if os.path.exists(place(work, name, "one.html")) else ""
              for name in ("pages",) + (() if unready else ("show",))}
     return [
         ("each copies the picture under its name in lowercase, and names it so",
          lambda: result.returncode == 0
-         and all(os.path.isfile(os.path.join(work, name, "img", "rising.png"))
+         and all(os.path.isfile(place(work, name, "img", "rising.png"))
                  and 'src="img/rising.png"' in shown[name] for name in shown)),
     ]
 
@@ -1460,8 +1503,8 @@ def case_display_style(work):
                                          "$\\displaystyle \\sum_{i=1}^{n} i$, and one in "
                                          "a line, $\\sum_{j=1}^{n} j$.\n"})
     result = convert(work, "--quick")
-    shown = {name: read(os.path.join(work, name, "one.html"))
-             if os.path.exists(os.path.join(work, name, "one.html")) else ""
+    shown = {name: read(place(work, name, "one.html"))
+             if os.path.exists(place(work, name, "one.html")) else ""
              for name in ("pages",) + (() if unready else ("show",))}
     return [
         (("on the deck's page" if unready else "in the presentation, as on the deck's page")
@@ -1514,7 +1557,7 @@ def case_downsample(work):
     raw = b"".join(b"\x00" + noise.randbytes(400 * 3) for _ in range(200))
     original = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 400, 200, 8, 2, 0, 0, 0))
                 + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
-    with open(os.path.join(work, "img", "wide.png"), "wb") as fh:
+    with open(place(work, "img", "wide.png"), "wb") as fh:
         fh.write(original)
     result = convert(work, "--quick")
 
@@ -1522,14 +1565,14 @@ def case_downsample(work):
         return struct.unpack(">II", data[16:24]) if data[:8] == b"\x89PNG\r\n\x1a\n" else None
 
     def file_size(*parts):
-        path = os.path.join(work, *parts)
+        path = place(work, *parts)
         if not os.path.exists(path):
             return None
         with open(path, "rb") as fh:
             return size(fh.read(64))
 
     def pptx_sizes():
-        path = os.path.join(work, "slides", "one.pptx")
+        path = place(work, "slides", "one.pptx")
         if not os.path.exists(path):
             return []
         with zipfile.ZipFile(path) as z:
@@ -1543,7 +1586,7 @@ def case_downsample(work):
             # reads as what it names and pypdf 4, Ubuntu 24.04's, doesn't.
             return entry.get_object() if hasattr(entry, "get_object") else entry
         found = []
-        for page in pypdf.PdfReader(os.path.join(work, "print", "one.pdf")).pages:
+        for page in pypdf.PdfReader(place(work, "print", "one.pdf")).pages:
             resources = resolved(page.get("/Resources")) or {}
             for image in (resolved(resources.get("/XObject")) or {}).values():
                 image = image.get_object()
@@ -1553,7 +1596,7 @@ def case_downsample(work):
     checks = [
         ("the deck converts, and its own picture stays as it is",
          lambda: result.returncode == 0
-         and open(os.path.join(work, "img", "wide.png"), "rb").read() == original),
+         and open(place(work, "img", "wide.png"), "rb").read() == original),
     ]
     if not old_reveal:
         checks.append(("its presentation carries the picture scaled down to twice the width "
@@ -1598,7 +1641,7 @@ def case_turned_pictures(work):
                                          "{width=100px}\n"})
     exif = Image.Exif()
     exif[0x0112] = 6
-    phone = os.path.join(work, "img", "phone.jpg")
+    phone = place(work, "img", "phone.jpg")
     Image.new("RGB", (600, 400), (0, 120, 200)).save(phone, quality=90, exif=exif.tobytes())
     with open(phone, "rb") as fh:
         original = fh.read()
@@ -1607,7 +1650,7 @@ def case_turned_pictures(work):
     def pptx_pictures(name):
         """Each JPEG in a PowerPoint file: its size and its orientation;
         and its first picture's box, (width, height) in EMU."""
-        path = os.path.join(work, name, "one.pptx")
+        path = place(work, name, "one.pptx")
         if not os.path.exists(path):
             return [], None
         found, box = [], None
@@ -1629,7 +1672,7 @@ def case_turned_pictures(work):
         def resolved(entry):
             return entry.get_object() if hasattr(entry, "get_object") else entry
         found = []
-        path = os.path.join(work, "print", "one.pdf")
+        path = place(work, "print", "one.pdf")
         if not os.path.exists(path):
             return found
         for page in pypdf.PdfReader(path).pages:
@@ -1664,21 +1707,21 @@ def case_implied(work):
     result = convert(work, "--quick")
     plain = os.path.join(os.path.dirname(work), "plain")
     os.makedirs(plain)
-    write(os.path.join(plain, "one.md"), "---\ntitle:\n- One Page\nlinkcolor: blue\n---\n\n"
+    write(place(plain, "one.md"), "---\ntitle:\n- One Page\nlinkcolor: blue\n---\n\n"
           "# Body\n\nA [link](https://example.org/).\n")
-    write(os.path.join(plain, "project.yaml"),
+    write(place(plain, "project.yaml"),
           "project:\n  identifier: org.example.book\n  title: A Book\n")
     book = convert(plain, "--quick")
     return [
         ("with no target declared, a folder of Markdown decks gets html",
          lambda: result.returncode == 0
-         and os.path.exists(os.path.join(work, "html", "one.html"))),
+         and os.path.exists(place(work, "html", "one.html"))),
         ("a folder of Markdown that says nothing is a book, its page titled by a list of one",
          lambda: book.returncode == 0 and "Slides:" not in book.stderr
-         and "<title>One Page</title>" in read(os.path.join(plain, "html", "one.html"))),
+         and "<title>One Page</title>" in read(place(plain, "html", "one.html"))),
         ("a link color gives dark mode the text's color, which CSS takes, not inherit",
-         lambda: "light-dark(blue, currentcolor)" in read(os.path.join(plain, "html", "one.html"))
-         and "inherit)" not in read(os.path.join(plain, "html", "one.html"))),
+         lambda: "light-dark(blue, currentcolor)" in read(place(plain, "html", "one.html"))
+         and "inherit)" not in read(place(plain, "html", "one.html"))),
     ]
 
 
@@ -1687,10 +1730,10 @@ def case_levels(work):
                   decks_given={"agenda.md": AGENDA, "subsections.md": SUBSECTIONS,
                                "nested.md": NESTED, "cue.md": CUE})
     result = convert(work, "--quick")
-    agenda = read(os.path.join(work, "pages", "agenda.html"))
-    subsections = read(os.path.join(work, "pages", "subsections.html"))
-    nested = read(os.path.join(work, "pages", "nested.html"))
-    check = rows_of(os.path.join(work, "output-check.csv"))
+    agenda = read(place(work, "pages", "agenda.html"))
+    subsections = read(place(work, "pages", "subsections.html"))
+    nested = read(place(work, "pages", "nested.html"))
+    check = rows_of(place(work, "output-check.csv"))
     return [
         ("a slide before the first section is an H2, as a section is, and one in it an H3",
          lambda: result.returncode == 0 and [n for n, _ in headings(agenda)] == [1, 2, 2, 3, 4, 2, 3]
@@ -1761,13 +1804,13 @@ def case_split(work):
     work = folder(work, SPLIT, decks_given={"sectioned.md": SECTIONED, "langs.md": LANGS,
                                             "divided.md": DIVIDED})
     result = convert(work, "--quick")
-    split = os.path.join(work, "split")
+    split = place(work, "split")
 
     def page(name):
-        path = os.path.join(split, name + ".html")
+        path = place(split, name + ".html")
         return html.unescape(read(path)) if os.path.exists(path) else ""
     piece = page("sectioned--a-footnote")
-    bare = read(os.path.join(work, "bare", "sectioned.html"))
+    bare = read(place(work, "bare", "sectioned.html"))
     return [
         ("pages.split_level cuts a deck into a page per slide, its sections groups",
          lambda: result.returncode == 0 and sorted(
@@ -1808,7 +1851,7 @@ def case_split(work):
         ("notes: omitted leaves them off", lambda: "Notes for part two" not in bare
          and "<details" not in bare),
         ("the split's report stays, though a target that doesn't split runs after it",
-         lambda: os.path.exists(os.path.join(work, "page-names-new.csv"))),
+         lambda: os.path.exists(place(work, "page-names-new.csv"))),
     ]
 
 
@@ -2354,7 +2397,7 @@ def piece_levels(pages, stem):
     pieces = []
     for name in os.listdir(pages):
         if name.endswith(".html"):
-            page = read(os.path.join(pages, name))
+            page = read(place(pages, name))
             part = re.search(r'<meta name="page-part" content="(\d+)/', page)
             if f'<meta name="source-page" content="{stem}"' in page and part:
                 pieces.append((int(part.group(1)), page))
@@ -2447,13 +2490,13 @@ def case_languages(work):
     result = convert(work, "--quick")
 
     def root(*parts):
-        path = os.path.join(work, *parts)
+        path = place(work, *parts)
         found = re.search(r'<html\b[^>]*\slang="([^"]*)"', read(path)) \
             if os.path.isfile(path) else None
         return found.group(1) if found else None
 
     def runs(name):
-        path = os.path.join(work, "slides", name + ".pptx")
+        path = place(work, "slides", name + ".pptx")
         if not os.path.isfile(path):
             return set()
         with zipfile.ZipFile(path) as z:
@@ -2462,7 +2505,7 @@ def case_languages(work):
                                            z.read(part).decode("utf-8"))}
 
     def catalog(name):
-        path = os.path.join(work, "pdf", name + ".pdf")
+        path = place(work, "pdf", name + ".pdf")
         if not os.path.isfile(path):
             return None
         with pikepdf.open(path) as pdf:
@@ -2484,7 +2527,7 @@ def case_languages(work):
          lambda: re.search(r"1 page is in a different language than the book \(en-US\): "
                            r"allemand in de \(its file\)\. Every output marks it in that "
                            r"language\.$", result.stderr, re.M)
-         and rows_of(os.path.join(work, "languages-new.csv"))[0][:2] == ["allemand", "de"]),
+         and rows_of(place(work, "languages-new.csv"))[0][:2] == ["allemand", "de"]),
     ]
     if ready:
         print(f"  skip  {ready}; a deck's PDF's language isn't checked")
@@ -2525,27 +2568,27 @@ def case_pdf(work):
         "term-notes.md": TERM_NOTES,
         "sectioned.md": SECTIONED.replace("Right.", "![A dark bar](<img/a bar.svg>)" if svg
                                           else "Right.")})
-    write(os.path.join(work, "img", "a bar.svg"), SVG)
+    write(place(work, "img", "a bar.svg"), SVG)
     if not svg:
         print("  skip  rsvg-convert not found; a deck's SVG picture isn't checked")
     result = convert(work)
     out = result.stderr
-    flat = os.path.join(work, "pdf", "Flat-Deck.pdf")
-    sectioned = os.path.join(work, "pdf", "sectioned.pdf")
-    agenda = os.path.join(work, "pdf", "agenda.pdf")
-    odd = os.path.join(work, "pdf", "odd.pdf")
-    nested = os.path.join(work, "pdf", "nested.pdf")
-    more = os.path.join(work, "pdf", "more.pdf")
-    subsections = os.path.join(work, "pdf", "subsections.pdf")
-    headings = os.path.join(work, "pdf", "headings.pdf")
-    langs = os.path.join(work, "pdf", "langs.pdf")
-    code_notes = os.path.join(work, "pdf", "code-notes.pdf")
-    shaded_notes = os.path.join(work, "pdf", "shaded-notes.pdf")
-    item_code = os.path.join(work, "pdf", "item-code.pdf")
-    term_notes = os.path.join(work, "pdf", "term-notes.pdf")
-    built = lambda: [os.path.join(work, "pdf", name)  # noqa: E731
-                     for name in sorted(os.listdir(os.path.join(work, "pdf")))]
-    check = rows_of(os.path.join(work, "output-check.csv"))
+    flat = place(work, "pdf", "Flat-Deck.pdf")
+    sectioned = place(work, "pdf", "sectioned.pdf")
+    agenda = place(work, "pdf", "agenda.pdf")
+    odd = place(work, "pdf", "odd.pdf")
+    nested = place(work, "pdf", "nested.pdf")
+    more = place(work, "pdf", "more.pdf")
+    subsections = place(work, "pdf", "subsections.pdf")
+    headings = place(work, "pdf", "headings.pdf")
+    langs = place(work, "pdf", "langs.pdf")
+    code_notes = place(work, "pdf", "code-notes.pdf")
+    shaded_notes = place(work, "pdf", "shaded-notes.pdf")
+    item_code = place(work, "pdf", "item-code.pdf")
+    term_notes = place(work, "pdf", "term-notes.pdf")
+    built = lambda: [place(work, "pdf", name)  # noqa: E731
+                     for name in sorted(os.listdir(place(work, "pdf")))]
+    check = rows_of(place(work, "output-check.csv"))
     ran = verapdf()
     if not ran:
         print("  skip  veraPDF not found (set VERAPDF); the PDFs' claims aren't judged")
@@ -2559,7 +2602,7 @@ def case_pdf(work):
     levels = lambda path: [h[0] for h in heading_elements(path)]  # noqa: E731
     checks = [
         ("a PDF of each deck, the whole deck however its pages are cut",
-         lambda: result.returncode == 0 and sorted(os.listdir(os.path.join(work, "pdf"))) == [
+         lambda: result.returncode == 0 and sorted(os.listdir(place(work, "pdf"))) == [
              "Flat-Deck.pdf", "agenda.pdf", "code-notes.pdf", "headings.pdf", "item-code.pdf",
              "langs.pdf", "more.pdf", "nested.pdf", "odd.pdf", "sectioned.pdf",
              "shaded-notes.pdf", "subsections.pdf", "term-notes.pdf", "untitled.pdf"]
@@ -2622,16 +2665,16 @@ def case_pdf(work):
          and not [r for r in check if r[1] == "link-to-missing-fragment"]),
         ("the PDF's headings are at the levels the deck's pages give them, split a page a"
          " slide, and no page has a heading for a block with no title, as no PDF has",
-         lambda: piece_levels(os.path.join(work, "pages"), "headings") == levels(headings)
+         lambda: piece_levels(place(work, "pages"), "headings") == levels(headings)
          and not [r for r in check if r[1] == "empty-heading"]),
         # The split found a deck's sections and slides only outside a div, and
         # a heading it cut lost its footnote, its title being its words alone.
         ("and a section in a passage in another language is cut there, its pages' levels"
          " the PDF's, and a section's footnote is on its page, as on the whole deck's",
-         lambda: piece_levels(os.path.join(work, "pages"), "langs") == levels(langs)
-         and os.path.exists(os.path.join(work, "pages", "langs--teil-zwei.html"))
+         lambda: piece_levels(place(work, "pages"), "langs") == levels(langs)
+         and os.path.exists(place(work, "pages", "langs--teil-zwei.html"))
          and "Marginal revenue and marginal cost." in read(
-             os.path.join(work, "pages", "agenda--profit-mr-mc.html"))),
+             place(work, "pages", "agenda--profit-mr-mc.html"))),
         ("a block's title is a heading one below its slide's",
          lambda: heading_elements(agenda)[3][0] == 3),
         ("every footnote's mark is a link to its note, the two tied by a /Ref each way,"
@@ -2745,9 +2788,9 @@ def case_pdf(work):
          and all(h[1] and not h[2] for h in heading_elements(sectioned))
          and sectioned_text.count("Part One") == 1),
         ("a deck with no title has no title slide, and its file's name for a title",
-         lambda: pikepdf.open(os.path.join(work, "pdf", "untitled.pdf")).open_metadata()
+         lambda: pikepdf.open(place(work, "pdf", "untitled.pdf")).open_metadata()
          .get("dc:title") == "untitled"
-         and text_of(os.path.join(work, "pdf", "untitled.pdf")).startswith("Only Slide")),
+         and text_of(place(work, "pdf", "untitled.pdf")).startswith("Only Slide")),
         ("a deck with no date has none on its title slide, not the day it was built",
          lambda: not re.search(r"\d", pypdf.PdfReader(sectioned).pages[0].extract_text())),
         ("a formula's MathML is in the structure", lambda: math_elements(flat) >= 1),
@@ -2911,31 +2954,31 @@ def case_pdf_settings(work):
     if problem:
         print(f"  skip  {problem}; a deck's PDF settings aren't checked")
         return []
-    plain = folder(os.path.join(work, "plain"), "targets:\n  pdf:\n    format: pdf\n"
+    plain = folder(place(work, "plain"), "targets:\n  pdf:\n    format: pdf\n"
                    "    picture_paths: \"off\"\n    pdf:\n      repair_captions: false\n",
                    decks_given={"captioned.md": CAPTIONED, "pictured.md": PICTURED})
     unrepaired = convert(plain)
-    captioned = os.path.join(plain, "pdf", "captioned.pdf")
-    pictured = os.path.join(plain, "pdf", "pictured.pdf")
-    plain_check = rows_of(os.path.join(plain, "output-check.csv"))
-    work = folder(os.path.join(work, "ua1"), "defaults:\n  captions:\n"
+    captioned = place(plain, "pdf", "captioned.pdf")
+    pictured = place(plain, "pdf", "pictured.pdf")
+    plain_check = rows_of(place(plain, "output-check.csv"))
+    work = folder(place(work, "ua1"), "defaults:\n  captions:\n"
                   "    figure_prefixes: [Figure, Exhibit]\n"
                   "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
                   "      standard: [ua-1]\n    slides:\n      aspect_ratio: \"5:4\"\n",
                   decks_given={"sectioned.md": SECTIONED, "agenda.md": AGENDA,
                                "labels.md": LABELS})
     result = convert(work)
-    built = os.path.join(work, "pdf", "sectioned.pdf")
-    agenda = os.path.join(work, "pdf", "agenda.pdf")
-    labels = os.path.join(work, "pdf", "labels.pdf")
+    built = place(work, "pdf", "sectioned.pdf")
+    agenda = place(work, "pdf", "agenda.pdf")
+    labels = place(work, "pdf", "labels.pdf")
     # Its words with no spaces, which pypdf before 5.1 infers where the
     # font changes (holds).
     labels_text = re.sub(r"\s+", "", text_of(labels)) if os.path.exists(labels) else ""
-    check = rows_of(os.path.join(work, "output-check.csv"))
+    check = rows_of(place(work, "output-check.csv"))
     ran = verapdf()
     if not ran:
         print("  skip  veraPDF not found (set VERAPDF); the PDFs' claims aren't judged")
-    write(os.path.join(work, "conversion.yaml"),
+    write(place(work, "conversion.yaml"),
           "targets:\n  pdf:\n    format: pdf\n    slides:\n      aspect_ratio: wide\n")
     wrong = convert(work)
     checks = [
@@ -3010,24 +3053,24 @@ def case_fallbacks(work):
     if problem:
         print(f"  skip  {problem}; the template's fallbacks aren't checked")
         return []
-    copy = os.path.join(work, "copy")
-    shutil.copytree(BIN, os.path.join(copy, "bin"))
-    shutil.copytree(os.path.join(ROOT, "lib"), os.path.join(copy, "lib"))
-    template = os.path.join(copy, "bin", "ltx-talk.latex")
+    copy = place(work, "copy")
+    shutil.copytree(BIN, place(copy, "bin"))
+    shutil.copytree(os.path.join(ROOT, "lib"), place(copy, "lib"))
+    template = place(copy, "bin", "ltx-talk.latex")
     with open(template, encoding="utf-8") as fh:
         text = fh.read()
     found = [text.count(old) for old, _ in FALLBACKS]
     for old, new in FALLBACKS:
         text = text.replace(old, new)
     write(template, text)
-    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+    decks_dir = folder(place(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
                        decks_given={"agenda.md": FALLBACK})
-    result = subprocess.run([sys.executable, os.path.join(copy, "bin", "convert.py"), "--quiet"],
+    result = subprocess.run([sys.executable, place(copy, "bin", "convert.py"), "--quiet"],
                             cwd=decks_dir, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL)
     out = result.stderr
-    agenda = os.path.join(decks_dir, "pdf", "agenda.pdf")
-    check = rows_of(os.path.join(decks_dir, "output-check.csv"))
+    agenda = place(decks_dir, "pdf", "agenda.pdf")
+    check = rows_of(place(decks_dir, "output-check.csv"))
     ran = verapdf()
     levels = lambda path: [h[0] for h in heading_elements(path)]  # noqa: E731
     checks = [
@@ -3059,7 +3102,7 @@ def case_fallbacks(work):
 def case_no_latex(work):
     """A deck's PDF with no LuaLaTeX on the path: the run stops, saying so."""
     tools = tools_without(work)
-    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+    decks_dir = folder(place(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
                        decks_given={"one.md": UNTITLED})
     result = convert(decks_dir, "--quick", env=dict(os.environ, PATH=tools))
     return [
@@ -3074,15 +3117,15 @@ def tools_without(work, keep=("pandoc", "file")):
     run needs before LaTeX, and nothing else. Python is a script that runs
     this one: a venv's python run through a link starts without the venv's
     packages."""
-    tools = os.path.join(work, "bin")
+    tools = place(work, "bin")
     os.makedirs(tools)
     for program in keep:
         found = shutil.which(program)
         if found:
-            os.symlink(found, os.path.join(tools, program))
-    with open(os.path.join(tools, "python3"), "w") as fh:
+            os.symlink(found, place(tools, program))
+    with open(place(tools, "python3"), "w") as fh:
         fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
-    os.chmod(os.path.join(tools, "python3"), 0o755)
+    os.chmod(place(tools, "python3"), 0o755)
     return tools
 
 
@@ -3090,9 +3133,9 @@ def case_svg(work):
     """An SVG a deck's PDF can't show: without rsvg-convert the run stops
     before LaTeX, and one rsvg-convert can't read stops its deck's PDF."""
     broken = "---\ntitle: Broken\n---\n\n# A Picture\n\n![A bar](img/broken.svg)\n"
-    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+    decks_dir = folder(place(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
                        decks_given={"broken.md": broken})
-    write(os.path.join(decks_dir, "img", "broken.svg"), "<svg xmlns='http://www.w3.org/2000/svg'")
+    write(place(decks_dir, "img", "broken.svg"), "<svg xmlns='http://www.w3.org/2000/svg'")
     without = convert(decks_dir, "--quick", env=dict(os.environ, PATH=tools_without(work)))
     checks = [
         ("without rsvg-convert, a deck's SVG stops the run before LaTeX, saying what it needs",
@@ -3108,9 +3151,9 @@ def case_svg(work):
              and "broken's PDF wasn't built: LaTeX can't show an SVG image, and img/broken.svg "
                  "couldn't be made a PDF (rsvg-convert:" in broke.stderr))
         # Before LaTeX, which would only stop on \includesvg.
-        intermediate = os.path.join(decks_dir, "broken.filtered.json")
+        intermediate = laidout.projectpaths.of(decks_dir).page("broken")
         direct = decks.build_pdf(
-            intermediate, decks_dir, os.path.join(work, "broken.pdf"),
+            intermediate, decks_dir, place(work, "broken.pdf"),
             template=os.path.join(BIN, "ltx-talk.latex"),
             filters=[os.path.join(BIN, name) for name in
                      ("target-blocks.lua", "deck-pdf.lua", "pdf-target.lua")],
@@ -3132,11 +3175,11 @@ def case_pdf_steady(work):
         return []
     work = folder(work, "targets:\n  pdf:\n    format: pdf\n",
                   decks_given={"steady.md": "---\ntitle: Steady\n---\n\n# A Slide\n\nText.\n"})
-    pdf = os.path.join(work, "pdf", "steady.pdf")
+    pdf = place(work, "pdf", "steady.pdf")
     env = dict(os.environ, SOURCE_DATE_EPOCH="1700000000")
     built = []
     for _ in range(2):
-        shutil.rmtree(os.path.join(work, "pdf"), ignore_errors=True)
+        shutil.rmtree(place(work, "pdf"), ignore_errors=True)
         done = convert(work, "--quick", env=env)
         with open(pdf, "rb") if os.path.exists(pdf) else open(os.devnull, "rb") as fh:
             built.append((done.returncode, fh.read()))
@@ -3150,21 +3193,21 @@ def case_timeout(work):
     """LaTeX that doesn't finish is stopped: build_pdf with an engine that
     only sleeps, and a limit of a second."""
     os.makedirs(work)
-    source, intermediate = os.path.join(work, "deck.md"), os.path.join(work, "deck.json")
+    source, intermediate = place(work, "deck.md"), place(work, "deck.json")
     write(source, "# Slide\n\nText.\n")
     subprocess.run(["pandoc", source, "-t", "json", "-o", intermediate], check=True)
     with open(intermediate, encoding="utf-8") as fh:
         doc = json.load(fh)
     doc["meta"][decks.LEVEL_KEY] = {"t": "MetaString", "c": "1"}
     write(intermediate, json.dumps(doc))
-    engine = os.path.join(work, "sleeper")
+    engine = place(work, "sleeper")
     write(engine, "#!/bin/sh\nexec sleep 30\n")
     os.chmod(engine, 0o755)
     saved = decks.latexbuild.ENGINE, decks.LATEX_TIMEOUT
     decks.latexbuild.ENGINE, decks.LATEX_TIMEOUT = engine, 1
     try:
         result = decks.build_pdf(
-            intermediate, work, os.path.join(work, "deck.pdf"),
+            intermediate, work, place(work, "deck.pdf"),
             template=os.path.join(BIN, "ltx-talk.latex"),
             filters=[os.path.join(BIN, name) for name in
                      ("target-blocks.lua", "pdf-target.lua", "deck-pdf.lua")],
@@ -3174,7 +3217,7 @@ def case_timeout(work):
     return [
         ("LaTeX that doesn't finish is stopped, and the result says so",
          lambda: result["timeout"] and not result["ok"]
-         and not os.path.exists(os.path.join(work, "deck.pdf"))),
+         and not os.path.exists(place(work, "deck.pdf"))),
     ]
 
 
@@ -3186,14 +3229,14 @@ def case_unsettled(work):
     if not real or pdf_ready():
         print(f"  skip  {pdf_ready() or 'lualatex not found'}; LaTeX's runs aren't checked")
         return []
-    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+    decks_dir = folder(place(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
                        decks_given={"moving.md": "---\ntitle: Moving\n---\n\n# Slide\n\nText.\n"})
-    tools, runs = os.path.join(work, "tools"), os.path.join(work, "runs.log")
-    write(os.path.join(tools, "lualatex"),
+    tools, runs = place(work, "tools"), place(work, "runs.log")
+    write(place(tools, "lualatex"),
           f"#!/bin/sh\n{shlex.quote(real)} \"$@\"\nstatus=$?\n"
           "if [ -f deck.aux ]; then echo \"% run $(date +%s%N)\" >> deck.aux; "
           f"echo run >> {shlex.quote(runs)}; fi\nexit $status\n")
-    os.chmod(os.path.join(tools, "lualatex"), 0o755)
+    os.chmod(place(tools, "lualatex"), 0o755)
     result = convert(decks_dir, "--quick",
                      env=dict(os.environ, PATH=tools + os.pathsep + os.environ["PATH"]))
     return [
@@ -3202,7 +3245,7 @@ def case_unsettled(work):
          lambda: result.returncode == 0 and read(runs).count("run") == 4
          and "WARNING: in 1 deck PDF(s) (moving), LaTeX's cross-references were still "
              "changing after 4 runs of LuaLaTeX" in result.stderr
-         and os.path.exists(os.path.join(decks_dir, "pdf", "moving.pdf"))),
+         and os.path.exists(place(decks_dir, "pdf", "moving.pdf"))),
     ]
 
 
@@ -3252,22 +3295,22 @@ def case_wide_slide(work):
     if not real or pdf_ready():
         print(f"  skip  {pdf_ready() or 'lualatex not found'}; a slide too wide isn't checked")
         return []
-    decks_dir = folder(os.path.join(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
+    decks_dir = folder(place(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
                        decks_given={"wide.md": WIDE_SLIDES,
                                     "plain.md": "---\ntitle: Plain\n---\n\n# Slide\n\nText.\n",
                                     "sections.md": SECTION_CODE % ("x" * 100),
                                     "sectionsshort.md": SECTION_CODE % "x"})
-    tools, runs = os.path.join(work, "tools"), os.path.join(work, "runs.log")
-    write(os.path.join(tools, "lualatex"),
+    tools, runs = place(work, "tools"), place(work, "runs.log")
+    write(place(tools, "lualatex"),
           f"#!/bin/sh\npwd >> {shlex.quote(runs)}\nexec {shlex.quote(real)} \"$@\"\n")
-    os.chmod(os.path.join(tools, "lualatex"), 0o755)
+    os.chmod(place(tools, "lualatex"), 0o755)
     result = convert(decks_dir, "--quick",
                      env=dict(os.environ, PATH=tools + os.pathsep + os.environ["PATH"]))
-    path = os.path.join(decks_dir, "pdf", "wide.pdf")
-    whole_dir = folder(os.path.join(work, "whole"), "targets:\n  pdf:\n    format: pdf\n"
+    path = place(decks_dir, "pdf", "wide.pdf")
+    whole_dir = folder(place(work, "whole"), "targets:\n  pdf:\n    format: pdf\n"
                        "    code_wrap: 1\n", decks_given={"wide.md": WIDE_SLIDES})
     convert(whole_dir, "--quick")
-    whole = os.path.join(whole_dir, "pdf", "wide.pdf")
+    whole = place(whole_dir, "pdf", "wide.pdf")
 
     def counts():
         """How many runs each deck's LaTeX had, fewest first, not counting
@@ -3297,7 +3340,7 @@ def case_wide_slide(work):
     def advance(deck, word, folder_=decks_dir):
         """How wide a glyph of the line of code that opens with word is, on
         average, in the deck's PDF; 0 where there's none."""
-        pdf = os.path.join(folder_, "pdf", deck + ".pdf")
+        pdf = place(folder_, "pdf", deck + ".pdf")
         if not os.path.exists(pdf):
             return 0
         lines = {}
@@ -4157,16 +4200,16 @@ def case_pptx(work):
         return []
     work = folder(work, PPTX, decks_given={"Flat Deck.md": FLAT, "sectioned.md": SECTIONED,
                                            "untitled.md": UNTITLED, "shapes.md": SHAPES})
-    write(os.path.join(work, "image-alt.csv"), "Image,Alt\nimg/chart,A line rising to the right\n")
-    png(os.path.join(work, "img", "plot.png"), 200, 90, 40)
-    write(os.path.join(work, "project.yaml"),
+    write(place(work, "image-alt.csv"), "Image,Alt\nimg/chart,A line rising to the right\n")
+    png(place(work, "img", "plot.png"), 200, 90, 40)
+    write(place(work, "project.yaml"),
           "project:\n  identifier: org.example.decks\n  title: The Decks\n"
           "  language: de-DE\n  kind: slides\n")
     result = convert(work, "--quick")
     out = result.stderr
-    where = os.path.join(work, "slides")
-    flat, sectioned = os.path.join(where, "Flat-Deck.pptx"), os.path.join(where, "sectioned.pptx")
-    shapes, untitled = os.path.join(where, "shapes.pptx"), os.path.join(where, "untitled.pptx")
+    where = place(work, "slides")
+    flat, sectioned = place(where, "Flat-Deck.pptx"), place(where, "sectioned.pptx")
+    shapes, untitled = place(where, "shapes.pptx"), place(where, "untitled.pptx")
     if result.returncode or not os.path.exists(shapes):
         return [("the pptx target writes a PowerPoint file of each deck",
                  lambda: False and print(out[-2000:]))]
@@ -4232,7 +4275,7 @@ def case_pptx(work):
          lambda: pptx_findings(flat) == [("slide 4", "pptx-slide-no-title")]
          and pptx_findings(shapes) == [] and pptx_findings(sectioned) == []
          and pptx_findings(untitled) == []
-         and "pptx-slide-no-title" in read(os.path.join(work, "output-check.csv"))),
+         and "pptx-slide-no-title" in read(place(work, "output-check.csv"))),
         ("a picture's description is its alt text, the sidecar's, not its title and path",
          lambda: chart is not None
          and [s.descr for s in chart.shapes if s.kind == "pic"] == ["A line rising to the right"]
@@ -4588,41 +4631,41 @@ def case_pptx_settings(work):
     unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
     config = PPTX + "    slides:\n      notes: omitted\n      reference_doc: look.pptx\n" \
         "      aspect_ratio: \"16:9\"\n      size: on-screen-show\n"
-    decks_dir = folder(os.path.join(work, "decks"), config,
+    decks_dir = folder(place(work, "decks"), config,
                        decks_given={"Flat Deck.md": FLAT})
-    pptxtarget.reference_doc("1.41:1", os.path.join(decks_dir, "look.pptx"))
+    pptxtarget.reference_doc("1.41:1", named(decks_dir, "look.pptx"))
     result = convert(decks_dir, "--quick")
-    made = os.path.join(decks_dir, "slides", "Flat-Deck.pptx")
+    made = place(decks_dir, "slides", "Flat-Deck.pptx")
     parts = pptx_parts(made) if os.path.exists(made) else {}
-    foreign_dir = folder(os.path.join(work, "foreign"), PPTX + "    slides:\n      "
+    foreign_dir = folder(place(work, "foreign"), PPTX + "    slides:\n      "
                          "reference_doc: house.pptx\n", decks_given={"Flat Deck.md": FLAT})
-    pptxtarget.reference_doc("16:9", os.path.join(work, "pandoc-look.pptx"))
-    foreign_reference(os.path.join(work, "pandoc-look.pptx"),
-                      os.path.join(foreign_dir, "house.pptx"))
+    pptxtarget.reference_doc("16:9", place(work, "pandoc-look.pptx"))
+    foreign_reference(place(work, "pandoc-look.pptx"),
+                      named(foreign_dir, "house.pptx"))
     foreign = convert(foreign_dir, "--quick")
-    foreign_made = os.path.join(foreign_dir, "slides", "Flat-Deck.pptx")
-    show_dir = folder(os.path.join(work, "show"), PPTX + "    slides:\n      size: on-screen-show\n",
+    foreign_made = place(foreign_dir, "slides", "Flat-Deck.pptx")
+    show_dir = folder(place(work, "show"), PPTX + "    slides:\n      size: on-screen-show\n",
                       decks_given={"one.md": UNTITLED})
     show = convert(show_dir, "--quick")
-    shown = os.path.join(show_dir, "slides", "one.pptx")
+    shown = place(show_dir, "slides", "one.pptx")
     show_parts = pptx_parts(shown) if os.path.exists(shown) else {}
-    missing = folder(os.path.join(work, "missing"), PPTX + "    slides:\n      reference_doc: "
+    missing = folder(place(work, "missing"), PPTX + "    slides:\n      reference_doc: "
                      "nowhere.pptx\n", decks_given={"one.md": UNTITLED})
     nowhere = convert(missing, "--quick")
-    book = os.path.join(work, "book")
-    os.makedirs(book)
-    write(os.path.join(book, "one.md"), "# A Page\n\nText.\n")
-    write(os.path.join(book, "project.yaml"),
+    book = place(work, "book")
+    laidout.project(book)
+    write(place(book, "one.md"), "# A Page\n\nText.\n")
+    write(place(book, "project.yaml"),
           "project:\n  identifier: org.example.book\n  title: A Book\n")
-    write(os.path.join(book, "conversion.yaml"), PPTX + "  pages:\n    format: html\n")
+    write(place(book, "conversion.yaml"), PPTX + "  pages:\n    format: html\n")
     as_book = convert(book, "--quick")
-    old_dir = folder(os.path.join(work, "old"), PPTX, decks_given={"one.md": UNTITLED})
-    tools = os.path.join(work, "tools")
+    old_dir = folder(place(work, "old"), PPTX, decks_given={"one.md": UNTITLED})
+    tools = place(work, "tools")
     os.makedirs(tools)
     real = shutil.which("pandoc")
-    write(os.path.join(tools, "pandoc"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo "
+    write(place(tools, "pandoc"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo "
           "'pandoc 3.10.0'; exit 0; fi\nexec %s \"$@\"\n" % real)
-    os.chmod(os.path.join(tools, "pandoc"), 0o755)
+    os.chmod(place(tools, "pandoc"), 0o755)
     old = convert(old_dir, "--quick", env=dict(os.environ, PATH=tools + os.pathsep
                                                + os.environ["PATH"]))
     built = [
@@ -4651,7 +4694,7 @@ def case_pptx_settings(work):
          "row is #FFFFFF on #4F81BD, a contrast of 4.0:1, under the 4.5:1 PowerPoint's "
          "Accessibility Checker asks for" in foreign.stderr
          and "contrast of" not in result.stderr
-         and pptxtarget.table_contrast(os.path.join(decks_dir, "look.pptx"))[1:3]
+         and pptxtarget.table_contrast(named(decks_dir, "look.pptx"))[1:3]
          == ("000000", "FFFFFF")),
         ("a reference document without a layout Pandoc's writer looks for is warned of, and "
          "one whose master gives no text size is read",
@@ -4668,7 +4711,7 @@ def case_pptx_settings(work):
         ("a book's pptx target writes nothing, and the run says why",
          lambda: as_book.returncode == 0
          and "target slides is format pptx, which is written for decks written in Markdown"
-         in as_book.stderr and not os.path.exists(os.path.join(book, "slides"))),
+         in as_book.stderr and not os.path.exists(place(book, "slides"))),
         ("a Pandoc older than 3.10.1 stops the pptx target, saying why",
          lambda: old.returncode != 0 and "Pandoc 3.10.0 is too old for target slides's "
          "PowerPoint files" in old.stderr),
@@ -4798,8 +4841,8 @@ def case_pptx_edges(work):
     if unready:
         print(f"  skip  {unready}; what the PowerPoint writer can't do isn't checked")
         return []
-    decks_dir = folder(os.path.join(work, "decks"), PPTX, decks_given={"edges.md": EDGES})
-    write(os.path.join(decks_dir, "img", "bar.svg"), "<svg xmlns='http://www.w3.org/2000/svg' "
+    decks_dir = folder(place(work, "decks"), PPTX, decks_given={"edges.md": EDGES})
+    write(place(decks_dir, "img", "bar.svg"), "<svg xmlns='http://www.w3.org/2000/svg' "
           "width='40' height='20'><rect width='40' height='20' fill='#333'/></svg>")
     without = convert(decks_dir, "--quick", env=dict(os.environ, PATH=tools_without(work)))
     checks = [
@@ -4810,7 +4853,7 @@ def case_pptx_edges(work):
     if not shutil.which("rsvg-convert"):
         return checks
     result = convert(decks_dir, "--quick")
-    made = os.path.join(decks_dir, "slides", "edges.pptx")
+    made = place(decks_dir, "slides", "edges.pptx")
     parts = pptx_parts(made) if os.path.exists(made) else {}
     deck = pptx_deck(made) if parts else None
     vector = slide_titled(deck, "Vector") if deck else None
@@ -4974,9 +5017,9 @@ def vendored_problem(missing):
     copy = tempfile.mkdtemp(prefix="vendored-")
     kept = revealtarget.VENDORED
     try:
-        shutil.copytree(kept, os.path.join(copy, "reveal.js"))
-        os.remove(os.path.join(copy, "reveal.js", missing))
-        revealtarget.VENDORED = os.path.join(copy, "reveal.js")
+        shutil.copytree(kept, place(copy, "reveal.js"))
+        os.remove(place(copy, "reveal.js", missing))
+        revealtarget.VENDORED = place(copy, "reveal.js")
         return revealtarget.revealjs_problem(revealtarget.revealjs_folder({}))
     finally:
         revealtarget.VENDORED = kept
@@ -5275,12 +5318,12 @@ def case_revealjs(work):
                  lambda: False)]
     decks_dir = folder(work, REVEALJS, decks_given={"presented.md": PRESENTED,
                                                     "no-title.md": NO_TITLE_SLIDE})
-    png(os.path.join(decks_dir, "img", "big.png"), 200, 120, 40, size=600)
+    png(place(decks_dir, "img", "big.png"), 200, 120, 40, size=600)
     result = convert(decks_dir)
-    out = os.path.join(decks_dir, "present")
-    path = os.path.join(out, "presented.html")
+    out = place(decks_dir, "present")
+    path = place(out, "presented.html")
     page = read(path) if os.path.exists(path) else ""
-    check = [r for r in rows_of(os.path.join(decks_dir, "output-check.csv"))
+    check = [r for r in rows_of(place(decks_dir, "output-check.csv"))
              if r[0].endswith(".html")]
     import outputcheck
     nu = outputcheck.find_validator("vnu")
@@ -5295,7 +5338,7 @@ def case_revealjs(work):
     coded = in_browser(path + "#/some-code", code_steps) if tried else {}
     narrow = in_browser(path + "#/a-long-list", narrow_steps, 900, 506) if tried else {}
     noted = in_browser(path + "#/a-long-list", note_steps, 900, 506) if tried else {}
-    topped = in_browser(os.path.join(out, "no-title.html#/long-first"), top_steps, 900, 506) \
+    topped = in_browser(place(out, "no-title.html#/long-first"), top_steps, 900, 506) \
         if tried else {}
     phone = in_browser(path + "#/a-long-list", narrow_steps, 375, 667, touch=True) if tried else {}
     broken = in_browser(path, lambda p: p.evaluate(FITTED), broken=True) if tried else {}
@@ -5307,11 +5350,11 @@ def case_revealjs(work):
         ("a presentation of each deck, beside a copy of reveal.js, its license and its "
          "theme's font's, and the deck's pictures, nothing loaded from elsewhere",
          lambda: result.returncode == 0 and "Wrote 2 presentation(s)" in result.stderr
-         and all(os.path.isfile(os.path.join(out, "reveal.js", name)) for name in (
+         and all(os.path.isfile(place(out, "reveal.js", name)) for name in (
              "dist/reveal.js", "dist/reveal.css", "dist/reset.css", "dist/theme/white.css",
              "dist/plugin/notes.js", "dist/plugin/search.js", "dist/plugin/zoom.js", "LICENSE",
              "css/theme/fonts/source-sans-pro/LICENSE"))
-         and os.path.isfile(os.path.join(out, "img", "chart.png"))
+         and os.path.isfile(place(out, "img", "chart.png"))
          and "unpkg" not in page and 'href="reveal.js/dist/theme/white.css"' in page),
         ("the deck's language, a viewport a reader can zoom, and every picture's address src, "
          "loaded with the page",
@@ -5466,74 +5509,74 @@ def case_revealjs_settings(work):
     if problem:
         return [("a copy of reveal.js to build the presentations with: " + problem,
                  lambda: False)]
-    visible_dir = folder(os.path.join(work, "visible"), "defaults:\n  pages:\n    "
+    visible_dir = folder(place(work, "visible"), "defaults:\n  pages:\n    "
                          "split_level: 2\n" + REVEALJS + "    slides:\n      "
                          "notes: visible\n      aspect_ratio: \"4:3\"\n      size: "
                          "on-screen-show\n", decks_given={"presented.md": PRESENTED})
-    png(os.path.join(visible_dir, "img", "big.png"), 200, 120, 40, size=400)
+    png(place(visible_dir, "img", "big.png"), 200, 120, 40, size=400)
     visible = convert(visible_dir, "--quick")
-    shown = read(os.path.join(visible_dir, "present", "presented.html")) \
+    shown = read(place(visible_dir, "present", "presented.html")) \
         if visible.returncode == 0 else ""
     # This deck has an include-after of its own, a closing line.
-    omitted_dir = folder(os.path.join(work, "omitted"), REVEALJS + "    slides:\n      "
+    omitted_dir = folder(place(work, "omitted"), REVEALJS + "    slides:\n      "
                          "notes: omitted\n", decks_given={"presented.md": PRESENTED.replace(
                              "author: A. Lecturer\n", "author: A. Lecturer\n"
                              "include-after: A closing line of the deck itself.\n")})
-    png(os.path.join(omitted_dir, "img", "big.png"), 200, 120, 40, size=400)
+    png(place(omitted_dir, "img", "big.png"), 200, 120, 40, size=400)
     omitted = convert(omitted_dir, "--quick")
-    left = read(os.path.join(omitted_dir, "present", "presented.html")) \
+    left = read(place(omitted_dir, "present", "presented.html")) \
         if omitted.returncode == 0 else ""
     # A transition whose escaped quotes end the template's string and go on
     # as code, and one that's a word.
-    injected_dir = folder(os.path.join(work, "injected"), REVEALJS, decks_given={
+    injected_dir = folder(place(work, "injected"), REVEALJS, decks_given={
         "one.md": "---\ntitle: Injected\ntransition: |\n  none\\', controls: "
                   "(window.pwned = 1), x: \\'\n---\n\n" + UNTITLED})
     injected = convert(injected_dir, "--quick")
-    faded_dir = folder(os.path.join(work, "faded"), REVEALJS, decks_given={
+    faded_dir = folder(place(work, "faded"), REVEALJS, decks_given={
         "one.md": "---\ntitle: Faded\ntransition: fade\n---\n\n" + UNTITLED})
     faded = convert(faded_dir, "--quick")
-    coded_dir = folder(os.path.join(work, "coded"), REVEALJS, decks_given={"code.md": SECTIONED})
+    coded_dir = folder(place(work, "coded"), REVEALJS, decks_given={"code.md": SECTIONED})
     coded = convert(coded_dir, "--quick")
-    code_page = read(os.path.join(coded_dir, "present", "code.html")) \
+    code_page = read(place(coded_dir, "present", "code.html")) \
         if coded.returncode == 0 else ""
-    book = os.path.join(work, "book")
-    os.makedirs(book)
-    write(os.path.join(book, "one.md"), "# A Page\n\nText.\n")
-    write(os.path.join(book, "project.yaml"),
+    book = place(work, "book")
+    laidout.project(book)
+    write(place(book, "one.md"), "# A Page\n\nText.\n")
+    write(place(book, "project.yaml"),
           "project:\n  identifier: org.example.book\n  title: A Book\n")
-    write(os.path.join(book, "conversion.yaml"), REVEALJS + "  pages:\n    format: html\n")
+    write(place(book, "conversion.yaml"), REVEALJS + "  pages:\n    format: html\n")
     as_book = convert(book, "--quick")
     import revealtarget
-    plain = folder(os.path.join(work, "plain"), REVEALJS, decks_given={"one.md": UNTITLED})
+    plain = folder(place(work, "plain"), REVEALJS, decks_given={"one.md": UNTITLED})
     unset = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=""))
-    copied = sorted(os.path.relpath(os.path.join(root, name), os.path.join(
+    copied = sorted(os.path.relpath(place(root, name), place(
         plain, "present", "reveal.js")) for root, _, names in os.walk(
-        os.path.join(plain, "present", "reveal.js")) for name in names) \
+        place(plain, "present", "reveal.js")) for name in names) \
         if unset.returncode == 0 else []
-    later = os.path.join(work, "reveal-later")
+    later = place(work, "reveal-later")
     shutil.copytree(revealtarget.VENDORED, later)
-    write(os.path.join(later, "package.json"), '{"name": "reveal.js", "version": "6.9.0"}\n')
-    shutil.rmtree(os.path.join(plain, "present"), ignore_errors=True)
+    write(place(later, "package.json"), '{"name": "reveal.js", "version": "6.9.0"}\n')
+    shutil.rmtree(place(plain, "present"), ignore_errors=True)
     newer = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=later))
-    five = os.path.join(work, "reveal5")
+    five = place(work, "reveal5")
     shutil.copytree(revealtarget.VENDORED, five)
-    write(os.path.join(five, "package.json"), '{"name": "reveal.js", "version": "5.2.1"}\n')
+    write(place(five, "package.json"), '{"name": "reveal.js", "version": "5.2.1"}\n')
     older = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=five))
-    empty = os.path.join(work, "empty")
+    empty = place(work, "empty")
     os.makedirs(empty)
     nothing = convert(plain, "--quick", env=dict(os.environ, REVEALJS_DIR=empty))
-    tools = os.path.join(work, "tools")
+    tools = place(work, "tools")
     os.makedirs(tools)
-    write(os.path.join(tools, "pandoc"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo "
+    write(place(tools, "pandoc"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo "
           "'pandoc 3.11.0'; exit 0; fi\nexec %s \"$@\"\n" % shutil.which("pandoc"))
-    os.chmod(os.path.join(tools, "pandoc"), 0o755)
+    os.chmod(place(tools, "pandoc"), 0o755)
     old = convert(plain, "--quick", env=dict(os.environ, PATH=tools + os.pathsep
                                              + os.environ["PATH"]))
     built = [
         ("slides.notes visible shows the notes under each slide, slides.aspect_ratio sets "
          "the shape, and the presentation is the whole deck, whatever cuts its pages",
-         lambda: sorted(os.listdir(os.path.join(visible_dir, "present")))[-1] == "reveal.js"
-         and [n for n in os.listdir(os.path.join(visible_dir, "present"))
+         lambda: sorted(os.listdir(place(visible_dir, "present")))[-1] == "reveal.js"
+         and [n for n in os.listdir(place(visible_dir, "present"))
               if n.endswith(".html")] == ["presented.html"]
          and "showNotes: true," in shown and '<aside class="notes">' in shown
          and "        width: 960,\n" in shown and "4:3 (slides.aspect_ratio) for 1" in visible.stderr
@@ -5555,7 +5598,7 @@ def case_revealjs_settings(work):
          "6.0.2, copied beside them" in unset.stderr and "NOTE: the presentations load"
          not in unset.stderr
          and copied == sorted(revealtarget.REVEALJS_FILES) == sorted(
-             os.path.relpath(os.path.join(root, name), revealtarget.VENDORED)
+             os.path.relpath(place(root, name), revealtarget.VENDORED)
              for root, _, names in os.walk(revealtarget.VENDORED) for name in names
              if name not in ("README.md", "package.json"))),
         ("REVEALJS_DIR's copy takes its place, and a release other than the repository's is "
@@ -5580,10 +5623,10 @@ def case_revealjs_settings(work):
          and "one's presentation wasn't written: in the script that starts reveal.js, the "
              "setting transition holds '<p>none', controls: (window.pwned = 1), x: '</p>', "
              "which isn't a setting alone and could run as code." in injected.stderr
-         and not os.path.exists(os.path.join(injected_dir, "present", "one.html"))),
+         and not os.path.exists(place(injected_dir, "present", "one.html"))),
         ("one that's a value alone is written",
          lambda: faded.returncode == 0
-         and "transition: 'fade'," in read(os.path.join(faded_dir, "present", "one.html"))),
+         and "transition: 'fade'," in read(place(faded_dir, "present", "one.html"))),
     ]
     # Said before a deck's presentation is built, whatever the Pandoc, or
     # of the repository's copy of reveal.js itself.
@@ -5591,7 +5634,7 @@ def case_revealjs_settings(work):
         ("a book's revealjs target is refused, the rest written",
          lambda: as_book.returncode == 0 and "target present is format revealjs, which is "
          "written for decks written in Markdown" in as_book.stderr
-         and not os.path.exists(os.path.join(book, "present"))),
+         and not os.path.exists(place(book, "present"))),
         ("the repository's copy is reveal.js as its README names it, and one missing a file "
          "stops the run, saying a checkout has it and REVEALJS_DIR can name another",
          lambda: vendored_version() == ("6.0.2", "6.0.2")
@@ -5651,7 +5694,7 @@ def run_cases(cases):
     try:
         for label, case in cases:
             print(label)
-            directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
+            directory = place(work, re.sub(r"[^\w-]+", "-", label))
             try:
                 checks = case(directory)
             except Exception as exc:

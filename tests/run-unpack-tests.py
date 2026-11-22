@@ -49,6 +49,12 @@ os.environ.pop("PANDOC_DATA_DIRS", None)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
+sys.path.insert(0, HERE)
+import laidout  # noqa: E402
+
+# The project an unpacker made of a folder: where its pages, its report,
+# and a run's outputs are.
+P = laidout.projectpaths.of
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 
 ONE_PIXEL = base64.b64decode(
@@ -133,34 +139,34 @@ def case_unpack(work):
     build_epub(epub)
     out = os.path.join(work, "small")
     result = subprocess.run(["python3", os.path.join(BIN, "unpack-epub.py"),
-                             epub, "-o", out], capture_output=True, text=True)
+                             epub, "-o", out, "--part", "book"], capture_output=True, text=True)
     again = subprocess.run(["python3", os.path.join(BIN, "unpack-epub.py"),
-                            epub, "-o", out], capture_output=True, text=True)
+                            epub, "-o", out, "--part", "book"], capture_output=True, text=True)
     import yaml
-    project = yaml.safe_load(read(out, "project.yaml"))["project"]
-    chapter = read(out, "chapter-1.html")
-    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
+    project = yaml.safe_load(read(P(out).project_file()))["project"]
+    chapter = read(P(out).source("chapter-1.html"))
+    with open(P(out).report("unpack-report.csv"), encoding="utf-8-sig") as fh:
         report = {(r["Where"], r["Check"]) for r in csv.DictReader(fh)}
     return [
         ("the run succeeds, a page per content document, the navigation "
          "document not among them",
          lambda: result.returncode == 0
-         and sorted(n for n in os.listdir(out) if n.endswith(".html"))
+         and sorted(n for n in os.listdir(P(out).sources()) if n.endswith(".html"))
          == ["chapter-1.html", "credits.html", "section-1-1.html"]),
         ("a page's name needs no encoding in a link",
-         lambda: os.path.exists(os.path.join(out, "chapter-1.html"))),
+         lambda: os.path.exists(P(out).source("chapter-1.html"))),
         ("a link to another page of the book is a link to that page, its "
          "fragment kept",
          lambda: 'href="section-1-1.html#deep"' in chapter
-         and 'href="chapter-1.html"' in read(out, "section-1-1.html")),
+         and 'href="chapter-1.html"' in read(P(out).source("section-1-1.html"))),
         ("a link out of the book is left alone",
          lambda: 'href="https://example.org/x.xhtml"' in chapter),
         ("an image is where it was beside the package, and the page says so",
          lambda: 'src="images/curve.png"' in chapter
-         and os.path.exists(os.path.join(out, "images", "curve.png"))),
+         and os.path.exists(P(out).source("images", "curve.png"))),
         ("a page that is not well-formed XML is unpacked all the same, "
          "unchanged but for its references",
-         lambda: "Deep,<br>and back" in read(out, "section-1-1.html")),
+         lambda: "Deep,<br>and back" in read(P(out).source("section-1-1.html"))),
         ("the package's metadata is the project's, the identifier made an "
          "XML name",
          lambda: project["title"] == 'A "Small" Book'
@@ -175,7 +181,7 @@ def case_unpack(work):
         ("no group around the whole book, and no marks to say the pages "
          "are sources",
          lambda: project["contents"][0]["title"] == "Chapter 1"
-         and "convert" not in read(out, "project.yaml")),
+         and "convert" not in read(P(out).project_file())),
         ("a spine page the navigation never names is listed last and "
          "reported",
          lambda: project["contents"][-1]["page"] == "credits"
@@ -204,17 +210,17 @@ def case_convert(work):
     build_epub(epub)
     out = os.path.join(work, "small")
     subprocess.run(["python3", os.path.join(BIN, "unpack-epub.py"), epub,
-                    "-o", out], capture_output=True, text=True)
-    with open(os.path.join(out, "conversion.yaml"), "w") as fh:
+                    "-o", out, "--part", "book"], capture_output=True, text=True)
+    with open(P(out).config_file(), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n"
                  "    format: epub3\n")
     # As unpacked, a page shows an error page as an image: the gate's.
     stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                               "--quiet"], cwd=out, capture_output=True,
                              text=True, stdin=subprocess.DEVNULL)
-    gate = read(out, "media-unresolved.csv") if os.path.exists(
-        os.path.join(out, "media-unresolved.csv")) else ""
-    chapter = os.path.join(out, "chapter-1.html")
+    gate = read(P(out).report("media-unresolved.csv")) if os.path.exists(
+        P(out).report("media-unresolved.csv")) else ""
+    chapter = P(out).source("chapter-1.html")
     with open(chapter, encoding="utf-8") as fh:
         text = fh.read()
     with open(chapter, "w", encoding="utf-8") as fh:
@@ -222,12 +228,12 @@ def case_convert(work):
     result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                              "--quiet"], cwd=out, capture_output=True,
                             text=True, stdin=subprocess.DEVNULL)
-    page = read(out, "html", "chapter-1.html") if os.path.exists(
-        os.path.join(out, "html", "chapter-1.html")) else ""
+    page = read(P(out).target_file("html", "chapter-1.html")) if os.path.exists(
+        P(out).target_file("html", "chapter-1.html")) else ""
     # The report exists only when something was found.
     checks = []
-    if os.path.exists(os.path.join(out, "output-check.csv")):
-        with open(os.path.join(out, "output-check.csv"),
+    if os.path.exists(P(out).report("output-check.csv")):
+        with open(P(out).report("output-check.csv"),
                   encoding="utf-8-sig") as fh:
             checks = [r["Check"] for r in csv.DictReader(fh)]
     return [
@@ -239,8 +245,8 @@ def case_convert(work):
          lambda: gate.startswith("\ufeffFile,")),
         ("the unpacked book converts, pages and an EPUB",
          lambda: result.returncode == 0 and page
-         and os.path.exists(os.path.join(
-             out, "epub", "example.org-books-a-small-book.epub"))),
+         and os.path.exists(P(out).target_file(
+             "epub", "example.org-books-a-small-book.epub"))),
         ("the page's title is its own, and its heading is not doubled",
          lambda: "<title>Chapter 1</title>" in page
          and page.count("<h1") == 1),
@@ -251,11 +257,11 @@ def case_convert(work):
          and "link-to-missing-fragment" not in checks),
         ("a link to a paragraph's id lands: the id is on an anchor the "
          "reader keeps",
-         lambda: '<span id="deep"></span>' in read(out, "html",
-                                                    "section-1-1.html")),
+         lambda: '<span id="deep"></span>' in read(P(out).target_file(
+             "html", "section-1-1.html"))),
         ("the image went with the page",
-         lambda: os.path.exists(os.path.join(out, "html", "images",
-                                             "curve.png"))),
+         lambda: os.path.exists(P(out).target_file("html", os.path.join(
+             "images", "curve.png")))),
     ]
 
 
@@ -340,16 +346,16 @@ def case_jekyll(work):
             fh.write(text)
     out = os.path.join(work, "book")
     result = subprocess.run(["python3", os.path.join(BIN, "unpack-jekyll.py"),
-                             src, "-o", out], capture_output=True, text=True)
+                             src, "-o", out, "--part", "book"], capture_output=True, text=True)
     import yaml
-    project = yaml.safe_load(read(out, "project.yaml"))["project"]
-    page = read(out, "sec-page.md")
-    report = read(out, "unpack-report.csv")
+    project = yaml.safe_load(read(P(out).project_file()))["project"]
+    page = read(P(out).source("sec-page.md"))
+    report = read(P(out).report("unpack-report.csv"))
     return [
         ("a page per .md with front matter, named from its path; a readme "
          "isn't one",
          lambda: result.returncode == 0 and sorted(
-             n for n in os.listdir(out) if n.endswith(".md"))
+             n for n in os.listdir(P(out).sources()) if n.endswith(".md"))
          == ["index.md", "sec-index.md", "sec-page.md"]),
         ("a section whose page is only front matter is a group, ordered "
          "by nav_order",
@@ -375,8 +381,8 @@ def case_jekyll(work):
          lambda: 'src="assets/a.png"' in page
          and "](index.html)" in page),
         ("the site's own 404.html isn't copied; the assets are",
-         lambda: not os.path.exists(os.path.join(out, "404.html"))
-         and os.path.exists(os.path.join(out, "assets", "a.png"))),
+         lambda: not os.path.exists(P(out).source("404.html"))
+         and os.path.exists(P(out).source("assets", "a.png"))),
         ("the report counts what was changed",
          lambda: "2 root-relative path(s)" in report
          and "1 kramdown inline formula(s)" in report

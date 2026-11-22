@@ -69,6 +69,8 @@ PLEX_SERIF = {"mainfont": "IBMPlexSerif",
               "mathfont": "IBMPlexMath-Regular.otf"}
 PLEX_FILES = ",".join(PLEX_SERIF["mainfontoptions"])
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+sys.path.insert(0, HERE)
+import laidout  # noqa: E402
 
 ONE_PIXEL = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2"
@@ -119,20 +121,45 @@ def module(repo, mid, title, content, cls="", glossary=""):
                         glossary=glossary))
 
 
-def read(*parts):
-    with open(os.path.join(*parts), encoding="utf-8") as fh:
+SETTINGS = ("project.yaml", "conversion.yaml", "pdf-layout.yaml")
+REPORTS = ("unpack-report.csv", "cnx-table-summaries.csv", "table-headers-new.csv",
+           "table-captions-missing.csv")
+SIDECARS = ("table-captions.csv",)
+TARGETS = ("html", "tex")
+
+
+def place(out, *names):
+    """Where a project the unpacker made keeps a file: its settings at
+    its top, a sidecar and a report with its part's, a target's file in
+    the target's folder, and a page or its media among the part's
+    sources."""
+    paths = laidout.projectpaths.of(out)
+    if len(names) == 1 and names[0] in SETTINGS:
+        return paths.top(names[0])
+    if len(names) == 1 and names[0] in REPORTS:
+        return paths.report(names[0])
+    if len(names) == 1 and names[0] in SIDECARS:
+        return paths.sidecar(names[0])
+    if len(names) > 1 and names[0] in TARGETS:
+        return paths.target_file(names[0], os.path.join(*names[1:]))
+    return paths.source(*names)
+
+
+def read(out, *names):
+    with open(place(out, *names) if names else out, encoding="utf-8") as fh:
         return fh.read()
 
 
 def unpack(repo, out, *extra):
+    part = () if "--part" in extra else ("--part", "book")
     return subprocess.run(["python3", os.path.join(BIN, "unpack-cnx.py"),
-                           repo, "-o", out, "--offline", *extra],
+                           repo, "-o", out, "--offline", *part, *extra],
                           capture_output=True, text=True,
                           stdin=subprocess.DEVNULL)
 
 
 def report_of(out):
-    with open(os.path.join(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
+    with open(place(out, "unpack-report.csv"), encoding="utf-8-sig") as fh:
         return list(csv.DictReader(fh))
 
 
@@ -333,13 +360,11 @@ def case_trade(work):
     out = os.path.join(work, "trade")
     result = unpack(repo, out, "--book", "tiny-trade")
     again = unpack(repo, out, "--book", "tiny-trade")
-    # The same book as a part of a project laid out with src/, and then
-    # again as a second part, the project's settings there by then.
-    proj = os.path.join(work, "trade-project")
-    as_part = unpack(repo, proj, "--book", "tiny-trade", "--part", "book")
-    settings_then = {n: read(proj, n) for n in ("project.yaml", "conversion.yaml")
-                     if os.path.exists(os.path.join(proj, n))}
-    second_part = unpack(os.path.join(proj, "upstream", "osbooks-trade"), proj,
+    # The same book again as a second part, the project's settings there
+    # by then.
+    settings_then = {n: read(out, n) for n in ("project.yaml", "conversion.yaml")
+                     if os.path.exists(place(out, n))}
+    second_part = unpack(os.path.join(out, "upstream", "osbooks-trade"), out,
                          "--book", "tiny-trade", "--part", "second")
 
     def files(folder):
@@ -354,8 +379,8 @@ def case_trade(work):
     project = yaml.safe_load(read(out, "project.yaml"))["project"]
     conversion = yaml.safe_load(read(out, "conversion.yaml"))
     layout = yaml.safe_load(read(out, "pdf-layout.yaml")) \
-        if os.path.exists(os.path.join(out, "pdf-layout.yaml")) else {}
-    names = sorted(n[:-5] for n in os.listdir(out) if n.endswith(".html"))
+        if os.path.exists(place(out, "pdf-layout.yaml")) else {}
+    names = sorted(n[:-5] for n in os.listdir(place(out)) if n.endswith(".html"))
     section = read(out, "1-1-why-trade-happens.html")
     gains = read(out, "1-2-gains-from-trade.html")
     intro = read(out, "1-introduction-to-trade.html")
@@ -364,11 +389,11 @@ def case_trade(work):
     key = read(out, "chapter-1.html")
     index = read(out, "index.html")
     report = report_of(out)
-    with open(os.path.join(out, "table-captions.csv"), encoding="utf-8-sig") as fh:
+    with open(place(out, "table-captions.csv"), encoding="utf-8-sig") as fh:
         captions = list(csv.DictReader(fh))
     marked = []
     for name in ("table-captions.csv", "unpack-report.csv"):
-        with open(os.path.join(out, name), "rb") as fh:
+        with open(place(out, name), "rb") as fh:
             marked.append(fh.read(3) == b"\xef\xbb\xbf")
     return [
         ("--list names the repository's books and their styles; a "
@@ -556,7 +581,7 @@ def case_trade(work):
                            r"2,00t\^\{2\}\}\{3\}\\\), \\\(R_\{0\}\S* \\Omega\\\), "
                            r"and \\\(N\\\)\.", " ".join(subprocess.run(
                                ["pandoc", "-f", "html", "-t", "latex",
-                                os.path.join(out, "a-some-math.html")],
+                                place(out, "a-some-math.html")],
                                capture_output=True, text=True).stdout.split()))
          if shutil.which("pandoc") else True),
         ("a formula's forced line breaks make its lines the rows of a "
@@ -574,7 +599,7 @@ def case_trade(work):
          lambda: (lambda tex: re.search(r"v = \\frac\{b\}\{p\}\}?\s*\\\\\s*\(w\)", tex)
                   and re.search(r"x = 1\}?\s*\\\\\s*\{?y = 2", tex))(subprocess.run(
                       ["pandoc", "-f", "html", "-t", "latex",
-                       os.path.join(out, "a-some-math.html")],
+                       place(out, "a-some-math.html")],
                       capture_output=True, text=True).stdout)
          if shutil.which("pandoc") else True),
         ("an empty title is no heading, its id kept on an anchor, and its "
@@ -658,7 +683,7 @@ def case_trade(work):
          "Excel needs to show the summary's dash as written", lambda: marked == [True, True]),
         ("media are copied; one the module names that isn't there is "
          "reported, its description in its place",
-         lambda: os.path.exists(os.path.join(out, "media", "dot.png"))
+         lambda: os.path.exists(place(out, "media", "dot.png"))
          and any(r["Check"] == "media-missing" for r in report)
          and "[gone: missing]" in gains and "missing.png" not in gains),
         ("a file outside the repository, named by a path that climbs out of "
@@ -673,37 +698,33 @@ def case_trade(work):
          and "[out:" in gains),
         ("a directory that already holds a book is refused",
          lambda: again.returncode != 0 and "not empty" in again.stderr),
-        ("with --part the book is a part of a project: its pages and media in "
-         "src/book/, the settings at the top, a drafted sidecar in sidecars/book/, "
-         "and the reports under output/",
-         lambda: as_part.returncode == 0
-         and files(os.path.join(proj, "src", "book"))
-         == [n for n in files(out) if n not in own]
-         and all(os.path.exists(os.path.join(proj, n)) ==
-                 os.path.exists(os.path.join(out, n))
-                 for n in ("project.yaml", "conversion.yaml", "pdf-layout.yaml"))
-         and os.path.exists(os.path.join(proj, "sidecars", "book", "table-captions.csv"))
-         == os.path.exists(os.path.join(out, "table-captions.csv"))
-         and os.path.exists(os.path.join(proj, "output", "reports", "book",
-                                         "unpack-report.csv"))
-         and os.path.exists(os.path.join(proj, "output", "reports", "book",
-                                         "cnx-table-summaries.csv"))
-         == os.path.exists(os.path.join(out, "cnx-table-summaries.csv"))),
+        ("the book is a part of a project: its pages and media in src/book/, the "
+         "settings at the top, a drafted sidecar in sidecars/book/, and the reports "
+         "under output/",
+         lambda: result.returncode == 0
+         and {"1-1-why-trade-happens.html", "media/dot.png"}
+         <= set(files(os.path.join(out, "src", "book")))
+         and not own & set(files(os.path.join(out, "src", "book")))
+         and all(os.path.exists(os.path.join(out, n))
+                 for n in ("project.yaml", "conversion.yaml"))
+         and os.path.exists(os.path.join(out, "sidecars", "book", "table-captions.csv"))
+         and os.path.exists(os.path.join(out, "output", "reports", "book",
+                                         "unpack-report.csv"))),
         ("the part is declared, and a repository outside the project is copied to "
          "upstream/ and named as its from, with the book unpacked",
          lambda: yaml.safe_load(settings_then["project.yaml"])["project"]["parts"]
          == {"book": {"kind": "book", "from": {
              "file": "upstream/osbooks-trade", "unpacker": "cnx",
              "options": ["--book=tiny-trade"]}}}
-         and os.path.isfile(os.path.join(proj, "upstream", "osbooks-trade", "META-INF",
+         and os.path.isfile(os.path.join(out, "upstream", "osbooks-trade", "META-INF",
                                          "books.xml"))),
         ("a second part leaves the project's settings as they are and writes what it "
          "would have as samples beside its report",
          lambda: second_part.returncode == 0
-         and all(read(proj, n) == text for n, text in settings_then.items())
-         and os.path.exists(os.path.join(proj, "src", "second",
+         and all(read(out, n) == text for n, text in settings_then.items())
+         and os.path.exists(os.path.join(out, "src", "second",
                                          "1-1-why-trade-happens.html"))
-         and all(os.path.exists(os.path.join(proj, "output", "reports", "second",
+         and all(os.path.exists(os.path.join(out, "output", "reports", "second",
                                              n.replace(".yaml", "-unpacked.yaml")))
                  for n in settings_then)),
     ]
@@ -754,7 +775,7 @@ id="gm1">a point</meaning></definition><definition id="g2"><term>dot</term>
         ("with no recipe, a figure is numbered in its page, and nothing "
          "moves",
          lambda: '<span class="os-label">Figure 1</span>' in page
-         and not os.path.exists(os.path.join(out, "1-key-terms.html"))),
+         and not os.path.exists(place(out, "1-key-terms.html"))),
         ("a note keeps its own title, as a heading",
          lambda: "<h2>Watch Out</h2>" in page),
         ("its glossary stays on its page, a term defined twice one term "
@@ -765,10 +786,10 @@ id="gm1">a point</meaning></definition><definition id="g2"><term>dot</term>
         ("a file kept beside its module is copied under media/, in a "
          "directory named for the module",
          lambda: 'src="media/m20001/dot.png"' in page
-         and os.path.exists(os.path.join(out, "media", "m20001", "dot.png"))),
+         and os.path.exists(place(out, "media", "m20001", "dot.png"))),
         ("no footer and no layout for a book that isn't OpenStax's",
-         lambda: not os.path.exists(os.path.join(out, "conversion.yaml"))
-         and not os.path.exists(os.path.join(out, "pdf-layout.yaml"))),
+         lambda: not os.path.exists(place(out, "conversion.yaml"))
+         and not os.path.exists(place(out, "pdf-layout.yaml"))),
         ("a web address written without its scheme is linked with it, "
          "and reported",
          lambda: '<a href="https://www.example.org">the site</a>' in page
@@ -779,8 +800,8 @@ id="gm1">a point</meaning></definition><definition id="g2"><term>dot</term>
         ("a picture in another format than its name says is named for its "
          "bytes, and one whose bytes are no picture is reported",
          lambda: 'src="media/photo.jpg"' in page
-         and os.path.exists(os.path.join(out, "media", "photo.jpg"))
-         and not os.path.exists(os.path.join(out, "media", "photo.png"))
+         and os.path.exists(place(out, "media", "photo.jpg"))
+         and not os.path.exists(place(out, "media", "photo.png"))
          and [(r["Check"], r["Detail"].split(":")[0])
               for r in report_of(out) if "image" in r["Check"]
               or "extension" in r["Check"]]
@@ -935,7 +956,7 @@ source, 2020.</span></note></section>""")
         lxml_html.fragments_fromstring("&#1;x")[:1])
     out = os.path.join(work, "selling")
     result = unpack(repo, out, "--exercises-cache", cache)
-    names = sorted(n[:-5] for n in os.listdir(out) if n.endswith(".html"))
+    names = sorted(n[:-5] for n in os.listdir(place(out)) if n.endswith(".html"))
     section = read(out, "1-1-what-selling-is.html")
     key = read(out, "chapter-1.html")
     refs = read(out, "1-references.html")
@@ -1024,7 +1045,7 @@ source, 2020.</span></note></section>""")
         ("a picture is named for its bytes, a JPEG the cache keeps as .png "
          "copied as .jpg",
          lambda: f'src="media/exercises/{blot}.jpg"' in section
-         and os.path.exists(os.path.join(out, "media", "exercises",
+         and os.path.exists(place(out, "media", "exercises",
                                          blot + ".jpg"))),
         ("a picture the bank marks decorative is reported on the page that "
          "shows it, once, not again in feedback, which baking drops",
@@ -1224,7 +1245,7 @@ url="#exercise/{code}"/></para></problem></exercise>"""
     refused, refused_out, refused_asked = run("refused", "--update-exercises", "--offline")
 
     def page(out):
-        path = os.path.join(out, "1-1-what-selling-is.html")
+        path = place(out, "1-1-what-selling-is.html")
         return read(path) if os.path.exists(path) else ""
     section = page(update_out)
     rows = {r["Detail"].split(":", 1)[0]: r for r in report_of(update_out)
@@ -1405,7 +1426,7 @@ url="#ost/api/ex/test-f2"/></para></problem></exercise></section>""")
          and unpacked.returncode == 0
          and "Which shop?" in read(book, "1-1-what-selling-is.html")
          and "Which day?" in read(book, "1-1-what-selling-is.html")
-         and os.path.exists(os.path.join(book, "media", "exercises", shot))),
+         and os.path.exists(place(book, "media", "exercises", shot))),
         ("from a repository, one that can't be had is listed in fetch-failures.tsv, in the "
          "folder it's run from, and the run fails",
          lambda: gone.returncode == 1
@@ -2110,7 +2131,7 @@ Outcomes</title><list id="l1"><item>Define a dose.</item>
     out = os.path.join(work, "nursing")
     result = unpack(repo, out)
     references = read(out, "references.html") \
-        if os.path.exists(os.path.join(out, "references.html")) else ""
+        if os.path.exists(place(out, "references.html")) else ""
     # Anatomy and Physiology's: each section's under its page's numbered
     # title, a heading of plain words, since a reader's contents (the
     # EPUB's navigation) shows a heading's spans, and an empty one is
@@ -2139,7 +2160,7 @@ Outcomes</title><list id="l1"><item>Define a dose.</item>
     out2 = os.path.join(work, "anatomy")
     result2 = unpack(anatomy, out2)
     gathered = read(out2, "references.html") \
-        if os.path.exists(os.path.join(out2, "references.html")) else ""
+        if os.path.exists(place(out2, "references.html")) else ""
     return [
         ("each chapter's references on one page at the book's end, under "
          "a heading holding a link to the chapter",
@@ -2402,7 +2423,7 @@ def case_step_tables(work):
             if r["Check"] == "table-kept-as-data"}
     labels = [r["Detail"] for r in report
               if r["Check"] == "table-label-left-out"]
-    with open(os.path.join(out, "table-captions.csv"), encoding="utf-8-sig") as fh:
+    with open(place(out, "table-captions.csv"), encoding="utf-8-sig") as fh:
         drafted = {r["Label"]: r["Description"] for r in csv.DictReader(fh)}
     other = os.path.join(work, "precalculus")
     unpack(repo, other, "--book", "tiny-precalculus")
@@ -2412,18 +2433,18 @@ def case_step_tables(work):
     converted, guessed, missing = None, [], []
     version = pandoc_version()
     if version is not None and version >= (3, 9):
-        write(os.path.join(out, "conversion.yaml"), read(out, "conversion.yaml")
+        write(place(out, "conversion.yaml"), read(out, "conversion.yaml")
               + "targets:\n  html:\n    format: html\n")
         run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                               "--quiet"], cwd=out, capture_output=True, text=True,
                              stdin=subprocess.DEVNULL)
-        page_out = os.path.join(out, "html", "1-1-ratios.html")
+        page_out = place(out, "html", "1-1-ratios.html")
         converted = read(page_out) if run.returncode == 0 and os.path.exists(
             page_out) else ""
-        with open(os.path.join(out, "table-headers-new.csv"), encoding="utf-8-sig") as fh:
+        with open(place(out, "table-headers-new.csv"), encoding="utf-8-sig") as fh:
             guessed = sorted((r["preview"], r["headers"]) for r in csv.DictReader(fh))
-        if os.path.exists(os.path.join(out, "table-captions-missing.csv")):
-            with open(os.path.join(out, "table-captions-missing.csv"),
+        if os.path.exists(place(out, "table-captions-missing.csv")):
+            with open(place(out, "table-captions-missing.csv"),
                       encoding="utf-8-sig") as fh:
                 missing = [r["Label"] for r in csv.DictReader(fh)]
 
@@ -2972,12 +2993,12 @@ def case_formula_steps(work):
     converted = None
     version = pandoc_version()
     if version is not None and version >= (3, 9) and result.returncode == 0:
-        write(os.path.join(out, "conversion.yaml"), read(out, "conversion.yaml")
+        write(place(out, "conversion.yaml"), read(out, "conversion.yaml")
               + "targets:\n  html:\n    format: html\n")
         run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                               "--quiet"], cwd=out, capture_output=True, text=True,
                              stdin=subprocess.DEVNULL)
-        page_out = os.path.join(out, "html", "1-1-simplifying.html")
+        page_out = place(out, "html", "1-1-simplifying.html")
         converted = read(page_out) if run.returncode == 0 and os.path.exists(
             page_out) else ""
     checks = [
@@ -3078,9 +3099,9 @@ def case_layout_kinds(work):
         out = os.path.join(work, slug)
         result = unpack(repo, out, "--book", slug)
         said[slug] = result.stdout + result.stderr
-        captions = os.path.join(out, "table-captions.csv")
+        captions = place(out, "table-captions.csv")
         drafted[slug] = read(captions) if os.path.exists(captions) else ""
-        listed = os.path.join(out, "cnx-table-summaries.csv")
+        listed = place(out, "cnx-table-summaries.csv")
         summaries[slug] = []
         if os.path.exists(listed):
             with open(listed, encoding="utf-8-sig", newline="") as fh:
@@ -3088,7 +3109,7 @@ def case_layout_kinds(work):
             with open(listed, "rb") as fh:
                 summaries_marked.append(fh.read(3) == b"\xef\xbb\xbf")
         found[slug] = {}
-        for name in sorted(os.listdir(out)) if result.returncode == 0 else []:
+        for name in sorted(os.listdir(place(out))) if result.returncode == 0 else []:
             if name.endswith(".html"):
                 found[slug].update(tables_of(read(out, name)))
         reports[slug] = report_of(out) if result.returncode == 0 else []
@@ -3281,7 +3302,7 @@ def case_organizers(work):
         out = os.path.join(work, slug)
         result = unpack(repo, out, "--book", slug)
         said[slug] = result.stdout + result.stderr
-        pages[slug] = [read(out, name) for name in sorted(os.listdir(out))
+        pages[slug] = [read(out, name) for name in sorted(os.listdir(place(out)))
                        if name.endswith(".html")] if result.returncode == 0 else []
 
     def table(slug, name):
@@ -3366,7 +3387,7 @@ def case_unwrapped(work):
     result = unpack(repo, out, "--book", "tiny-usa")
     page = read(out, "1-1-the-colonies.html") if result.returncode == 0 else ""
     report = report_of(out) if result.returncode == 0 else []
-    captions = os.path.join(out, "table-captions.csv")
+    captions = place(out, "table-captions.csv")
     drafted = read(captions) if os.path.exists(captions) else ""
 
     def table(name):
@@ -3818,20 +3839,20 @@ def case_convert(work):
     write(preface, read(preface).replace("<document ", '<document xml:lang="es" ', 1))
     out = os.path.join(work, "trade")
     unpack(repo, out, "--book", "tiny-trade")
-    write(os.path.join(out, "conversion.yaml"),
+    write(place(out, "conversion.yaml"),
           read(out, "conversion.yaml") + "targets:\n  html:\n    format: html\n"
           "  tex:\n    format: latex\n")
     run = subprocess.run(["python3", os.path.join(BIN, "convert.py"),
                           "--quick", "--quiet"], cwd=out, capture_output=True,
                          text=True, stdin=subprocess.DEVNULL)
-    page = os.path.join(out, "html", "1-1-why-trade-happens.html")
+    page = place(out, "html", "1-1-why-trade-happens.html")
     html = read(page) if os.path.exists(page) else ""
-    master = os.path.join(out, "tex", "book-11111111-2222-4333-8444-555555555555.tex")
+    master = place(out, "tex", "book-11111111-2222-4333-8444-555555555555.tex")
     latex = read(master) if os.path.exists(master) else ""
-    page = os.path.join(out, "html", "chapter-1.html")
+    page = place(out, "html", "chapter-1.html")
     key = read(page) if os.path.exists(page) else ""
-    unplaced = os.path.join(out, "table-captions-missing.csv")
-    page = os.path.join(out, "html", "preface.html")
+    unplaced = place(out, "table-captions-missing.csv")
+    page = place(out, "html", "preface.html")
     preface_page = read(page) if os.path.exists(page) else ""
     return [
         ("the book converts",
