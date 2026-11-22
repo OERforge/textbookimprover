@@ -84,6 +84,7 @@ import pdfcheck  # noqa: E402
 import pdfparagraphs  # noqa: E402
 sys.path.insert(0, HERE)
 import parallel  # noqa: E402
+import laidout  # noqa: E402
 import pdftext  # noqa: E402
 
 # Latin Modern's faces, named, as a metadata file keeps them where the
@@ -733,13 +734,15 @@ PROJECT = """project:
       role: appendix
 """
 
+# front.md is the metadata file and a page of the book too (PROJECT), so
+# it's among the sources, and the setting names it there.
 CONVERSION = """targets:
   html:
     format: html
   pdf:
     format: pdf
     pdf:
-      metadata: front.md
+      metadata: src/book/front.md
 """
 
 
@@ -789,16 +792,121 @@ def image_pixels(path):
 
 
 def write_book(work):
-    os.makedirs(os.path.join(work, "assets"))
+    os.makedirs(place(work, "assets"))
     for name, text in (("front.md", FRONT), ("one.md", ONE),
                        ("appendix.md", APPENDIX), ("project.yaml", PROJECT),
                        ("conversion.yaml", CONVERSION)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
-    png(os.path.join(work, "assets", "rule.png"), (0, 0, 0))
-    png(os.path.join(work, "assets", "blank.png"), (255, 255, 255))
-    png(os.path.join(work, "assets", "photo.png"), (0, 120, 0))
+    png(place(work, "assets", "red.png"), (200, 0, 0))
+    png(place(work, "assets", "rule.png"), (0, 0, 0))
+    png(place(work, "assets", "blank.png"), (255, 255, 255))
+    png(place(work, "assets", "photo.png"), (0, 120, 0))
+
+
+
+# --------------------------------------------------------------------------
+# a book's folder, a project
+# --------------------------------------------------------------------------
+# A build writes its book into a folder file by file, and the folder is
+# laid out as a project (laidout.settle) when a tool is first run in it.
+
+SETTINGS = ("project.yaml", "conversion.yaml", "packaging.yaml", "pdf-layout.yaml")
+REPORTS = ("output-check.csv", "fidelity.csv", "-sample.yaml", "-sample.csv", "-new.csv")
+TOOLS = ("convert.py", "build-pdf.py")
+
+
+def named_at_top(folder):
+    """The files and folders at a book's top that its conversion.yaml
+    names as a setting's value (a metadata file, a template's folder),
+    which stay there when the folder is laid out."""
+    path = os.path.join(folder, "conversion.yaml")
+    if not os.path.isfile(path):
+        return ()
+    import yaml
+    with open(path, encoding="utf-8") as fh:
+        try:
+            settings = yaml.safe_load(fh)
+        except yaml.YAMLError:
+            return ()
+    found = set()
+
+    def leaves(node):
+        if isinstance(node, dict):
+            for value in node.values():
+                leaves(value)
+        elif isinstance(node, list):
+            for value in node:
+                leaves(value)
+        elif isinstance(node, str) and node and not os.path.isabs(node):
+            first = node.replace("\\", "/").split("/")[0]
+            if first not in ("", ".", "..") and os.path.lexists(os.path.join(folder, first)):
+                found.add(first)
+    leaves(settings)
+    return tuple(sorted(found))
+
+
+def settled(folder):
+    """The folder, laid out as a project if it holds a book that isn't."""
+    if folder and os.path.isdir(folder) and not laidout.projectpaths.is_tree(folder) \
+            and any(os.path.isfile(os.path.join(folder, n)) for n in SETTINGS[:2]):
+        laidout.settle(folder, top=named_at_top(folder))
+    return folder
+
+
+def started(arguments, cwd=None, **options):
+    """subprocess.run, a book's folder laid out first where the program
+    is one of the tools: the folder it's run in, and one -d names."""
+    if any(os.path.basename(str(a)) in TOOLS for a in arguments if len(str(a)) < 400):
+        settled(cwd)
+        for at, argument in enumerate(arguments[:-1]):
+            if argument == "-d":
+                settled(arguments[at + 1])
+    return subprocess.run(arguments, cwd=cwd, **options)
+
+
+def targets(folder):
+    """The names of a project's targets, as its conversion.yaml has them."""
+    import yaml
+    path = os.path.join(folder, "conversion.yaml")
+    if not os.path.isfile(path):
+        return {"html"}
+    with open(path, encoding="utf-8") as fh:
+        try:
+            settings = yaml.safe_load(fh) or {}
+        except yaml.YAMLError:
+            return set()
+    return set((settings.get("targets") or {"html": None}))
+
+
+def place(folder, *names):
+    """Where a project keeps a file: its settings and a file a setting
+    names at its top, a report with its part's, a target's file in the
+    target's folder, and anything else among the part's sources. In a
+    folder that isn't laid out yet, or isn't a book's, the names joined
+    to it."""
+    if not laidout.projectpaths.is_tree(folder):
+        return os.path.join(folder, *names)
+    paths = laidout.projectpaths.of(folder)
+    first = names[0]
+    if first in SETTINGS or os.path.lexists(os.path.join(folder, first)) \
+            and first not in ("src", "sidecars", "output"):
+        return paths.top(*names)
+    if len(names) == 1 and first.endswith(REPORTS):
+        return os.path.join(folder, "output", "reports", "book", first)
+    if first in targets(folder) or os.path.isdir(os.path.join(folder, "output", first)) \
+            and first not in ("work", "reports", "packages"):
+        return os.path.join(folder, "output", first, *names[1:])
+    if len(names) == 1 and first.endswith(".csv"):
+        return paths.sidecar(first)
+    return paths.source(*names)
+
+
+def beside(folder, name):
+    """A folder beside a book's, for what isn't the book's: a project
+    can't hold another, or a folder of a hand's own runs, among its
+    sources."""
+    return folder.rstrip(os.sep) + "-" + name
 
 
 # --------------------------------------------------------------------------
@@ -882,26 +990,26 @@ def build_ua1(work):
     """A one-chapter book claiming PDF/UA-1, its math as Office writes it,
     which is the default, with a list of figures: (the PDF's path, what
     the run said, the output check's rows)."""
-    os.makedirs(os.path.join(work, "assets"))
-    png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
-    with open(os.path.join(work, "old.md"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "assets"))
+    png(place(work, "assets", "red.png"), (200, 0, 0))
+    with open(place(work, "old.md"), "w", encoding="utf-8") as fh:
         fh.write(UA1_PAGE)
-    with open(os.path.join(work, "meta.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "meta.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nlof: true\n---\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Old Standard\n  identifier: org.example.ua1\n"
                  "  language: en-US\n  contents:\n    - old\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      standard: [ua-1]\n"
                  "      metadata: meta.md\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+    converted = started(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    report = os.path.join(work, "output-check.csv")
+    report = place(work, "output-check.csv")
     rows = []
     if os.path.exists(report):
         with open(report, encoding="utf-8-sig", newline="") as fh:
             rows = list(csv.DictReader(fh))
-    return os.path.join(work, "pdf", "org.example.ua1.pdf"), converted.stdout + converted.stderr, rows
+    return place(work, "pdf", "org.example.ua1.pdf"), converted.stdout + converted.stderr, rows
 
 
 def build_untagged(work):
@@ -909,24 +1017,24 @@ def build_untagged(work):
     (LATIN_MODERN), since pypdf 4.0.2, Ubuntu 24.04's, runs the words of
     its text together in IBM Plex, as it does the notes book's untagged
     copy's (build_notes): (the PDF's path, what the run said)."""
-    os.makedirs(os.path.join(work, "assets"))
-    png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
-    noise_png(os.path.join(work, "assets", "wide.png"), 400, 200)
-    with open(os.path.join(work, "figures.md"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "assets"))
+    png(place(work, "assets", "red.png"), (200, 0, 0))
+    noise_png(place(work, "assets", "wide.png"), 400, 200)
+    with open(place(work, "figures.md"), "w", encoding="utf-8") as fh:
         fh.write(UNTAGGED_PAGE)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: No Standard\n  identifier: org.example.untagged\n"
                  "  language: en-US\n")
-    with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "meta.yaml"), "w", encoding="utf-8") as fh:
         fh.write(LATIN_MODERN)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  captions:\n    figure_prefixes: [Figure, Exhibit]\n"
                  "  images:\n    downsample: 2\n"
                  "targets:\n  pdf:\n    format: pdf\n    picture_paths: \"off\"\n"
                  "    pdf:\n      standard: []\n      metadata: meta.yaml\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+    converted = started(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return (os.path.join(work, "pdf", "org.example.untagged.pdf"),
+    return (place(work, "pdf", "org.example.untagged.pdf"),
             converted.stdout + converted.stderr)
 
 
@@ -982,18 +1090,18 @@ def build_languages(work):
     """LANGUAGE_PAGES built: the PDF's path."""
     os.makedirs(work)
     for name, text in LANGUAGE_PAGES.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Languages\n  identifier: org.example.languages\n"
                  "  language: en-US\n  contents:\n    - two\n    - un\n"
                  "    - title: Le chapitre\n      items:\n        - chapitre\n"
                  "        - suite\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.languages.pdf")
+    return place(work, "pdf", "org.example.languages.pdf")
 
 
 def language_checks(path):
@@ -1037,34 +1145,34 @@ def build_notes(work):
     text of an untagged PDF in IBM Plex runs its words together, which
     pdftotext's and MuPDF's don't: such a PDF draws no spaces, and pypdf
     finds them by the gaps."""
-    os.makedirs(os.path.join(work, "assets"))
-    png(os.path.join(work, "assets", "red.png"), (200, 0, 0))
+    os.makedirs(place(work, "assets"))
+    png(place(work, "assets", "red.png"), (200, 0, 0))
     for name, text in (("captions.md", NOTES_CAPTIONS), ("cells.md", NOTES_CELLS),
                        ("headings.md", NOTES_HEADINGS), ("pairs.md", NOTES_PAIRS),
                        ("meta.md", "---\nlof: true\n" + CLASS_PAGE + "---\n"),
                        ("plain.md", "---\n" + LATIN_MODERN + "---\n")):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Notes\n  identifier: org.example.notes\n"
                  "  language: en-US\n  contents:\n    - captions\n    - cells\n    - headings\n"
                  "    - pairs\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n"
                  "  plain:\n    format: pdf\n    pdf:\n      standard: []\n"
                  "      metadata: plain.md\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+    converted = started(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL,
                                env=glyph_blanks())
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only", "--target", "pdf"],
         work)
-    tex = os.path.join(work, "pdf", "book.tex")
+    tex = place(work, "pdf", "book.tex")
     source = ""
     if os.path.exists(tex):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
-    return (os.path.join(work, "pdf", "org.example.notes.pdf"),
-            os.path.join(work, "plain", "org.example.notes.pdf"),
+    return (place(work, "pdf", "org.example.notes.pdf"),
+            place(work, "plain", "org.example.notes.pdf"),
             converted.stdout + converted.stderr, source)
 
 
@@ -1108,19 +1216,19 @@ def build_footer(work):
     for name, text in (("one.md", FOOTER_ONE),
                        ("two.md", FOOTER_TWO + FOOTER_VERSE + "\n![" + FOOTER_CAPTION * 3
                         + "Henceforth." + FOOTER_BREAK + "](cc.png)\n")):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Footed\n  identifier: org.example.footer\n"
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
-    png(os.path.join(work, "cc.png"), (0, 0, 0))
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    png(place(work, "cc.png"), (0, 0, 0))
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write('defaults:\n  footer: "Read *this book* free at '
                  '[example.net](https://example.net). ![CC BY](cc.png)"\n'
                  "targets:\n  pdf:\n    format: pdf\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.footer.pdf")
+    return place(work, "pdf", "org.example.footer.pdf")
 
 
 # A numbered book whose first chapter's title and a section's have a line
@@ -1162,17 +1270,17 @@ def build_headings(work):
     """HEADINGS_ONE and HEADINGS_TWO, numbered: the PDF's path."""
     os.makedirs(work)
     for name, text in (("one.md", HEADINGS_ONE), ("two.md", HEADINGS_TWO)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    png(os.path.join(work, "cc.png"), (0, 0, 0))
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    png(place(work, "cc.png"), (0, 0, 0))
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Headed\n  identifier: org.example.headings\n"
                  "  language: en-US\n  numbering: true\n  contents:\n    - one\n    - two\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.headings.pdf")
+    return place(work, "pdf", "org.example.headings.pdf")
 
 
 # The default page changed a field at a time: a type size the book class
@@ -1214,18 +1322,18 @@ def build_sized(work):
                        ("two.md", THOUSANDTH + FOOTER_TWO + SIZED_LIST + SIZED_SECTION
                         + SIZED_BOX),
                        ("sized.yaml", SIZED_LAYOUT)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Sized\n  identifier: org.example.sized\n"
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
-    png(os.path.join(work, "cc.png"), (0, 0, 0))
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    png(place(work, "cc.png"), (0, 0, 0))
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: sized.yaml\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.sized.pdf"), converted.stdout + converted.stderr
+    return place(work, "pdf", "org.example.sized.pdf"), converted.stdout + converted.stderr
 
 
 # A footer from a file of its own, with a heading, on pages in
@@ -1261,18 +1369,18 @@ def build_fancy(work):
     os.makedirs(work)
     for name, text in (("one.md", FOOTER_ONE), ("two.md", FOOTER_TWO + FANCY_ARROW),
                        ("footer.md", FANCY_FOOTER), ("fancy.yaml", FANCY_LAYOUT)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Fancy\n  identifier: org.example.fancy\n"
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  footer: footer.md\n"
                  "targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: fancy.yaml\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.fancy.pdf"), \
+    return place(work, "pdf", "org.example.fancy.pdf"), \
         converted.stdout + converted.stderr
 
 
@@ -1312,28 +1420,28 @@ def build_preamble(work):
     for name, text in (("one.md", "# One\n\n" + "".join(FOOTER_WORDS * 4 + "\n\n"
                                                          for _ in range(6))),
                        ("two.md", PREAMBLE_TWO), ("_preamble.md", PREAMBLE_META)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Preamble\n  identifier: org.example.preamble\n"
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: _preamble.md\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     # The metadata file had been looked for in the book's folder twice
     # over (Pandoc ran there, given a path relative to where the build
     # did), and the build stopped.
-    hand = subprocess.run(["python3", os.path.join(BIN, "build-pdf.py"), "-d",
+    hand = started(["python3", os.path.join(BIN, "build-pdf.py"), "-d",
                            os.path.basename(work), "--latex-only"],
                           cwd=os.path.dirname(work), capture_output=True, text=True,
                           stdin=subprocess.DEVNULL)
-    tex = os.path.join(work, "pdf", "book.tex")
+    tex = place(work, "pdf", "book.tex")
     source = ""
     if os.path.exists(tex):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
-    return os.path.join(work, "pdf", "org.example.preamble.pdf"), source, \
+    return place(work, "pdf", "org.example.preamble.pdf"), source, \
         hand.stdout + hand.stderr
 
 # The page for WCAG 1.4.8 (AAA), bin/pdf-layout-wcag-aaa.yaml, copied into
@@ -1359,31 +1467,30 @@ def build_aaa(work):
            + "".join("\n" + FOOTER_WORDS * 4 + "\n" for _ in range(4))
            + "\n" + "\\\n".join("A short line of a poem, %d." % i for i in range(30)) + "\n")
     for name, text in (("one.md", FOOTER_ONE), ("two.md", two)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     shutil.copy(os.path.join(BIN, "pdf-layout-wcag-aaa.yaml"), work)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: AAA\n  identifier: org.example.aaa\n"
                  "  language: en-US\n  contents:\n    - one\n    - two\n")
-    png(os.path.join(work, "cc.png"), (0, 0, 0))
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    png(place(work, "cc.png"), (0, 0, 0))
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n"
                  "      metadata: pdf-layout-wcag-aaa.yaml\n")
     converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
-    found = [os.path.join(work, "pdf", "org.example.aaa.pdf"), converted.stdout + converted.stderr]
+    found = [place(work, "pdf", "org.example.aaa.pdf"), converted.stdout + converted.stderr]
     for suffix, code in (("-latin", None), ("-lacking", LACKING_PLEX)):
         again = work + suffix
         shutil.copytree(work, again)
-        path = os.path.join(again, "pdf", "org.example.aaa.pdf")
+        path = place(again, "pdf", "org.example.aaa.pdf")
         if os.path.exists(path):
             os.remove(path)
         if code is None:
-            with open(os.path.join(again, "pdf-layout-wcag-aaa.yaml"), "a",
+            with open(place(again, "pdf-layout-wcag-aaa.yaml"), "a",
                       encoding="utf-8") as fh:
                 fh.write(LATIN_MODERN)
         rebuilt = run(["python3"] + (["-c", code] if code else [])
-                      + [os.path.join(BIN, "build-pdf.py"), "-d", again, "--target", "pdf",
-                         "--intermediates", again], again)
+                      + [os.path.join(BIN, "build-pdf.py"), "-d", again, "--target", "pdf"], again)
         found += [path, rebuilt.stdout + rebuilt.stderr]
     return tuple(found)
 
@@ -1830,35 +1937,35 @@ def build_fit(work):
     its LaTeX, and LuaLaTeX's log of its LaTeX run as a third run would
     be, the aux saying two had gone before and fitted nothing)."""
     os.makedirs(work)
-    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_ONE)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Fit\n  identifier: org.example.fit\n"
                  "  language: en-US\n  contents:\n    - one\n")
-    with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "meta.yaml"), "w", encoding="utf-8") as fh:
         fh.write(LATIN_MODERN)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.yaml\n")
     characters = glyph_blanks(dict(os.environ, OER_MEASURES="none"))
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL, env=characters)
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work, characters)
-    tex = os.path.join(work, "pdf", "book.tex")
+    tex = place(work, "pdf", "book.tex")
     source = third = ""
     if os.path.exists(tex):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
-        runs = os.path.join(work, "third")
+        runs = beside(work, "third")   # not among the book's sources
         os.makedirs(runs)
         with open(os.path.join(runs, "book.aux"), "w", encoding="utf-8") as fh:
             fh.write("\\relax\n\\OERFitRun{2}\n")
-        subprocess.run(["lualatex", "-interaction=nonstopmode", "-output-directory", runs, tex],
+        started(["lualatex", "-interaction=nonstopmode", "-output-directory", runs, tex],
                        cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if os.path.exists(os.path.join(runs, "book.log")):
             with open(os.path.join(runs, "book.log"), encoding="utf-8", errors="replace") as fh:
                 third = fh.read()
-    return (os.path.join(work, "pdf", "org.example.fit.pdf"),
+    return (place(work, "pdf", "org.example.fit.pdf"),
             converted.stdout + converted.stderr, source, third)
 
 
@@ -1891,23 +1998,23 @@ def build_fit_columns(work):
     default (the target wrapped): (the first PDF's path, what the run said,
     the second PDF's path)."""
     os.makedirs(work)
-    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_TWO)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Columns\n  identifier: org.example.columns\n"
                  "  language: en-US\n  contents:\n    - one\n")
-    with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "meta.yaml"), "w", encoding="utf-8") as fh:
         fh.write("classoption: [twocolumn, fleqn]\n" + LATIN_MODERN)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    code_wrap: 0.5\n    pdf:\n"
                  "      metadata: meta.yaml\n  wrapped:\n    format: pdf\n    pdf:\n"
                  "      metadata: meta.yaml\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
-    return (os.path.join(work, "pdf", "org.example.columns.pdf"),
+    return (place(work, "pdf", "org.example.columns.pdf"),
             converted.stdout + converted.stderr,
-            os.path.join(work, "wrapped", "org.example.columns.pdf"))
+            place(work, "wrapped", "org.example.columns.pdf"))
 
 
 # An evaluation bar's limits as OpenStax writes them, an mtable under the
@@ -1934,21 +2041,21 @@ def build_blank_lines(work):
     """BLANK_LINES as a book's one page, on the default page: (the PDF's
     path, its LaTeX)."""
     os.makedirs(work)
-    with open(os.path.join(work, "bars.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "bars.html"), "w", encoding="utf-8") as fh:
         fh.write(BLANK_LINES)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Bars\n  identifier: org.example.bars\n"
                  "  language: en-US\n  contents:\n    - bars\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n")
     run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work)
-    tex = os.path.join(work, "pdf", "book.tex")
+    tex = place(work, "pdf", "book.tex")
     source = ""
     if os.path.exists(tex):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
-    return os.path.join(work, "pdf", "org.example.bars.pdf"), source
+    return place(work, "pdf", "org.example.bars.pdf"), source
 
 
 # Fill-in blanks as a build draws them, as lines (latexbuild.PDF_MACROS),
@@ -2054,24 +2161,24 @@ def build_drawn_blanks(work):
             ("lines", DRAWN_BLANKS, pdf, None), ("glyphs", DRAWN_BLANKS, pdf, glyph_blanks()),
             ("faces", DRAWN_FACES, pdf + "    pdf:\n      metadata: faces.yaml\n", None),
             ("untagged", DRAWN_UNTAGGED, pdf + "    pdf:\n      standard: []\n", None)):
-        folder = os.path.join(work, name)
+        folder = place(work, name)
         os.makedirs(folder)
-        with open(os.path.join(folder, "lines.md"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "lines.md"), "w", encoding="utf-8") as fh:
             fh.write(page)
-        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  title: Lines\n  identifier: org.example.lines\n"
                      "  language: en-US\n  contents:\n    - lines\n")
-        with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write(targets)
-        with open(os.path.join(folder, "faces.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "faces.yaml"), "w", encoding="utf-8") as fh:
             fh.write("mainfont: IBM Plex Serif\nmainfontoptions:\n  - Renderer=HarfBuzz\n")
         done = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], folder, environment)
-        found[name] = (os.path.join(folder, "pdf", "org.example.lines.pdf"),
+        found[name] = (place(folder, "pdf", "org.example.lines.pdf"),
                        done.stdout + done.stderr)
-    folder = os.path.join(work, "lines")
+    folder = place(work, "lines")
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], folder)
     source = ""
-    tex = os.path.join(folder, "pdf", "book.tex")
+    tex = place(folder, "pdf", "book.tex")
     if os.path.exists(tex):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
@@ -2381,15 +2488,15 @@ def build_rules(work):
     os.makedirs(work)
     for name, page in (("ruled", RULED_TABLES), ("inner", RULED_INNER),
                        ("long", RULED_LONG)):
-        with open(os.path.join(work, name + ".html"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".html"), "w", encoding="utf-8") as fh:
             fh.write(page)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Rules\n  identifier: org.example.rules\n"
                  "  language: en-US\n  contents:\n    - ruled\n    - inner\n    - long\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n")
     run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
-    return os.path.join(work, "pdf", "org.example.rules.pdf")
+    return place(work, "pdf", "org.example.rules.pdf")
 
 
 def rules_between(lines, rules, above, below, color=GRAY):
@@ -2821,28 +2928,28 @@ def build_code(work):
     book's PDF's path, what its run said, the wrap book's three PDFs'
     paths, pdf's, whole's, and half's, and what its run said)."""
     os.makedirs(work)
-    with open(os.path.join(work, "code.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "code.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_CODE)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Code\n  identifier: org.example.code\n"
                  "  language: en-US\n  contents:\n    - code\n")
-    with open(os.path.join(work, "meta.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "meta.yaml"), "w", encoding="utf-8") as fh:
         fh.write(LATIN_MODERN)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n  latin:\n    format: pdf\n"
                  "    pdf:\n      metadata: meta.yaml\n")
     converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work,
                     dict(os.environ, OER_MEASURES="none"))
     margins = work + "-margins"
     os.makedirs(margins)
-    with open(os.path.join(margins, "margins.md"), "w", encoding="utf-8") as fh:
+    with open(place(margins, "margins.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_CODE_MARGINS)
-    with open(os.path.join(margins, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(margins, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Margins\n  identifier: org.example.margins\n"
                  "  language: en-US\n  contents:\n    - margins\n")
-    with open(os.path.join(margins, "page.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(margins, "page.yaml"), "w", encoding="utf-8") as fh:
         fh.write(CODE_MARGINS)
-    with open(os.path.join(margins, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(margins, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    footer: \"" + CODE_FOOTER + "\"\n"
                  "    pdf:\n      metadata: page.yaml\n"
                  "  untagged:\n    format: pdf\n    pdf:\n      standard: []\n"
@@ -2850,35 +2957,35 @@ def build_code(work):
     margined = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], margins)
     tall = work + "-tall"
     os.makedirs(tall)
-    with open(os.path.join(tall, "tall.md"), "w", encoding="utf-8") as fh:
+    with open(place(tall, "tall.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_CODE_TALL)
-    with open(os.path.join(tall, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(tall, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Tall\n  identifier: org.example.tall\n"
                  "  language: en-US\n  contents:\n    - tall\n")
-    with open(os.path.join(tall, "page.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(tall, "page.yaml"), "w", encoding="utf-8") as fh:
         fh.write(CODE_TALL_PAGE)
-    with open(os.path.join(tall, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(tall, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: page.yaml\n")
     talled = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], tall)
     wrap = work + "-wrap"
     os.makedirs(wrap)
-    with open(os.path.join(wrap, "wrap.md"), "w", encoding="utf-8") as fh:
+    with open(place(wrap, "wrap.md"), "w", encoding="utf-8") as fh:
         fh.write(FIT_CODE_WRAP)
-    with open(os.path.join(wrap, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(wrap, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Wrap\n  identifier: org.example.wrap\n"
                  "  language: en-US\n  contents:\n    - wrap\n")
-    with open(os.path.join(wrap, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(wrap, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n  whole:\n    format: pdf\n"
                  "    code_wrap: 1\n  half:\n    format: pdf\n    code_wrap: 0.5\n")
     wrapped_run = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], wrap)
-    return (os.path.join(work, "pdf", "org.example.code.pdf"),
-            os.path.join(work, "latin", "org.example.code.pdf"),
+    return (place(work, "pdf", "org.example.code.pdf"),
+            place(work, "latin", "org.example.code.pdf"),
             converted.stdout + converted.stderr,
-            os.path.join(margins, "pdf", "org.example.margins.pdf"),
+            place(margins, "pdf", "org.example.margins.pdf"),
             margined.stdout + margined.stderr,
-            os.path.join(tall, "pdf", "org.example.tall.pdf"),
+            place(tall, "pdf", "org.example.tall.pdf"),
             talled.stdout + talled.stderr,
-            tuple(os.path.join(wrap, name, "org.example.wrap.pdf")
+            tuple(place(wrap, name, "org.example.wrap.pdf")
                   for name in ("pdf", "whole", "half")),
             wrapped_run.stdout + wrapped_run.stderr)
 
@@ -3921,20 +4028,20 @@ def build_math_font(work):
     targets = MATH_FONT_TARGETS + ((STATIC_FACE,) if font_installed("JosefinSans-Regular.ttf")
                                    else ()) \
         + ((VARIABLE_FACE,) if font_installed("JunicodeVF-Roman.ttf") else ())
-    os.makedirs(os.path.join(work, "fonts"))
+    os.makedirs(place(work, "fonts"))
     for name, text in [("formulas.md", MATH_FONT_BOOK)] + [
             (target + ".yaml", meta) for target, meta in targets]:
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    plex = subprocess.run(["kpsewhich", "IBMPlexMath-Regular.otf"], capture_output=True,
+    plex = started(["kpsewhich", "IBMPlexMath-Regular.otf"], capture_output=True,
                           text=True, stdin=subprocess.DEVNULL).stdout.strip() \
         if shutil.which("kpsewhich") else ""
     if plex:
-        shutil.copyfile(plex, os.path.join(work, "fonts", "BookMath.otf"))
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        shutil.copyfile(plex, place(work, "fonts", "BookMath.otf"))
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Formulas\n  identifier: org.example.formulas\n"
                  "  language: en-US\n  contents:\n    - formulas\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n" + "".join(
             f"  {target}:\n    format: pdf\n    pdf:\n      metadata: {target}.yaml\n"
             for target, _meta in targets) + "  latex:\n    format: latex\n")
@@ -3942,7 +4049,7 @@ def build_math_font(work):
     # The LaTeX a PDF is made from, alone, as --latex-only writes it.
     latex = run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only", "--target",
                  "defaulted"], work)
-    return ({target: os.path.join(work, target, "org.example.formulas.pdf")
+    return ({target: place(work, target, "org.example.formulas.pdf")
              for target, _meta in targets},
             converted.stdout + converted.stderr + latex.stdout + latex.stderr)
 
@@ -4088,7 +4195,7 @@ def build_collector(work):
     peaks = {}
     for count, tagged in ((2500, False), (5000, False), (300, True)):
         name = f"collector-{count}"
-        with open(os.path.join(work, name + ".tex"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".tex"), "w", encoding="utf-8") as fh:
             fh.write(("\\DocumentMetadata{lang=en, pdfstandard=ua-2, tagging=on}\n"
                       if tagged else "")
                      + "\\documentclass{book}\n" + latexbuild.STATIC_FONTS
@@ -4101,7 +4208,7 @@ def build_collector(work):
         done = run([sys.executable, "-c", COLLECTOR_PEAK, "lualatex",
                     "-interaction=nonstopmode", name + ".tex"], work)
         if tagged:
-            log = os.path.join(work, name + ".log")
+            log = place(work, name + ".log")
             peaks["log"] = (open(log, encoding="utf-8", errors="replace").read()
                             if os.path.exists(log) else "")
         else:
@@ -4135,7 +4242,7 @@ def build_cff2_face(work):
     where fontTools or LuaLaTeX isn't there."""
     if not shutil.which("lualatex"):
         return None
-    fonts = os.path.join(work, CFF2_FOLDER)
+    fonts = place(work, CFF2_FOLDER)
     os.makedirs(fonts)
     if not (make_cff2_face(os.path.join(fonts, CFF2_FACE))
             and make_cff2_face(os.path.join(fonts, CFF2_WEIGHT), 1)):
@@ -4147,7 +4254,7 @@ def build_cff2_face(work):
             ("node", "", CFF2_FACE, ""),
             ("weight", CFF2_LOST, CFF2_WEIGHT, ",RawFeature={axis={wght=900}}"),
             ("black", CFF2_LOST, CFF2_WEIGHT, ",RawFeature={instance=Black}")):
-        name = os.path.join(work, way + ".tex")
+        name = place(work, way + ".tex")
         # The fonts by their absolute path, as the book's metadata gives
         # them: luaotfload keeps a face it has read in its cache with the
         # path it was read by, and the book's node target, built in another
@@ -4160,11 +4267,11 @@ def build_cff2_face(work):
                      f"\\setmainfont{{{face}}}[Path={fonts}/{options}]\n"
                      f"\\begin{{document}}\n{CFF2_TEXT}\n\\end{{document}}\n")
         run(["lualatex", "-interaction=nonstopmode", "-halt-on-error", way + ".tex"], work)
-        log = os.path.join(work, way + ".log")
-        pages[way] = (os.path.join(work, way + ".pdf"),
+        log = place(work, way + ".log")
+        pages[way] = (place(work, way + ".pdf"),
                       open(log, encoding="utf-8", errors="replace").read()
                       if os.path.exists(log) else "")
-    book = os.path.join(work, "book")
+    book = place(work, "book")
     os.makedirs(book)
     files = {"chapter.md": f"# A chapter\n\n{CFF2_TEXT}\n",
              "project.yaml": "project:\n  title: Boxes\n  identifier: org.example.boxes\n"
@@ -4176,10 +4283,10 @@ def build_cff2_face(work):
         files[way + ".yaml"] = (f"mainfont: {CFF2_FACE}\nmainfontoptions:\n"
                                 f"  - Path={fonts}/\n" + renderer)
     for name, text in files.items():
-        with open(os.path.join(book, name), "w", encoding="utf-8") as fh:
+        with open(place(book, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], book)
-    built = {way: os.path.exists(os.path.join(book, way, "org.example.boxes.pdf"))
+    built = {way: os.path.exists(place(book, way, "org.example.boxes.pdf"))
              for way in ("harf", "node")}
     return pages, converted.stdout + converted.stderr, built
 
@@ -4466,25 +4573,25 @@ def build_note_numbers(work):
     and NUMBERED_TABLE, the second with NUMBERED_TABLE alone, measured as
     every book's PDF is: (the PDF's path, its LaTeX)."""
     os.makedirs(work)
-    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("# One\n\n" + "".join("Text %d.[^n%d]\n\n[^n%d]: Note %d.\n\n" % (k, k, k, k)
                                        for k in range(1, 11)) + NUMBERED_TABLE)
-    with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Two\n\n" + NUMBERED_TABLE)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Numbered\n  identifier: org.example.numbered\n"
                  "  language: en-US\n  numbering: true\n  contents:\n    - one\n    - two\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n")
     measuring = {key: value for key, value in os.environ.items() if key != "OER_MEASURES"}
     run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work, measuring)
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work, measuring)
     source = ""
-    tex = os.path.join(work, "pdf", "book.tex")
+    tex = place(work, "pdf", "book.tex")
     if os.path.exists(tex):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
-    return os.path.join(work, "pdf", "org.example.numbered.pdf"), source
+    return place(work, "pdf", "org.example.numbered.pdf"), source
 
 
 def note_numbers_checks(path, source):
@@ -4522,26 +4629,26 @@ def build_measured(work):
     was run with, its metadata file's LaTeX reading a file in the book's
     folder: (the PDF's path, what the run said, its LaTeX)."""
     os.makedirs(work)
-    with open(os.path.join(work, "measured.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "measured.md"), "w", encoding="utf-8") as fh:
         fh.write(MEASURED_BOOK)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Measured\n  identifier: org.example.measured\n"
                  "  language: en-US\n  contents:\n    - measured\n")
-    with open(os.path.join(work, "measured-meta.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "measured-meta.yaml"), "w", encoding="utf-8") as fh:
         fh.write("header-includes:\n  - \\input{measured-macros.tex}\n")
-    with open(os.path.join(work, "measured-macros.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "measured-macros.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\newcommand\\Measuredmacro{A macro of the book's own.}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: measured-meta.yaml\n")
     measuring = {key: value for key, value in os.environ.items() if key != "OER_MEASURES"}
     converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work, measuring)
     run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work, measuring)
-    tex = os.path.join(work, "pdf", "book.tex")
+    tex = place(work, "pdf", "book.tex")
     source = ""
     if os.path.exists(tex):
         with open(tex, encoding="utf-8") as fh:
             source = fh.read()
-    return (os.path.join(work, "pdf", "org.example.measured.pdf"),
+    return (place(work, "pdf", "org.example.measured.pdf"),
             converted.stdout + converted.stderr, source)
 
 
@@ -4554,17 +4661,17 @@ def build_default(work):
     beside it ending -lacking. (The PDF's path, what the run said, the
     copy's PDF's path, and what its build said.)"""
     write_book(work)
-    with open(os.path.join(work, "front.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "front.md"), "w", encoding="utf-8") as fh:
         fh.write(FRONT.replace(CLASS_PAGE, ""))
     converted = run(["python3", os.path.join(BIN, "convert.py"), "--quick"], work)
     lacking = work + "-lacking"
     shutil.copytree(work, lacking)
-    lacking_path = os.path.join(lacking, "pdf", "org.example.pdf.pdf")
+    lacking_path = place(lacking, "pdf", "org.example.pdf.pdf")
     if os.path.exists(lacking_path):
         os.remove(lacking_path)
     rebuilt = run(["python3", "-c", LACKING_PLEX, os.path.join(BIN, "build-pdf.py"), "-d",
-                   lacking, "--target", "pdf", "--intermediates", lacking], lacking)
-    return (os.path.join(work, "pdf", "org.example.pdf.pdf"),
+                   lacking, "--target", "pdf"], lacking)
+    return (place(work, "pdf", "org.example.pdf.pdf"),
             converted.stdout + converted.stderr, lacking_path, rebuilt.stdout + rebuilt.stderr)
 
 
@@ -4848,7 +4955,7 @@ def untagged_repairs(work):
     """build-pdf.py's repairs after LaTeX on a PDF with no structure tree,
     as one built to no PDF/UA standard has none: (whether it's taken for
     tagged, what the repairs said, what they raised)."""
-    path = os.path.join(work, "untagged.pdf")
+    path = place(work, "untagged.pdf")
     pdf = pdfparagraphs.pikepdf.new()
     pdf.add_blank_page()
     pdf.save(path)
@@ -5262,7 +5369,7 @@ def tex_missing():
     if not shutil.which("kpsewhich"):
         return []
     return [package for package, name in PDF_TEX + SUITE_TEX
-            if not subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+            if not started(["kpsewhich", name], capture_output=True, text=True,
                                   stdin=subprocess.DEVNULL).stdout.strip()]
 
 
@@ -5270,7 +5377,7 @@ def font_installed(name):
     """Whether TeX finds the font file."""
     if not shutil.which("kpsewhich"):
         return False
-    found = subprocess.run(["kpsewhich", name], capture_output=True, text=True,
+    found = started(["kpsewhich", name], capture_output=True, text=True,
                            stdin=subprocess.DEVNULL)
     return bool(found.stdout.strip())
 
@@ -5364,7 +5471,7 @@ def outline_titles(reader):
 # --------------------------------------------------------------------------
 
 def run(arguments, cwd, environment=None):
-    return subprocess.run(arguments, cwd=cwd, env=environment,
+    return started(arguments, cwd=cwd, env=environment,
                           capture_output=True, text=True,
                           stdin=subprocess.DEVNULL)
 
@@ -5375,12 +5482,12 @@ def build(work):
     division commands can be counted."""
     write_book(work)
     converted = run(["python3", os.path.join(BIN, "convert.py")], work, glyph_blanks())
-    pdf = os.path.join(work, "pdf", "org.example.pdf.pdf")
+    pdf = place(work, "pdf", "org.example.pdf.pdf")
     if not os.path.exists(pdf):
         raise RuntimeError("no PDF was written:\n" + converted.stderr[-3000:])
     latex = run(["python3", os.path.join(BIN, "build-pdf.py"),
                  "--latex-only"], work)
-    tex = os.path.join(work, "pdf", "book.tex")
+    tex = place(work, "pdf", "book.tex")
     if not os.path.exists(tex):
         raise RuntimeError("no LaTeX was written:\n" + latex.stderr[-3000:])
     with open(tex, encoding="utf-8") as fh:
@@ -5389,14 +5496,14 @@ def build(work):
     # since LaTeX takes a while and the in_place default is built above.
     placements = {}
     for choice in ("section", "float"):
-        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write(CONVERSION + "      figures: %s\n" % choice)
         run(["python3", os.path.join(BIN, "build-pdf.py"), "--latex-only"], work)
         with open(tex, encoding="utf-8") as fh:
             placements[choice] = fh.read()
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write(CONVERSION)
-    report = os.path.join(work, "output-check.csv")
+    report = place(work, "output-check.csv")
     rows = []
     if os.path.exists(report):
         with open(report, encoding="utf-8-sig", newline="") as fh:
@@ -6378,10 +6485,10 @@ print(c.tight * new.factor / s.factor * s.columns * (line - pad) / (new.columns 
       new.factor, new.columns)
 """.format(case="{ " + ", ".join("%s = %r" % item for item in case.items()) + " }")
     with tempfile.TemporaryDirectory() as work:
-        script = os.path.join(work, "refit.lua")
+        script = place(work, "refit.lua")
         with open(script, "w", encoding="utf-8") as fh:
             fh.write(stubs + macros[opening:end - 1] + run)
-        done = subprocess.run([texlua, script], cwd=work, capture_output=True, text=True)
+        done = started([texlua, script], cwd=work, capture_output=True, text=True)
     return tuple(float(x) for x in done.stdout.split()) if done.returncode == 0 else ()
 
 
@@ -6443,10 +6550,10 @@ for _, s in ipairs({%s}) do
 end
 """ % ", ".join("[==[%s]==]" % text for text in texts)
     with tempfile.TemporaryDirectory() as work:
-        script = os.path.join(work, "paragraph.lua")
+        script = place(work, "paragraph.lua")
         with open(script, "w", encoding="utf-8") as fh:
             fh.write(stubs + macros[opening:end - 1] + run)
-        done = subprocess.run([texlua, script], cwd=work, capture_output=True, text=True)
+        done = started([texlua, script], cwd=work, capture_output=True, text=True)
     if done.returncode != 0:
         print(done.stderr[-500:])
         return []
@@ -6471,10 +6578,10 @@ def formula_widths(texs, count="formula_width(tex)"):
               + ", ".join("[==[%s]==]" % tex for tex in texs)
               + "}) do print(" + count + ") end\n")
     with tempfile.TemporaryDirectory() as work:
-        path = os.path.join(work, "widths.lua")
+        path = place(work, "widths.lua")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(script)
-        done = subprocess.run(["pandoc", "lua", path], cwd=work, capture_output=True,
+        done = started(["pandoc", "lua", path], cwd=work, capture_output=True,
                               text=True, stdin=subprocess.DEVNULL)
     return [int(x) for x in done.stdout.split()] if done.returncode == 0 else []
 
@@ -7518,10 +7625,10 @@ def fancy_checks(fancy_path, fancy_said):
 # message each had a list of their own.
 BOOK_FOLDERS = ("", "-ua1", "-untagged", "-notes", "-footer", "-headings", "-sized", "-fancy",
                 "-default", "-default-lacking", "-preamble", "-aaa", "-aaa-latin",
-                "-aaa-lacking", "-fit", "-columns", "-bars", "-drawn", "-languages", "-rules",
-                "-code", "-code-margins", "-code-tall", "-code-wrap", "-mathfont", "-cff2",
-                "-measured", "-numbered", "-ams", "-doctoc", "-own", "-twice", "-collector",
-                "-converted", "-turned", "-stopped")
+                "-aaa-lacking", "-fit", "-fit-third", "-columns", "-bars", "-drawn",
+                "-languages", "-rules", "-code", "-code-margins", "-code-tall", "-code-wrap",
+                "-mathfont", "-cff2", "-measured", "-numbered", "-ams", "-doctoc", "-own",
+                "-twice", "-collector", "-converted", "-turned", "-stopped")
 
 
 # A book in amsbook's class, with a contents and a list of figures, whose
@@ -7554,20 +7661,20 @@ def build_ams(work):
     """AMS_PAGE in amsbook's class, tagged, to PDF/UA-2, with a contents
     and a list of figures, in Latin Modern: (the PDF's path, what the run
     said)."""
-    os.makedirs(os.path.join(work, "assets"))
-    png(os.path.join(work, "assets", "gray.png"), (128, 128, 128))
-    with open(os.path.join(work, "sets.md"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "assets"))
+    png(place(work, "assets", "gray.png"), (128, 128, 128))
+    with open(place(work, "sets.md"), "w", encoding="utf-8") as fh:
         fh.write(AMS_PAGE)
-    with open(os.path.join(work, "meta.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "meta.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ndocumentclass: amsbook\ntoc: true\nlof: true\n" + LATIN_MODERN + "---\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Sets\n  identifier: org.example.sets\n"
                  "  language: en-US\n  contents:\n    - sets\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+    converted = started(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.sets.pdf"), converted.stdout + converted.stderr
+    return place(work, "pdf", "org.example.sets.pdf"), converted.stdout + converted.stderr
 
 
 
@@ -7588,21 +7695,21 @@ def build_doc_toc(work):
     of one argument, in Latin Modern: (the PDF's path, what the run
     said)."""
     os.makedirs(work)
-    with open(os.path.join(work, "sets.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "sets.md"), "w", encoding="utf-8") as fh:
         fh.write(DOC_TOC_PAGE)
-    with open(os.path.join(work, "meta.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "meta.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntoc: true\nheader-includes: |\n  ```{=latex}\n  \\makeatletter\n"
                  "  \\let\\kernelstarttoc\\@starttoc\n"
                  "  \\RenewDocumentCommand\\@starttoc{m}{\\kernelstarttoc{#1}}\n"
                  "  \\makeatother\n  ```\n" + LATIN_MODERN + "---\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Sets\n  identifier: org.example.sets\n"
                  "  language: en-US\n  contents:\n    - sets\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      metadata: meta.md\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py")], cwd=work,
+    converted = started(["python3", os.path.join(BIN, "convert.py")], cwd=work,
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.sets.pdf"), converted.stdout + converted.stderr
+    return place(work, "pdf", "org.example.sets.pdf"), converted.stdout + converted.stderr
 
 
 def build_own_template(work):
@@ -7610,25 +7717,25 @@ def build_own_template(work):
     Pandoc's with a paragraph of its own after \\begin{document}, kept in
     a folder beside the configuration: (the PDF's path, what the run
     said)."""
-    os.makedirs(os.path.join(work, "templates"))
-    template = subprocess.run(["pandoc", "--data-dir", os.path.join(work, "templates"),
+    os.makedirs(place(work, "templates"))
+    template = started(["pandoc", "--data-dir", place(work, "templates"),
                                "-D", "latex"], capture_output=True, text=True,
                               check=True).stdout
-    with open(os.path.join(work, "templates", "book.latex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "templates", "book.latex"), "w", encoding="utf-8") as fh:
         fh.write(template.replace("\\begin{document}",
                                   "\\begin{document}\nA template of its own.\\par", 1))
-    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("# One\n\nA page.\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Own\n  identifier: org.example.own\n"
                  "  language: en-US\n  contents:\n    - one\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n"
                  "    pdf:\n      template: templates/book.latex\n")
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
-    return os.path.join(work, "pdf", "org.example.own.pdf"), converted.stdout + converted.stderr
+    return place(work, "pdf", "org.example.own.pdf"), converted.stdout + converted.stderr
 
 
 def build_twice(work):
@@ -7638,24 +7745,24 @@ def build_twice(work):
     runs said)."""
     paths, said = [], ""
     for folder, zone in (("first", "UTC"), (os.path.join("second", "deeper"), "Pacific/Kiritimati")):
-        book = os.path.join(work, folder)
-        os.makedirs(os.path.join(book, "assets"))
-        png(os.path.join(book, "assets", "red.png"), (200, 0, 0))
-        with open(os.path.join(book, "one.md"), "w", encoding="utf-8") as fh:
+        book = place(work, folder)
+        os.makedirs(place(book, "assets"))
+        png(place(book, "assets", "red.png"), (200, 0, 0))
+        with open(place(book, "one.md"), "w", encoding="utf-8") as fh:
             fh.write("# One\n\nA page, a picture with no description, a formula, $x^2$, "
                      "and a table, whose caption the PDF's repair retags.\n\n"
                      "![](assets/red.png)\n\n| Name | Value |\n|------|-------|\n"
                      "| a    | 1     |\n\n: Two columns\n")
-        with open(os.path.join(book, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(book, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  title: Twice\n  identifier: org.example.twice\n"
                      "  language: en-US\n  contents:\n    - one\n")
-        with open(os.path.join(book, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(book, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n  pdf:\n    format: pdf\n")
-        converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+        converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                    cwd=book, capture_output=True, text=True,
                                    stdin=subprocess.DEVNULL,
                                    env=dict(os.environ, SOURCE_DATE_EPOCH="1700000000", TZ=zone))
-        paths.append(os.path.join(book, "pdf", "org.example.twice.pdf"))
+        paths.append(place(book, "pdf", "org.example.twice.pdf"))
         said += converted.stdout + converted.stderr
     return paths[0], paths[1], said
 
@@ -7669,9 +7776,9 @@ def build_converted(work):
         from PIL import Image
     except ImportError:
         return None
-    os.makedirs(os.path.join(work, "assets"))
-    Image.new("RGB", (800, 400), (0, 120, 200)).save(os.path.join(work, "assets", "wide.gif"))
-    noise_png(os.path.join(work, "assets", "wide.png"), 30, 15)
+    os.makedirs(place(work, "assets"))
+    Image.new("RGB", (800, 400), (0, 120, 200)).save(place(work, "assets", "wide.gif"))
+    noise_png(place(work, "assets", "wide.png"), 30, 15)
     for name, text in (
             ("one.md", "# One\n\n![A blue box](assets/wide.gif){width=1in}\n\n"
                        "![A box of noise](assets/wide.png){width=2in}\n"),
@@ -7679,12 +7786,12 @@ def build_converted(work):
                              "  language: en-US\n  contents:\n    - one\n"),
             ("conversion.yaml", "defaults:\n  images:\n    downsample: 2\n"
                                 "targets:\n  pdf:\n    format: pdf\n")):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
-    return (os.path.join(work, "pdf", "org.example.converted.pdf"),
+    return (place(work, "pdf", "org.example.converted.pdf"),
             converted.stdout + converted.stderr)
 
 
@@ -7714,22 +7821,22 @@ def build_turned(work):
         from PIL import Image
     except ImportError:
         return None
-    os.makedirs(os.path.join(work, "assets"))
+    os.makedirs(place(work, "assets"))
     exif = Image.Exif()
     exif[0x0112] = 6
     Image.new("RGB", (300, 200), (0, 120, 200)).save(
-        os.path.join(work, "assets", "phone.jpg"), quality=90, exif=exif.tobytes())
+        place(work, "assets", "phone.jpg"), quality=90, exif=exif.tobytes())
     for name, text in (
             ("one.md", "# One\n\n![A blue photograph, taller than wide](assets/phone.jpg)\n"),
             ("project.yaml", "project:\n  title: Turned\n  identifier: org.example.turned\n"
                              "  language: en-US\n  contents:\n    - one\n"),
             ("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n")):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    converted = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    converted = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                                cwd=work, capture_output=True, text=True,
                                stdin=subprocess.DEVNULL)
-    return (os.path.join(work, "pdf", "org.example.turned.pdf"),
+    return (place(work, "pdf", "org.example.turned.pdf"),
             converted.stdout + converted.stderr)
 
 
@@ -7776,13 +7883,13 @@ def build_stopped(work):
     built = {}
 
     def convert(book, **environment):
-        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+        done = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                               cwd=book, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL, env=dict(os.environ, **environment))
         return done.stdout + done.stderr
 
     for name, text in pages.items():
-        book = os.path.join(work, name)
+        book = place(work, name)
         os.makedirs(book)
         files = {
             "one.md": "# One\n\nA first page.\n\n## A section\n\nIts text.\n",
@@ -7796,17 +7903,17 @@ def build_stopped(work):
                                   "    \\usepackage{oernosuchpackage}\n    ```\n")
             files["conversion.yaml"] += "    pdf:\n      metadata: meta.yaml\n"
         for file_name, content in files.items():
-            with open(os.path.join(book, file_name), "w", encoding="utf-8") as fh:
+            with open(place(book, file_name), "w", encoding="utf-8") as fh:
                 fh.write(content)
         environment = {}
         if name in ("killed", "refused", "lua"):
             # LuaLaTeX itself for the release's probe, the page's measure,
             # and any run after the first of the book's own, which is the
             # one given the seed.
-            tools = os.path.join(work, name + "-bin")
+            tools = place(work, name + "-bin")
             os.makedirs(tools)
             real = shutil.which("lualatex")
-            count = os.path.join(work, name + "-runs")
+            count = place(work, name + "-runs")
             with open(os.path.join(tools, "lualatex"), "w", encoding="utf-8") as fh:
                 fh.write("#!/bin/sh\n"
                          f"case \"$*\" in *setrandomseed*) ;; *) exec '{real}' \"$@\" ;; esac\n"
@@ -7850,21 +7957,30 @@ def build_stopped(work):
             except OSError:
                 built[key] = 0
         if name == "command":
+            # Where the run says it kept the log: the folder the target
+            # was being built in.
+            named = re.search(r"LaTeX's log is kept as (\S*book\.log), and", built[name][1])
+            there = os.path.dirname(os.path.join(book, named.group(1))) if named \
+                else place(book, "pdf")
             kept = [f for f in ("book.log", "book.tex")
-                    if os.path.exists(os.path.join(book, "pdf", f))]
+                    if os.path.exists(os.path.join(there, f))]
             lines = []
             if "book.tex" in kept:
-                with open(os.path.join(book, "pdf", "book.tex"), encoding="utf-8") as fh:
+                with open(os.path.join(there, "book.tex"), encoding="utf-8") as fh:
                     lines = fh.read().split("\n")
             built["kept"] = (kept, lines)
-            shutil.rmtree(os.path.join(book, "pdf"))
+            shutil.rmtree(there, ignore_errors=True)
             built["pandoc"] = (book, convert(book, OER_PDF_VIA="pandoc"))
-            built["pandoc-kept"] = os.path.exists(os.path.join(book, "pdf", "book.log"))
-            with open(os.path.join(book, "pdf", "book.log"), "w", encoding="utf-8") as fh:
+            built["pandoc-kept"] = os.path.exists(os.path.join(there, "book.log")) \
+                or os.path.exists(place(book, "pdf", "book.log"))
+            os.makedirs(there, exist_ok=True)
+            with open(os.path.join(there, "book.log"), "w", encoding="utf-8") as fh:
                 fh.write("a failed build's log\n")
-            with open(os.path.join(book, "two.md"), "w", encoding="utf-8") as fh:
+            with open(place(book, "two.md"), "w", encoding="utf-8") as fh:
                 fh.write("# Two\n\nBefore it. After it.\n")
             built["mended"] = (book, convert(book))
+            built["log-left"] = os.path.exists(os.path.join(there, "book.log")) \
+                or os.path.exists(place(book, "pdf", "book.log"))
     return built
 
 
@@ -7896,10 +8012,12 @@ def stopped_checks(built):
              and "wasn't built" in said("package"), why("package"))),
         ("a command nothing defines, in a page's raw LaTeX, stops the build with LaTeX's "
          "error, the line of the book's LaTeX it's on, and the page that's on, and the log "
-         "and that LaTeX are kept where the PDF would have been",
+         "and that LaTeX are kept where the target was being built, named from the "
+         "project's folder",
          lambda: explained(
              "! Undefined control sequence." in said("command")
-             and "pdf/book.log" in said("command").replace(os.sep, "/")
+             and "kept as output/work/staging/targets/pdf/book.log" in
+             said("command").replace(os.sep, "/")
              and at_line(), why("command"))),
         ("built by Pandoc's own route, the same book is reported as Pandoc reports it, and "
          "no log is kept",
@@ -7910,9 +8028,9 @@ def stopped_checks(built):
              and not built["pandoc-kept"], why("pandoc"))),
         ("and with the command taken out it builds, and the failed build's log is gone",
          lambda: explained(
-             os.path.exists(os.path.join(built["mended"][0], "pdf", "org.example.command.pdf"))
+             os.path.exists(place(built["mended"][0], "pdf", "org.example.command.pdf"))
              and "wasn't built" not in said("mended")
-             and not os.path.exists(os.path.join(built["mended"][0], "pdf", "book.log")),
+             and not built["log-left"],
              why("mended"))),
         ("an error that first shows on LaTeX's second run, in the contents its first run "
          "wrote, is reported as that run's, with the line of the contents it's on",
@@ -8134,7 +8252,7 @@ def checks(work, built):
     ua1_roles = dict(f for f in ua1_math if f[0] == "roles").get("roles", [])
     ua1_languages = languages(ua1_path) if os.path.exists(ua1_path) else []
     ua1_math = [f for f in ua1_math if f[0] != "roles"]
-    pdf_path = os.path.join(work, "pdf", "org.example.pdf.pdf")
+    pdf_path = place(work, "pdf", "org.example.pdf.pdf")
     declared = languages(pdf_path)
     untagged = untagged_repairs(work)
     root = reader.trailer["/Root"]
@@ -9125,7 +9243,7 @@ def main():
 
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+    version = started(["pandoc", "--version"], capture_output=True,
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
         sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "

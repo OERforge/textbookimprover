@@ -1425,7 +1425,12 @@ def check_project_paths():
          and "TEXINPUTS" not in here.tex_env({})
          and tree.tex_env({"TEXINPUTS": "/own"})["TEXINPUTS"].split(os.pathsep)
          == [".", at("src", "book"), "/own"]
-         and tree.tex_env({})["BIBINPUTS"].endswith(os.pathsep)),
+         and tree.tex_env({})["BIBINPUTS"].endswith(os.pathsep)
+         # A face's file too, which fontspec's Path names from the sources.
+         and "OPENTYPEFONTS" not in here.tex_env({})
+         and all(tree.tex_env({name: "/faces"})[name].split(os.pathsep)
+                 == [".", at("src", "book"), "/faces"]
+                 for name in ("OPENTYPEFONTS", "TTFONTS"))),
         ("a path is inside the project by where it leads, a link followed",
          lambda: there.inside("a/b.png") and there.inside(work)
          and not there.inside("../b.png") and not there.inside("/etc/passwd")

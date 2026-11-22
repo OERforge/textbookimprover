@@ -247,12 +247,15 @@ class Project:
         """The environment for a LaTeX, BibTeX, or Biber run in run_dir
         that reads the book's own files: env, or the run's own, with the
         sources' folder on the programs' search paths when it isn't the
-        folder they run in."""
+        folder they run in. The paths a face's file is looked for on are
+        among them: fontspec's Path=fonts/ names a folder from where the
+        book's files are, and LuaTeX looks from the folder it runs in and
+        then on those paths, not on TEXINPUTS."""
         env = dict(os.environ if env is None else env)
         folders = [os.path.abspath(os.path.join(self.run_dir(part), o))
                    for o in self.originals(part) if o != "."]
         if folders:
-            for name in ("TEXINPUTS", "BIBINPUTS", "BSTINPUTS"):
+            for name in ("TEXINPUTS", "BIBINPUTS", "BSTINPUTS") + FONT_PATHS:
                 env[name] = os.pathsep.join(["."] + folders + [env.get(name, "")])
         return env
 
@@ -478,6 +481,10 @@ class Tree(Project):
     def originals(self, part=None):
         part = self.part(part)
         return (".", os.path.relpath(self.sources(part), self.run_dir(part)))
+
+
+# kpathsea's search paths for a face's file, OpenType and TrueType.
+FONT_PATHS = ("OPENTYPEFONTS", "TTFONTS")
 
 
 def is_tree(folder):

@@ -1532,8 +1532,12 @@ def measure_page(document, filters, environment, base):
             done = subprocess.run(
                 [ENGINE, "-interaction=nonstopmode", "-halt-on-error", "-output-directory",
                  work, os.path.join(work, "measure.tex")],
-                cwd=P(base).run_dir(), env=dict(environment, OER_MEASURE_LUA=os.path.join(
-                    work, "measure-page.lua"), OER_MEASURE_OUT=out),
+                # With the sources on TeX's search paths where they aren't
+                # the folder it runs in, as the book's own build has them.
+                cwd=P(base).run_dir(), env=dict(
+                    P(base).tex_env(environment),
+                    OER_MEASURE_LUA=os.path.join(work, "measure-page.lua"),
+                    OER_MEASURE_OUT=out),
                 capture_output=True, text=True, errors="replace", stdin=subprocess.DEVNULL,
                 timeout=600)
         except OSError:
@@ -1936,6 +1940,11 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
                  for folder in P(base).originals() if folder != "."]
     env["TEXINPUTS"] = os.pathsep.join([tex_dir] + [d for d in searched if d] + originals
                                        + [environment.get("TEXINPUTS", "")])
+    # And a face's file, which fontspec's Path names from the book's own
+    # folder: LuaTeX looks for one on these paths, not on TEXINPUTS.
+    if originals:
+        for name in projectpaths.FONT_PATHS:
+            env[name] = os.pathsep.join(originals + [environment.get(name, "")])
     env["TEXMFOUTPUT"] = tex_dir
     if env.get("SOURCE_DATE_EPOCH"):
         # LaTeX writes the PDF's dates in local time, with the zone's offset.
@@ -1969,7 +1978,9 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
             with open(os.path.join(kept, "book.log"), "w", encoding="utf-8") as fh:
                 fh.write(log or said)
             shutil.copyfile(tex, os.path.join(kept, "book.tex"))
-            there = os.path.relpath(kept, P(base).run_dir())
+            # From the project's folder, where the person is, not the
+            # folder LaTeX ran in.
+            there = os.path.relpath(kept, P(base).top())
             lines.append(f"LaTeX's log is kept as {os.path.join(there, 'book.log')}, and the "
                          f"LaTeX it read, whose lines the log names, as "
                          f"{os.path.join(there, 'book.tex')}.")
