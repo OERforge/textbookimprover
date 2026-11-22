@@ -6,7 +6,7 @@ OpenStax writes its books in CNXML, an XML format of its own, and keeps each boo
 git clone https://github.com/openstax/osbooks-principles-economics-bundle
 python3 $T/bin/unpack-cnx.py osbooks-principles-economics-bundle --list
 python3 $T/bin/unpack-cnx.py osbooks-principles-economics-bundle \
-    --book principles-economics-3e -o ~/books/econ
+    --book principles-economics-3e -o ~/books/econ --part book
 cd ~/books/econ
 python3 $T/bin/convert.py
 ```
@@ -25,7 +25,7 @@ A repository can hold several books (a "bundle"); `--list` names them, and `--bo
 
 ## A book's settings, and where to change them
 
-What the unpacker decides for a book is in the book's own folder, most of it in files `convert.py` reads, each yours to edit. The unpacker writes only into an empty folder, so unpacking a book again means a new folder, and the files you've edited copied into it.
+With `--part book`, `-o` is a project's folder: the pages go to `src/book/`, the drafted sidecars to `sidecars/book/`, the settings to the project's top, and the repository is copied, without its `.git/`, to the project's `upstream/` and named as the book's `from` ([A project's folders](layout.md#unpacking-a-part-from-upstream)). What the unpacker decides for a book is in those folders, most of it in files `convert.py` reads, each yours to edit. The unpacker writes only into an empty `src/book/`, so unpacking a book again means emptying it, or a new project, and the files you've edited copied in; `convert.py --src-status` lists what you've changed since the unpacking.
 
 - **`project.yaml`**: the book's title, language, license, and identifier, and its contents, the order and grouping of its pages, a unit a part ([Project settings](project-settings.md)).
 - **`conversion.yaml`**, for an OpenStax book: the footer on every page, how footnotes are numbered, the word a caption opens with where it isn't `Figure` or `Table`, and the PDF's page, `pdf.metadata`; and any other of the [conversion settings](conversion-settings.md), the targets among them.

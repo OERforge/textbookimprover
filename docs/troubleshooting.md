@@ -6,7 +6,7 @@ OpenStax's DOCX export bookmarks a paragraph, heading, list, or table by putting
 
 ## "These files would each be the same page"
 
-A page is named after its file, without the extension and made safe for a link, so `ch1.md` and `ch1.adoc` would both be the page `ch1`, and so would `Chapter 1.docx` and `Chapter-1.html`, or `about.docx` and `_pt/about.md`. The run stops before reading either, naming both, rather than let one overwrite the other and every sidecar keyed on the page describe whichever won. Rename one, or move the one that isn't a source out of the book's directory. Two leftovers are recognized and skipped instead: an `.md` beside the `.docx` of the same name (what v0.1 wrote) and an `.html` named after another source (what a target writing beside the sources wrote). Two variants of one page for one target (`ch1.print.md` and `ch1.print.adoc`) stop the run the same way.
+A page is named after its file, without the extension and made safe for a link, so `ch1.md` and `ch1.adoc` would both be the page `ch1`, and so would `Chapter 1.docx` and `Chapter-1.html`, or `about.docx` and `_pt/about.md`. The run stops before reading either, naming both, rather than let one overwrite the other and every sidecar keyed on the page describe whichever won. Rename one, or move the one that isn't a source out of the part's sources. Two leftovers are recognized and skipped instead: an `.md` beside the `.docx` of the same name (what v0.1 wrote) and an `.html` named after another source (what a target writing beside the sources wrote). Two variants of one page for one target (`ch1.print.md` and `ch1.print.adoc`) stop the run the same way.
 
 ## Converting on a cloud-synced drive
 
@@ -24,7 +24,7 @@ A folder that Google Drive, OneDrive, or Dropbox syncs, reached from WSL under `
 
 **`Stopping: N media reference(s) could not be resolved`** — a page shows an image that isn't on disk or isn't in a format the run can identify; `media-unresolved.csv` names each one. Usually it's an EMF or WMF, Word's own vector formats, which no browser shows: [replace it in Word or convert it](architecture.md#what-conversion-does-to-your-pages).
 
-**A page is in the wrong place in the book** — check `project-sample.yaml`. When a run worked out the book's order itself, the sample holds what it decided, for you to correct.
+**A page is in the wrong place in the book** — check `project-sample.yaml`, among the reports in `output/reports/book/`. When a run worked out the book's order itself, the sample holds what it decided, for you to correct.
 
 **Keys like `page#table-3` don't match what you see** — in a table report or `table-captions.csv`, the number counts the page's data tables only, in reading order; a table that only holds an image becomes a figure and isn't counted. The `Excerpt` column identifies the table.
 

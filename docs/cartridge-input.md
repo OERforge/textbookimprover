@@ -4,18 +4,24 @@ A Common Cartridge (`.imscc`) is how a course leaves an LMS: Brightspace, Canvas
 
 ## Converting one
 
-Put the cartridge in a directory of its own and run `convert.py` there. Finding a cartridge and no sources, it unpacks it into the directory, then converts the pages:
+Unpack the cartridge as the book of a new project, and run `convert.py` there:
 
 ```bash
-mkdir ~/books/soc && cp introduction-to-sociology-3e-export.imscc ~/books/soc/
+python3 $T/bin/unpack-cartridge.py introduction-to-sociology-3e-export.imscc -o ~/books/soc --part book
 cd ~/books/soc
 python3 $T/bin/convert.py
 ```
 
-As with a web archive, the pages are the book from then on: correct them, not the cartridge, which later runs don't read again. A `project.yaml` already in the directory is kept, with the unpacker's beside it as `project-unpacked.yaml`. To unpack by hand, into a directory of its own:
+The pages go to `src/book/`, the cartridge is copied to the project's `upstream/`, and `project.yaml` names it as the book's `from` ([A project's folders](layout.md#unpacking-a-part-from-upstream)). As with a web archive, the pages are the book from then on: correct them, not the cartridge. Each later run says how many of them differ from what was unpacked. A `project.yaml` already in the project is kept, with the unpacker's among the reports as `project-unpacked.yaml` and the lines to add printed.
 
-```bash
-python3 $T/bin/unpack-cartridge.py course.imscc -o ~/books/course
+A run unpacks for you when the project is only its settings and the cartridge: put the file in `upstream/`, name it in `project.yaml`, and run `convert.py`, which unpacks into `src/book/` when that folder holds nothing:
+
+```yaml
+project:
+  parts:
+    book:
+      kind: book
+      from: upstream/course.imscc
 ```
 
 A cartridge is recognized by its manifest, whatever the file is called, and versions 1.0 through 1.3 read the same way.

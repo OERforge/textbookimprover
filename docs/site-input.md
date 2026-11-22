@@ -3,14 +3,14 @@
 When a book exists only as a website, save its pages and unpack them:
 
 ```bash
-python3 $T/bin/unpack-site.py "saved pages/" -o ~/books/cs168
+python3 $T/bin/unpack-site.py "saved pages/" -o ~/books/cs168 --part book
 cd ~/books/cs168
 python3 $T/bin/convert.py
 ```
 
 Look for the book's source first. Two of the three web books this was built against have public repositories (Markdown for one, AsciiDoc for another), and a source beats the best save.
 
-A `.zip` of saved pages, or a WARC or WACZ, left alone in a book's directory, is unpacked by `convert.py` on its first run, through `unpack-site.py` ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)).
+With `--part book`, `-o` is a project's folder: the pages go to `src/book/`, the report to `output/reports/book/`, and what was unpacked is copied to the project's `upstream/` and named in `project.yaml` as the book's `from` ([A project's folders](layout.md#unpacking-a-part-from-upstream)). A WARC or WACZ put in `upstream/` and named as the `from` of a part whose folder is empty is unpacked by `convert.py` on its first run, through `unpack-site.py` ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)).
 
 `unpack-site.py` takes a directory of a browser's "complete" saves (an `.html` per page, each with a `_files` directory beside it), a directory of `.mhtml` files, or WARC and WACZ files. It fetches nothing.
 

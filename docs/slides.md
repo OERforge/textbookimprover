@@ -10,12 +10,16 @@ Testing with assistive technology has been limited. Where this page says what a 
 
 ## A first run
 
-Put the decks in a folder of their own and run `convert.py` there:
+Put the decks in `src/slides/` of a project's folder and run `convert.py` in the project's folder:
 
 ```bash
+mkdir -p stats-slides/src/slides
+cp /path/to/decks/*.pptx stats-slides/src/slides/
 cd stats-slides
 python3 $T/bin/convert.py
 ```
+
+The copies are written to `output/remediated/`, the reports to `output/reports/slides/`, and the sidecars you keep go in `sidecars/slides/` ([A project's folders](layout.md)). A project can hold a book and its decks, each a part with a folder under `src/` ([Parts](layout.md#parts)).
 
 A slides run of PowerPoint decks needs Python and PyYAML from the [requirements](installation.md#requirements), and not Pandoc, which a book's run reads its sources with, unless a target converts the decks; decks written in Markdown need Pandoc, as a book does.
 

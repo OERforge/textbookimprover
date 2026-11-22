@@ -2,6 +2,8 @@
 
 Three real books taken from the files their publishers offer to a finished result, one command at a time, with what each command prints. They follow [A first run](first-run.md) on real books, so read that first; the settings it explains aren't explained again here. The output below is from running these steps as written. Your numbers may differ if a publisher has changed its files since.
 
+Each example was run with its book kept in one folder: the sources beside the settings, the pages in `html/`, and the reports and samples beside the sources. In a project laid out with `src/` ([A project's folders](layout.md)) the commands are the same, run in the project's folder, and the places differ: the sources and a publisher's unpacked files are in `src/book/`, a zip or cartridge to unpack is in `upstream/` and named as the book's `from`, the pages are in `output/html/`, each report and sample a step names is in `output/reports/book/`, a sidecar is in `sidecars/book/`, and a sample is moved to the project's top where a step says to rename it.
+
 The examples use `T` for the directory you unpacked or cloned TextbookImprover into:
 
 ```bash

@@ -246,7 +246,7 @@ How many levels the table of contents shows. A group at the top of project.conte
 
 **`epub.cover_image`**—`path`; default `""` (empty)
 
-An image for the cover page, JPEG or PNG, as an absolute path or one relative to the content directory. Left empty the book has no cover page. A path that doesn't exist stops the build.
+An image for the cover page, JPEG or PNG, as a path from the project's top (for a book kept in one folder, an absolute path or one relative to that folder). Left empty the book has no cover page. A path that doesn't exist stops the build.
 
 **`epub.css`**—`path`; default `""` (empty)
 
@@ -358,7 +358,7 @@ A LaTeX book, read through its master file: the one in the book's directory with
 
 **`latex.main`**—`list`; default `[]`
 
-The master file, when more than one file in the book's directory is a whole document, as when one set of chapters makes a textbook, a workbook, and a solutions manual (GIAM.tex). Or a list, when the book is a set of documents each built on its own, a course's notes a topic at a time: each is read in the order given, a page each (or a page for each file it \include-s), and the PDF target's book route builds a PDF of each. A name can be a path below the book's directory (src/Topic 01.tex) or a pattern (src/*.tex, in sorted order). Blank takes the only one, and stops the run when there are several; a master that only gathers PDFs with \includepdf stops it too, naming the documents of the same names to list here.
+The master file, when more than one file among the book's sources is a whole document, as when one set of chapters makes a textbook, a workbook, and a solutions manual (GIAM.tex). Or a list, when the book is a set of documents each built on its own, a course's notes a topic at a time: each is read in the order given, a page each (or a page for each file it \include-s), and the PDF target's book route builds a PDF of each. A name can be a path below the book's sources (notes/Topic 01.tex) or a pattern (notes/*.tex, in sorted order). Blank takes the only one, and stops the run when there are several; a master that only gathers PDFs with \includepdf stops it too, naming the documents of the same names to list here.
 
 **`latex.macros`**—`string`; default `latex-conversion-macros.tex`
 
@@ -366,7 +366,7 @@ A file of LaTeX definitions read after the book's own preamble, so they win over
 
 ## sidecars
 
-CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. These files are read, and written only to make each one UTF-8 with the byte-order mark (one Excel saved in a code page rewritten as UTF-8, one without the mark given it), and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.
+CSV files holding decisions a person made about the source. These describe the book rather than one rendering, so a target should rarely override them. Only for a book kept in one folder. In a project laid out with src/, a part's sidecars are in sidecars/<part>/, each under the default name given here, and this setting stops the run. These files are read, and written only to make each one UTF-8 with the byte-order mark (one Excel saved in a code page rewritten as UTF-8, one without the mark given it), and hold work no script can reproduce. A bare name resolves against the content directory, which is convenient but leaves them among the generated HTML, the extracted media, and the disposable reports: the directory you would delete to rebuild, and the one replaced wholesale when the publisher reissues the source. An absolute path, or one relative to the content directory such as "../corrections/ibs2e/table-captions.csv", keeps them somewhere you can put under version control. A path set here that doesn't exist stops the run, because the alternative is converting the whole book while silently discarding every correction in it.
 
 *Book level:* set these under `defaults:`, never in a target, since the whole book shares them; in a target they stop the run.
 
@@ -408,7 +408,7 @@ The language a page is in, keyed on its source, as page_names is: source, langua
 
 ## reports
 
-Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there's work to do.
+Where the run records what still needs human attention. Removing a report when nothing is outstanding is deliberate: the file existing at all is the signal that there's work to do. Only for a book kept in one folder. In a project laid out with src/, a part's reports are written to output/reports/<part>/, each under the default name given here, and this setting stops the run.
 
 *Book level:* set these under `defaults:`, never in a target, since the whole book shares them; in a target they stop the run.
 

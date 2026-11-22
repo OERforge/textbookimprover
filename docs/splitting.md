@@ -30,7 +30,7 @@ Each piece records its source, its part number, its position among the cut headi
 <meta name="page-parent" content="Economies of Scale" />
 ```
 
-A page `contents` declares that the split then cuts stands for its pieces: the entry becomes a group holding the source's opening page, when it kept one, and its pieces nested by their headings. `contents` that already names the pieces is left as declared. The run writes what such an entry resolved to into `project-sample.yaml`, every piece named, and says so: renamed to `project.yaml`, it's where to arrange the pieces yourself. A link into a cut source from any other page of the book (its contents page, an index, a cross-reference in another chapter) follows its target to the piece that now holds it, and a link to a source that kept no page of its own goes to its first piece.
+A page `contents` declares that the split then cuts stands for its pieces: the entry becomes a group holding the source's opening page, when it kept one, and its pieces nested by their headings. `contents` that already names the pieces is left as declared. The run writes what such an entry resolved to into `project-sample.yaml`, every piece named, and says so: moved to the project's top as `project.yaml`, it's where to arrange the pieces yourself. A link into a cut source from any other page of the book (its contents page, an index, a cross-reference in another chapter) follows its target to the piece that now holds it, and a link to a source that kept no page of its own goes to its first piece.
 
 The packager and the EPUB assembler read that, so with no `contents` declared the pieces are grouped under the headings they sat beneath, in reading order, with a heading's own page first in its group. A book that is a single source isn't wrapped in a group for the source, since the book is the source. The guess is written to `project-sample.yaml` and is the place to adjust it.
 
@@ -51,7 +51,7 @@ To choose your own, the workflow is:
 
 2. Edit the `name` column to the names you want (`1-1-what-is-java`, say) and append the rows to `page-names.csv`. Rows you don't want to rename can be left out; the derived name stands.
 
-3. Convert again. The pieces are written under the new names, the pages the previous run wrote under the old ones are removed (the run keeps their list in `page-names-report.csv`), and `project-sample.yaml` shows the new names in the guessed order. Rename it to `project.yaml` when the order is right, or edit the order there.
+3. Convert again. The pieces are written under the new names, the pages the previous run wrote under the old ones are removed (the run keeps their list in `page-names-report.csv`), and `project-sample.yaml` shows the new names in the guessed order. Move it to the project's top as `project.yaml` when the order is right, or edit the order there.
 
 A row is keyed on the source, the headings above (joined with ` > `), and the heading's text, so it survives the section moving and stops matching when the heading is edited, which is reported. The `position` column is filled in only for pieces the other three columns can't tell apart, two sections both called *Introduction* under the same parent, and it's the one thing that does change when a section moves. Names must be usable as file names: letters, digits, `.`, `_`, and `-`.
 
@@ -80,10 +80,10 @@ The splitter cuts at what Pandoc reads as headings, and Pandoc's DOCX reader rea
 
 ## Adopting the pages as sources
 
-A piece is named `<source>--<heading>`, and `--` in a source's own name is reserved for pieces, so the pages a split wrote can't be read back as sources as they stand. `adopt-pages.py` writes a new book directory where they can:
+A piece is named `<source>--<heading>`, and `--` in a source's own name is reserved for pieces, so the pages a split wrote can't be read back as sources as they stand. `adopt-pages.py` writes a new project where they can:
 
 ```bash
-python3 $T/bin/adopt-pages.py book/html -o book-2
+python3 $T/bin/adopt-pages.py book/output/html -o book-2 --part book
 cd book-2 && python3 $T/bin/convert.py
 ```
 

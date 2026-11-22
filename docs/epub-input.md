@@ -3,12 +3,12 @@
 When the cleanest copy of a book is its publisher's EPUB, unpack it and convert what comes out:
 
 ```bash
-python3 $T/bin/unpack-epub.py book.epub -o ~/books/infosys
+python3 $T/bin/unpack-epub.py book.epub -o ~/books/infosys --part book
 cd ~/books/infosys
 python3 $T/bin/convert.py
 ```
 
-`unpack-epub.py` reads the EPUB and never writes to it. The directory it makes holds:
+`unpack-epub.py` reads the EPUB and never writes to it. With `--part book`, `-o` is a project's folder: the sources go to `src/book/`, the EPUB is copied to `upstream/` and named in `project.yaml` as the book's `from`, and the report goes to `output/reports/book/` ([A project's folders](layout.md#unpacking-a-part-from-upstream)). The book's folder, `src/book/`, holds:
 
 - **One `.html` per content document**, named for the file it was and made safe for a link. The text is the publisher's, byte for byte, except that its references point at where things now are: a link to another file of the book is a link to that page, fragment kept; an image is at the path it had beside the package document. The navigation document isn't a page.
 - **The book's other files**, images and stylesheets, where they sat.

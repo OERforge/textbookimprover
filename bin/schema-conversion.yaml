@@ -856,8 +856,9 @@ keys:
         type: path
         default: ""
         description: >
-          An image for the cover page, JPEG or PNG, as an absolute path
-          or one relative to the content directory. Left empty the book
+          An image for the cover page, JPEG or PNG, as a path from the
+          project's top (for a book kept in one folder, an absolute path
+          or one relative to that folder). Left empty the book
           has no cover page. A path that doesn't exist stops the build.
 
       css:
@@ -1175,15 +1176,15 @@ keys:
         item: string
         default: []
         description: >
-          The master file, when more than one file in the book's directory
+          The master file, when more than one file among the book's sources
           is a whole document, as when one set of chapters makes a
           textbook, a workbook, and a solutions manual (GIAM.tex). Or a
           list, when the book is a set of documents each built on its own,
           a course's notes a topic at a time: each is read in the order
           given, a page each (or a page for each file it \include-s), and
           the PDF target's book route builds a PDF of each. A name can be
-          a path below the book's directory (src/Topic 01.tex) or a
-          pattern (src/*.tex, in sorted order). Blank takes the only one,
+          a path below the book's sources (notes/Topic 01.tex) or a
+          pattern (notes/*.tex, in sorted order). Blank takes the only one,
           and stops the run when there are several; a master that only
           gathers PDFs with \includepdf stops it too, naming the documents
           of the same names to list here.
@@ -1205,6 +1206,10 @@ keys:
       CSV files holding decisions a person made about the source. These
       describe the book rather than one rendering, so a target should
       rarely override them.
+
+      Only for a book kept in one folder. In a project laid out with src/,
+      a part's sidecars are in sidecars/<part>/, each under the default
+      name given here, and this setting stops the run.
 
       These files are read, and written only to make each one UTF-8 with
       the byte-order mark (one Excel saved in a code page rewritten as
@@ -1336,6 +1341,10 @@ keys:
       Where the run records what still needs human attention. Removing a
       report when nothing is outstanding is deliberate: the file existing
       at all is the signal that there's work to do.
+
+      Only for a book kept in one folder. In a project laid out with src/,
+      a part's reports are written to output/reports/<part>/, each under
+      the default name given here, and this setting stops the run.
     keys:
 
       table_captions_missing:
