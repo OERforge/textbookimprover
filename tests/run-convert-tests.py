@@ -590,6 +590,18 @@ def case_tree_layout(work):
     lay(tree, os.path.join(tree, "src", "book"), os.path.join(tree, "sidecars", "book"))
     before = files(os.path.join(tree, "src"))
     ran_flat, ran_tree = build(flat), build(tree)
+    # The same book in one folder, moved by the utility a person would
+    # use, and built: what it moves is checked for where it lands in the
+    # unit suite, and here for what it builds.
+    moved = os.path.join(work, "moved")
+    lay(moved, moved, moved)
+    mover = subprocess.run(
+        ["python3", os.path.join(ROOT, "util", "move-to-src.py"), "-d", moved],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    ran_moved = build(moved)
+    built_moved = {name: {k: v for k, v in files(os.path.join(moved, "output", name)).items()
+                          if not k.startswith("intermediates" + os.sep)}
+                   for name in ("html", "epub", "word")}
     targets = {name: (files(os.path.join(flat, name)),
                       files(os.path.join(tree, "output", name)))
                for name in ("html", "epub", "word")}
@@ -617,6 +629,12 @@ def case_tree_layout(work):
          lambda: all(a and a == b for a, b in targets.values())
          or fail(str({n: sorted(set(a.items()) ^ set(b.items()))[:4]
                       for n, (a, b) in targets.items() if a != b}))),
+        ("the book in one folder, moved by util/move-to-src.py, builds the same files too",
+         lambda: (mover.returncode == 0 or fail(mover.stderr[-600:]))
+         and (ran_moved.returncode == 0 or fail(ran_moved.stderr[-600:]))
+         and all(built_moved[n] and built_moved[n] == targets[n][1] for n in targets)
+         or fail(str({n: sorted(set(built_moved[n].items()) ^ set(targets[n][1].items()))[:4]
+                      for n in targets if built_moved[n] != targets[n][1]}))),
         ("a footer whose text is the name of a file among the sources is still that text",
          lambda: "Free to read" in page and "PLANTED" not in page),
         ("a stylesheet the settings name that is among the sources and not at the top "
