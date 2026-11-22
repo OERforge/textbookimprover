@@ -4780,6 +4780,54 @@ def check_tlmgr_command():
     ]
 
 
+def check_installed_tex_file():
+    """A file of TeX's own the run reads is looked for where TeX is
+    installed: kpsewhich is run from an empty folder, never the book's,
+    and an answer that isn't a whole path to a file isn't taken."""
+    import types
+    import taggingstatus
+    work = tempfile.mkdtemp(prefix="tex-file-")
+    real = os.path.join(work, "latex-tagging-status.ltx")
+    open(real, "w").close()
+    asked = []
+    saved_run, saved_which = taggingstatus.subprocess.run, taggingstatus.shutil.which
+
+    def answering(text):
+        def run(command, cwd=None, **kwargs):
+            asked.append((command, cwd, os.listdir(cwd) if cwd else None))
+            return types.SimpleNamespace(stdout=text, returncode=0)
+        return run
+    try:
+        taggingstatus.shutil.which = lambda name: "/usr/bin/" + name
+        taggingstatus.subprocess.run = answering(real + "\n")
+        found = taggingstatus.installed(taggingstatus.DATA)
+        taggingstatus.subprocess.run = answering("./latex-tagging-status.ltx\n")
+        relative = taggingstatus.installed(taggingstatus.DATA)
+        taggingstatus.subprocess.run = answering(os.path.join(work, "gone.ltx") + "\n")
+        gone = taggingstatus.installed(taggingstatus.DATA)
+        taggingstatus.subprocess.run = answering("")
+        nothing = taggingstatus.installed(taggingstatus.DATA)
+        taggingstatus.shutil.which = lambda name: None
+        before = len(asked)
+        no_tex = taggingstatus.installed(taggingstatus.DATA)
+    finally:
+        taggingstatus.subprocess.run, taggingstatus.shutil.which = saved_run, saved_which
+        shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("the file kpsewhich names by its whole path is the one read",
+         lambda: found == real),
+        ("kpsewhich is run from an empty folder of the run's own, which is gone after",
+         lambda: all(cwd and held == [] and not os.path.exists(cwd)
+                     and os.path.realpath(cwd) != os.path.realpath(os.getcwd())
+                     for _, cwd, held in asked) and len(asked) == 4),
+        ("a file in the folder it's run from isn't taken", lambda: relative is None),
+        ("nor a path that's no file, nor no answer",
+         lambda: gone is None and nothing is None),
+        ("and with no kpsewhich, nothing is asked",
+         lambda: no_tex is None and len(asked) == before),
+    ]
+
+
 def check_pages_written():
     """The pages of the PDF LaTeX wrote, as its last lines say, which a
     book's build counts in its last line beside the book's pages, and a
@@ -11356,6 +11404,7 @@ GROUPS = [
     ("the WCAG probe, and the setup checked before veraPDF runs", check_wcag_probe),
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
+    ("a file of TeX's own, looked for where TeX is installed", check_installed_tex_file),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("the pages of the PDF LaTeX wrote, as it says", check_pages_written),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),

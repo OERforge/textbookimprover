@@ -5,7 +5,9 @@ The list comes from the TeX distribution itself: the package
 latex-tagging-status (TeX Live's collection-latexextra; MiKTeX installs it
 on demand) holds latex-tagging-status.ltx, which LaTeX reads for the
 check-tagging-status key of \\DocumentMetadata. The run looks for it with
-kpsewhich, from the book's own folder first, and says how to install it
+kpsewhich, where TeX is installed and never among the book's own files,
+since the list decides which of a book's packages a tagged copy replaces
+and a book isn't to say that of itself. It says how to install the list
 when it's missing; the distribution's own updater keeps it current, and
 the run says when it's older than the LaTeX it checks.
 
@@ -42,15 +44,20 @@ CLASS = re.compile(r"\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}")
 INPUT = re.compile(r"\\(?:input|include)\s*\{([^}]*)\}")
 
 
-def kpsewhich(name, cwd):
-    """The path kpsewhich finds for name, looking from cwd, or None."""
+def installed(name):
+    """The path kpsewhich finds for name where TeX is installed, or None.
+    kpsewhich looks in the folder it's run from before TeX's own, so it's
+    run from an empty one, and a file there, or one named by a path that
+    isn't whole, isn't taken: a book's own file of the name is never the
+    one found."""
     if not shutil.which("kpsewhich"):
         return None
-    found = subprocess.run(["kpsewhich", name], cwd=cwd, capture_output=True,
-                           text=True).stdout.strip()
-    if not found:
+    with projectpaths.TemporaryDirectory(prefix="kpsewhich-") as empty:
+        found = subprocess.run(["kpsewhich", name], cwd=empty, capture_output=True,
+                               text=True, stdin=subprocess.DEVNULL).stdout.strip()
+    if not found or not os.path.isabs(found) or not os.path.isfile(found):
         return None
-    return found if os.path.isabs(found) else os.path.join(cwd, found)
+    return found
 
 
 def load(path):
@@ -62,8 +69,8 @@ def load(path):
         (m.group(1), m.group(2)): int(m.group(3)) for m in ENTRY.finditer(text)}
 
 
-def kernel_date(cwd):
-    path = kpsewhich("latex.ltx", cwd)
+def kernel_date():
+    path = installed("latex.ltx")
     if not path:
         return ""
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -112,8 +119,7 @@ def check(base, master, say):
     list, for a book of several documents, and each class and package is
     named once. Returns the counts, or None when the data file isn't
     installed."""
-    # From the sources' folder, as LaTeX looks when it builds the book.
-    path = kpsewhich(DATA, P(base).sources())
+    path = installed(DATA)
     if not path:
         say("The tagging status check needs TeX's latex-tagging-status package, "
             "which isn't installed: "
@@ -123,7 +129,7 @@ def check(base, master, say):
             "is checked.")
         return None
     date, statuses = load(path)
-    kernel = kernel_date(P(base).sources())
+    kernel = kernel_date()
     if date and kernel and date < kernel:
         say(f"The tagging status list is dated {date}, older than the LaTeX it "
             f"checks ({kernel}): `{latexbuild.tlmgr_command('update latex-tagging-status')}` "

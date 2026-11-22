@@ -809,8 +809,8 @@ def why_no_drawings():
 
 def why_no_status():
     """Why the run can't check a book's packages against LaTeX's tagging
-    status list here, or None: the case writes the list beside its book,
-    and the run finds it with TeX's kpsewhich."""
+    status list here, or None: the case writes a list of its own and has
+    TeX look there first, and the run finds it with TeX's kpsewhich."""
     return None if shutil.which("kpsewhich") \
         else "no kpsewhich, which TeX has, to find the tagging status list with"
 
@@ -4909,14 +4909,25 @@ def case_source(work):
     first = convert(work, without_tagging_status(work))
     first_said = first.stdout + first.stderr
     # LaTeX's tagging status data, as the distribution's package has it,
-    # beside the book, where kpsewhich looks first: dated before any LaTeX
-    # this runs on, amsthm rated currently incompatible, babel unchecked,
-    # and graphicx not in it.
-    with open(place(work, "latex-tagging-status.ltx"), "w") as fh:
+    # where TeX is told to look ahead of its own (TEXINPUTS, its other
+    # folders after): dated before any LaTeX this runs on, amsthm rated
+    # currently incompatible, babel unchecked, and graphicx not in it. And
+    # a list among the book's own files, which rates them all compatible
+    # and is dated after any LaTeX: a book doesn't get to rate itself.
+    listed = beside(work, "status")
+    os.makedirs(listed, exist_ok=True)
+    with open(os.path.join(listed, "latex-tagging-status.ltx"), "w") as fh:
         fh.write("\\ProvidesFile{latex-tagging-status.ltx}[2020-01-01]\n"
                  "\\@kernel@tagging@status{article}{cls}{4}\n"
                  "\\@kernel@tagging@status{amsthm}{sty}{2}\n"
                  "\\@kernel@tagging@status{babel}{sty}{0}\n")
+    with open(place(work, "latex-tagging-status.ltx"), "w") as fh:
+        fh.write("\\ProvidesFile{latex-tagging-status.ltx}[2099-01-01]\n"
+                 + "".join("\\@kernel@tagging@status{%s}{%s}{4}\n" % pair for pair in (
+                     ("article", "cls"), ("amsthm", "sty"), ("babel", "sty"),
+                     ("graphicx", "sty"))))
+    with_status = dict(os.environ, TEXINPUTS=os.path.abspath(listed) + os.pathsep
+                       + os.environ.get("TEXINPUTS", ""))
     # A person's header decision for the table, from the census's row.
     new = place(work, "table-headers-new.csv")
     rows = list(csv.DictReader(open(new, encoding="utf-8-sig"))) if os.path.exists(new) else []
@@ -4926,7 +4937,7 @@ def case_source(work):
                  + "".join("%s,layout\n" % r["key"] for r in rows
                            if "Item" in r.get("preview", "")))
     before = fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build"))
-    result = convert(work)
+    result = convert(work, with_status)
     said = result.stdout + result.stderr
     fixed = place(work, "fixed")
     notes = read(work, "fixed", "notes.tex") \
@@ -5200,6 +5211,9 @@ def case_source(work):
          lambda: skip(why_no_status()) if why_no_status()
          else "currently incompatible: amsthm" in said and "unchecked: babel" in said
          and "not in the list: graphicx" in said and "older than the LaTeX it checks" in said),
+        ("and a list among the book's own files isn't the one read",
+         lambda: skip(why_no_status()) if why_no_status()
+         else "(2020-01-01)" in said and "2099-01-01" not in said),
         ("tagging off leaves the book's build alone",
          lambda: "\\DocumentMetadata" not in notes and "pdftex" in notes),
         ("the tagged copy builds with LuaLaTeX, no tagging error or warning", builds_tagged),
