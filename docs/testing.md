@@ -87,6 +87,8 @@ Before a release, run the suites under it as well as with the latest Pandoc; any
 
 ### Extending them
 
+**A case that builds a book lays it out as a project and asks where things are.** `tests/laidout.py`'s `project(folder)` makes the folder a project laid out with `src/` and returns `lib/projectpaths.py`'s object for it, which the case asks for the place of a source (`.source("ch1.md")`), a settings file (`.project_file()`, `.config_file()`), a sidecar, a report, and a target's file (`.target_file("html", "ch1.html")`). A case doesn't join such a path itself, so the suites follow the layout from one place. The EPUB and MathJax suites are written that way; the others still build each book in one folder, and are being converted before that layout is retired.
+
 The `.docx` fixtures under `tests/fixtures/` are committed, so the tests need only Pandoc. `tests/make-filter-fixtures.py` rebuilds them and is the only thing that needs `python-docx`.
 
 Two things about Word are worth knowing before adding a fixture, because both cost time to discover:

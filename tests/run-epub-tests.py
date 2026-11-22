@@ -63,12 +63,13 @@ FIXTURES = os.path.join(HERE, "fixtures")
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+import laidout  # noqa: E402
 import parallel  # noqa: E402
 import projectpaths  # noqa: E402
 
 # Where a project's files are is lib/projectpaths.py's to say: the cases
 # ask it where to put a fixture and where to look for what a run wrote.
-P = projectpaths.Project
+P = laidout.project
 
 
 def load(path, name):
@@ -114,7 +115,7 @@ def convert(work, names, sidecars=None):
             fh.write(content)
     for name in names:
         shutil.copy(os.path.join(FIXTURES, name + ".docx"), P(work).sources())
-    docx = [n + ".docx" for n in names]
+    docx = [P(work).source_arg(n + ".docx") for n in names]
     # The pre-pass, so declared headers reach the filter as they do in a
     # real run. Its guesses are adopted wholesale, which is what makes
     # the first-column declaration on tables.docx produce row headers.
@@ -131,7 +132,7 @@ def convert(work, names, sidecars=None):
                "--resolved", P(work).work_file("resolved.json")], P(work).run_dir())
     environment["TABLE_HEADERS_RESOLVED"] = P(work).work_file("resolved.json")
     for name in names:
-        run(["pandoc", "-f", "docx", "-t", "json", name + ".docx",
+        run(["pandoc", "-f", "docx", "-t", "json", P(work).source_arg(name + ".docx"),
              "-o", name + ".json",
              "--lua-filter", os.path.join(BIN, "media-extensions.lua"),
              "--extract-media", name], P(work).run_dir(), environment)
@@ -532,7 +533,8 @@ def markdown_page(work, name, text):
                        TABLE_CAPTIONS_MISSING=P(work).report("caps-missing.csv"))
     with open(P(work).source(name + ".md"), "w", encoding="utf-8") as fh:
         fh.write(text)
-    run(["pandoc", "-f", "markdown", "-t", "json", name + ".md", "-o", name + ".json"],
+    run(["pandoc", "-f", "markdown", "-t", "json", P(work).source_arg(name + ".md"),
+         "-o", name + ".json"],
         P(work).run_dir(), environment)
     run(["pandoc", "-f", "json", "-t", "json", name + ".json", "-o", name + ".filtered.json",
          "--lua-filter", os.path.join(BIN, "figures-and-tables.lua")], P(work).run_dir(), environment)
@@ -856,7 +858,7 @@ def case_one_page_formulas(work):
                                   "## The sum $x^2 + y_1$\n\nMore.\n")
     run(["pandoc", "-f", "json", "-t", "json", "book.filtered.json", "-o",
          "book.filtered.json", "--lua-filter", os.path.join(BIN, "title-formulas.lua")],
-        folder, dict(os.environ))
+        P(folder).run_dir(), dict(os.environ))
     write_config(folder, "    - book\n")
     built = Built(folder)
     with zipfile.ZipFile(P(folder).target_file("epub", "org.example.fixtures.epub")) as z:

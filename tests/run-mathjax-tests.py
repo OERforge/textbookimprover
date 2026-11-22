@@ -30,6 +30,12 @@ os.environ.pop("PANDOC_DATA_DIRS", None)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+sys.path.insert(0, HERE)
+
+import laidout  # noqa: E402
+
+# Where a project's files are is lib/projectpaths.py's to say.
+P = laidout.project
 
 
 def pandoc_tex(html):
@@ -142,7 +148,7 @@ def pipeline_checks(samples):
     try:
         svg = re.sub(r"<title[^>]*>.*?</title>", "", samples["mj2-svg"][0],
                      flags=re.S)
-        with open(os.path.join(work, "saved.html"), "w", encoding="utf-8") as fh:
+        with open(P(work).source("saved.html"), "w", encoding="utf-8") as fh:
             fh.write('<!DOCTYPE html><html lang="en"><head><title>Saved</title>'
                      '</head><body><h1>Saved</h1><p>First %s, then '
                      '<span class="MathJax_SVG">%s</span>.</p></body></html>'
@@ -151,7 +157,7 @@ def pipeline_checks(samples):
         # its source after it: one in the text, one displayed, whose source
         # doesn't say so, as where MathJax was told which were displays.
         mml = [re.sub(r"\s*\n\s*", "", m) for m in samples["mj2-mml"]]
-        with open(os.path.join(work, "source.html"), "w", encoding="utf-8") as fh:
+        with open(P(work).source("source.html"), "w", encoding="utf-8") as fh:
             fh.write('<!DOCTYPE html><html lang="en"><head><title>Source</title>'
                      '</head><body><h1>Source</h1><p>First %s<script type="math/mml" '
                      'id="MathJax-Element-1">%s</script>, then:</p><div '
@@ -159,19 +165,19 @@ def pipeline_checks(samples):
                      'id="MathJax-Element-2">%s</script></body></html>'
                      % (samples["mj2-chtml"][0], mml[0], samples["mj2-chtml"][1],
                         re.sub(r'\s*display="block"', "", mml[1])))
-        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        with open(P(work).config_file(), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         run = subprocess.run([sys.executable, os.path.join(ROOT, "bin",
                                                            "convert.py"),
                               "--quiet", "--quick"], cwd=work, capture_output=True,
                              text=True, stdin=subprocess.DEVNULL)
         page = ""
-        path = os.path.join(work, "html", "saved.html")
+        path = P(work).target_file("html", "saved.html")
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 page = fh.read()
         report = ""
-        path = os.path.join(work, "output-check.csv")
+        path = P(work).report("output-check.csv")
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 report = fh.read()
@@ -182,7 +188,7 @@ def pipeline_checks(samples):
                "[formula]" in page and "lost, marked [formula]" in run.stderr
                and "formula-lost" in report, run.stderr[-300:])
         source = ""
-        path = os.path.join(work, "html", "source.html")
+        path = P(work).target_file("html", "source.html")
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 source = fh.read()
