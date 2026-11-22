@@ -2081,7 +2081,7 @@ def shimmed_packages(packages, base=None):
     statuses = {}
     if base:
         import taggingstatus
-        path = taggingstatus.kpsewhich(taggingstatus.DATA, base)
+        path = taggingstatus.installed(taggingstatus.DATA)
         if path:
             statuses = taggingstatus.load(path)[1]
     found = [name for name in list(SHIMS) + list(SHIM_ALIASES)
