@@ -1504,8 +1504,9 @@ def route_cases(work):
                  '<script>new WebSocket("wss://ws.example.com/");'
                  'fetch("https://example.com/").catch(() => {});'
                  'const img = document.createElement("img"); img.src = "../../../etc/hostname";'
-                 'document.body.append(img); setTimeout(() => location.href = '
-                 '"https://elsewhere.example.com/", 50);</script></body></html>')
+                 'document.body.append(img); window.addEventListener("load", () => '
+                 'setTimeout(() => location.href = "https://elsewhere.example.com/", 50));'
+                 '</script></body></html>')
     outside = os.path.join(work, "outside.png")
     with open(outside, "wb") as fh:
         fh.write(b"outside the folder")
@@ -1514,7 +1515,10 @@ def route_cases(work):
                            "print(repr(l.leave_network())); print(l.interfaces())"],
                           capture_output=True, text=True, env=dict(
                               os.environ, PYTHONPATH=os.path.join(ROOT, "lib")))
-    seen = {}
+    # The page leaves once it has loaded, and not before: a page that
+    # starts for elsewhere while its pictures are still being answered
+    # never has its load event, and with every core busy that was this one.
+    seen = {"url": "", "refused": [], "served": {}, "canceled": [], "blocked": []}
 
     async def go():
         async with async_playwright() as play:
@@ -1528,7 +1532,10 @@ def route_cases(work):
                         blocked=await lockedbrowser.blocked(page.main_frame))
             await context.close()
             await browser.close()
-    asyncio.run(go())
+    try:
+        asyncio.run(go())
+    except Exception as exc:            # Playwright's Error: the checks below say so
+        seen["stopped"] = f"{type(exc).__name__}: {exc}"
     return [
         ("with the page's scripts allowed, a WebSocket is taken and never connected",
          lambda: ("websocket", "wss://ws.example.com/", "elsewhere") in seen["refused"]
