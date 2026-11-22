@@ -1984,7 +1984,7 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     project = resolved.project
     for warning in resolved.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
-    pages_dir = intermediates or base
+    pages_dir = P(base).pages(own=intermediates)
     tree, titles, placed, numbered = plan_book(pages_dir, resolved, "PDF")
     real = [s for s in placed if os.path.exists(
         os.path.join(pages_dir, s + INTERMEDIATE))]

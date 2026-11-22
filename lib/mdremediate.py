@@ -149,7 +149,8 @@ def sidecar_key(target, base=None):
     path = unquote(target.replace("\\", "/"))
     path = path[2:] if path.startswith("./") else path
     if base and not os.path.isabs(path) and not os.path.isfile(P(base).referenced(path)):
-        cased = case_match(base, path)
+        cased = next(filter(None, (case_match(folder, path)
+                                   for folder in P(base).reference_folders())), None)
         if cased:
             path = cased.replace(os.sep, "/")
     return os.path.splitext(path)[0]

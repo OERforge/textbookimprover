@@ -24,3 +24,33 @@ def project(folder, part="book"):
     for kept in ("src", "sidecars"):
         os.makedirs(os.path.join(folder, kept, part), exist_ok=True)
     return projectpaths.of(folder)
+
+
+# What a book written in one folder keeps at its top when it's laid out:
+# its settings, and the definitions' file a LaTeX book's run reads there.
+TOP = ("project.yaml", "conversion.yaml", "packaging.yaml", "pdf-layout.yaml",
+       "latex-conversion-macros.tex", "upstream")
+
+
+def settle(folder, part="book", top=()):
+    """A folder a case wrote a book into, file by file, laid out as a
+    project before its first run: the settings (and the names in top,
+    for a file a setting names) stay at the top, a CSV file is a
+    sidecar, and everything else is the part's sources. A folder laid
+    out already is left as it is. Returns the paths of either."""
+    if not projectpaths.is_tree(folder):
+        names = [n for n in os.listdir(folder) if n not in TOP and n not in top]
+        # Through a folder of its own, since a book may keep a src/ itself.
+        staged = os.path.join(folder, ".laying-out")
+        sources = os.path.join(staged, "src", part)
+        sidecars = os.path.join(staged, "sidecars", part)
+        os.makedirs(sources)
+        os.makedirs(sidecars)
+        for name in names:
+            os.rename(os.path.join(folder, name), os.path.join(
+                sidecars if name.endswith(".csv") else sources, name))
+        for kept in ("src", "sidecars"):
+            os.rename(os.path.join(staged, kept), os.path.join(folder, kept))
+        os.rmdir(staged)
+        projectpaths.forget(folder)
+    return projectpaths.of(folder)

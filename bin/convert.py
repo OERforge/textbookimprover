@@ -2393,7 +2393,8 @@ def read_asciidoc_to_json(base, docs, env, imagesdir=""):
         stem = safe_stem(os.path.splitext(name)[0])
         fixed = adoc_root_index_text(P(base).source(name))
         if fixed is None:
-            run([*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json", name,
+            run([*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json",
+                 P(base).source_arg(name),
                  "-o", stem + ".json", "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
@@ -4754,7 +4755,7 @@ def remediate_sources(target, base, docs, paths, env, html_stems=(), language=No
         written.extend(os.path.join(target.output_dir, f) for f in files)
         if tagging:
             written.extend(embed_figures(
-                target, base, target.output_dir,
+                target, P(base).sources(), target.output_dir,
                 list(outputs) + [P(base).media(latexsource.RENDERED)], "the copy"))
     others = sorted(f for f in os.listdir(P(base).sources()) if f.endswith(".adoc") and not f.startswith("."))
     if docs or pages or md_files or not latex_parts:

@@ -112,7 +112,8 @@ def check(base, master, say):
     list, for a book of several documents, and each class and package is
     named once. Returns the counts, or None when the data file isn't
     installed."""
-    path = kpsewhich(DATA, base)
+    # From the sources' folder, as LaTeX looks when it builds the book.
+    path = kpsewhich(DATA, P(base).sources())
     if not path:
         say("The tagging status check needs TeX's latex-tagging-status package, "
             "which isn't installed: "
@@ -122,7 +123,7 @@ def check(base, master, say):
             "is checked.")
         return None
     date, statuses = load(path)
-    kernel = kernel_date(base)
+    kernel = kernel_date(P(base).sources())
     if date and kernel and date < kernel:
         say(f"The tagging status list is dated {date}, older than the LaTeX it "
             f"checks ({kernel}): `{latexbuild.tlmgr_command('update latex-tagging-status')}` "

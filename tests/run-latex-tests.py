@@ -74,6 +74,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, HERE)
+import laidout  # noqa: E402
 import parallel  # noqa: E402
 
 MASTER = r"""\documentclass{book}
@@ -350,11 +351,102 @@ def raster_pdf(path, word="Map", size=128):
     return raw
 
 
+SETTINGS = ("project.yaml", "conversion.yaml", "packaging.yaml", "pdf-layout.yaml",
+            "latex-conversion-macros.tex")
+REPORTS = ("-new.csv", "-missing.csv", "-report.csv", "-check.csv", "-repaired.csv",
+           "-sample.yaml", "-sample.tex", "-sample.csv", "fidelity.csv")
+
+
+def project(folder):
+    """The folder made a project laid out with src/, its book to go in
+    src/book/."""
+    laidout.project(folder)
+    return folder
+
+
+def targets(folder):
+    """The names of the folders a project's targets are written to, by
+    its conversion.yaml: each target's name, or its output_dir."""
+    import yaml
+    try:
+        with open(laidout.projectpaths.of(folder).config_file(), encoding="utf-8") as fh:
+            declared = (yaml.safe_load(fh) or {}).get("targets") or {}
+    except (OSError, yaml.YAMLError):
+        declared = {}
+    return {str((settings or {}).get("output_dir") or name)
+            for name, settings in declared.items()} or {"html"}
+
+
+def place(folder, *names):
+    """Where a project keeps a file (project() makes one): its settings
+    and its definitions' file at its top, a sidecar and a report with its
+    part's, a target's file in the target's folder, a drawing a run
+    rendered with the part's intermediates, and anything else among the
+    part's sources. In any other folder, the names joined to it."""
+    if not laidout.projectpaths.is_tree(folder):
+        # A book in a folder below this one, named with its file.
+        for depth in range(1, len(names)):
+            below = os.path.join(folder, *names[:depth])
+            if laidout.projectpaths.is_tree(below):
+                return place(below, *names[depth:])
+        return os.path.join(folder, *names)
+    # Asking the path module for some places makes their folders, and a
+    # run takes only an output/ it made: before a first run, what the
+    # asking made, all of it empty, goes again.
+    fresh = not os.path.isdir(os.path.join(folder, "output"))
+    path = _place(folder, *names)
+    if fresh:
+        for top, _, _ in os.walk(os.path.join(folder, "output"), topdown=False):
+            os.rmdir(top)
+    return path
+
+
+def _place(folder, *names):
+    paths = laidout.projectpaths.of(folder)
+    first = names[0]
+    if len(names) == 1:
+        if first in SETTINGS:
+            return paths.top(first)
+        if first.endswith(REPORTS):
+            return paths.report(first)
+        if first.endswith(".csv"):
+            return paths.sidecar(first)
+    # A target's folder, by the settings as they are now or by a run made
+    # under earlier ones, whose folder is still there.
+    if first in targets(folder) or (first not in ("work", "reports", "packages")
+                                    and os.path.isdir(os.path.join(folder, "output", first))):
+        return os.path.join(paths.target_dir(first), *names[1:])
+    if first == "rendered":
+        return paths.media(*names)
+    return paths.source(*names)
+
+
+def named(folder, name):
+    """A file a setting names, at a project's top."""
+    return laidout.projectpaths.of(folder).top(name)
+
+
+def beside(folder, name):
+    """A folder beside a book's, for a second book made of what the first
+    wrote: a project can't lie among another's sources."""
+    return folder.rstrip(os.sep) + "-" + name
+
+
+def into(folder):
+    """Where a file copied into a book's folder goes: a project's
+    sources, or the folder itself."""
+    return laidout.projectpaths.of(folder).sources() \
+        if laidout.projectpaths.is_tree(folder) else folder
+
+
 def write_book(work, macros=False, second_master=False, readme=True,
-               epub=False):
-    os.makedirs(os.path.join(work, "ch1"))
-    os.makedirs(os.path.join(work, "ch2"))
-    os.makedirs(os.path.join(work, "img"))
+               epub=False, laid=True):
+    # laid: the folder a project; not, for the case that compares the layouts.
+    if laid:
+        project(work)
+    os.makedirs(place(work, "ch1"))
+    os.makedirs(place(work, "ch2"))
+    os.makedirs(place(work, "img"))
     files = {"book.tex": MASTER, "preface.tex": PREFACE, "ch1/one.tex": ONE,
              "ch1/table.tex": TABLE, "ch2/two.tex": TWO,
              "answers.tex": ANSWERS}
@@ -365,12 +457,12 @@ def write_book(work, macros=False, second_master=False, readme=True,
     if readme:
         files["README.md"] = "# The repository\n\nNot a page.\n"
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    png(os.path.join(work, "img", "square.png"), (90, 90, 90))
-    png(os.path.join(work, "img", "rule.png"), (0, 0, 0))
-    pdf(os.path.join(work, "img", "diagram.pdf"))
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    png(place(work, "img", "square.png"), (90, 90, 90))
+    png(place(work, "img", "rule.png"), (0, 0, 0))
+    pdf(place(work, "img", "diagram.pdf"))
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  + ("  epub:\n    format: epub3\n  word:\n    format: docx\n"
                     "  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n"
@@ -383,6 +475,10 @@ def fingerprint(work, skip_dirs=()):
     found = {}
     for top, _, names in os.walk(work):
         rel = os.path.relpath(top, work).split(os.sep)
+        if rel[0] == "output":
+            continue
+        if not os.path.relpath(top, into(work)).startswith(".."):
+            rel = os.path.relpath(top, into(work)).split(os.sep)
         if any(rel[0].startswith(d) for d in skip_dirs):
             continue
         for name in names:
@@ -395,9 +491,14 @@ def fingerprint(work, skip_dirs=()):
                     and os.sep + "md" + os.sep not in path \
                     and os.sep + "adoc" + os.sep not in path \
                     and os.sep + "adoc-back" + os.sep not in path:
+                # Named from the sources' folder, where a project keeps
+                # them, so that a book has the same names laid out or not.
+                rel = os.path.relpath(path, work)
+                if not rel.startswith(".." + os.sep) and \
+                        not os.path.relpath(path, into(work)).startswith(".."):
+                    rel = os.path.relpath(path, into(work))
                 with open(path, "rb") as fh:
-                    found[os.path.relpath(path, work)] = \
-                        hashlib.sha256(fh.read()).hexdigest()
+                    found[rel] = hashlib.sha256(fh.read()).hexdigest()
     return found
 
 
@@ -409,7 +510,12 @@ RUNS = []
 RUN_TAIL = 15
 
 
-def convert(work, env=None):
+def convert(work, env=None, any_layout=False, top=()):
+    # Every book is a project, but for the case that compares the two
+    # layouts: one a case wrote into a plain folder is laid out here.
+    # top: the names of files a setting names, which stay at the top.
+    if not any_layout:
+        laidout.settle(work, top=top)
     began = time.monotonic()
     done = subprocess.run(
         ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
@@ -434,7 +540,7 @@ def runs_said():
 def sample_text(work):
     """project-sample.yaml's values as YAML, without the description above
     each setting, which a check reading the text would otherwise see."""
-    path = os.path.join(work, "project-sample.yaml")
+    path = place(work, "project-sample.yaml")
     if not os.path.exists(path):
         return ""
     import yaml
@@ -449,11 +555,11 @@ def without_tagging_status(work):
     real = shutil.which("kpsewhich")
     shim = os.path.join(work, "..", os.path.basename(work) + "-kpsewhich")
     os.makedirs(shim, exist_ok=True)
-    with open(os.path.join(shim, "kpsewhich"), "w") as fh:
+    with open(place(shim, "kpsewhich"), "w") as fh:
         fh.write("#!/bin/sh\n"
                  "case \"$1\" in latex-tagging-status.ltx) exit 1;; esac\n"
                  "exec %s \"$@\"\n" % (real or "false"))
-    os.chmod(os.path.join(shim, "kpsewhich"), 0o755)
+    os.chmod(place(shim, "kpsewhich"), 0o755)
     return dict(os.environ, PATH=os.path.abspath(shim) + os.pathsep + os.environ["PATH"])
 
 
@@ -465,7 +571,7 @@ def latexsource_mark():
 
 
 def read(work, *parts):
-    with open(os.path.join(work, *parts), encoding="utf-8") as fh:
+    with open(place(work, *parts), encoding="utf-8") as fh:
         return fh.read()
 
 
@@ -474,7 +580,7 @@ def epub_links_resolve(work):
     the file it names, or its own when it names none."""
     import posixpath
     import zipfile
-    with zipfile.ZipFile(os.path.join(work, "epub", "book.epub")) as z:
+    with zipfile.ZipFile(place(work, "epub", "book.epub")) as z:
         texts = {n: z.read(n).decode("utf-8") for n in z.namelist()
                  if n.endswith(".xhtml")}
     ids = {n: set(re.findall(r'\sid="([^"]+)"', t)) for n, t in texts.items()}
@@ -488,10 +594,10 @@ def epub_links_resolve(work):
 def word_list_reads_back(work):
     """one.docx, read back as a source, gives the list whole: the table
     and the rule inside their items, and every item in one list."""
-    back = os.path.join(work, "back")
-    os.makedirs(back, exist_ok=True)
-    shutil.copy(os.path.join(work, "word", "one.docx"), back)
-    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+    back = beside(work, "back")
+    project(back)
+    shutil.copy(place(work, "word", "one.docx"), into(back))
+    with open(place(back, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     convert(back)
     page = read(back, "html", "one.html")
@@ -510,7 +616,7 @@ def word_quote_reads_back(work):
     """The quotation holding a table, read back from one.docx (which
     word_list_reads_back converted), is one quotation with the table in it,
     and no cell is a quotation."""
-    page = read(work, "back", "html", "one.html")
+    page = read(beside(work, "back"), "html", "one.html")
     quotes = re.findall(r"<blockquote>(.*?)</blockquote>", page, re.S)
     proof = [q for q in quotes if "Proof: a table follows" in q]
     return proof and "<table" in proof[0] and "Q.E.D." in proof[0] \
@@ -521,13 +627,14 @@ def word_quote_reads_back(work):
 def asciidoc_math_reads_back(work):
     """adoc/, the AsciiDoc target, read back as a source: one.html has
     as many formulas as the page it was written from."""
-    back = os.path.join(work, "adoc-back")
+    back = beside(work, "adoc-back")
     if not os.path.exists(back):
-        shutil.copytree(os.path.join(work, "adoc"), back)
-        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        project(back)
+        shutil.copytree(place(work, "adoc"), into(back), dirs_exist_ok=True)
+        with open(place(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         convert(back)
-    page = os.path.join(back, "html", "one.html")
+    page = place(back, "html", "one.html")
     return os.path.exists(page) and \
         read(work, "html", "one.html").count("<math") == read(back, "html", "one.html").count("<math")
 
@@ -535,9 +642,10 @@ def asciidoc_math_reads_back(work):
 def markdown_reads_back(work):
     """md/, the Markdown target, read back as a source: one.html has the
     same figures, a centered drawing's figure among them."""
-    back = os.path.join(work, "md-back")
-    shutil.copytree(os.path.join(work, "md"), back)
-    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+    back = beside(work, "md-back")
+    project(back)
+    shutil.copytree(place(work, "md"), into(back), dirs_exist_ok=True)
+    with open(place(back, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     convert(back)
     def figures(page):
@@ -545,7 +653,7 @@ def markdown_reads_back(work):
                 for c in re.findall(r"<figcaption>(.*?)</figcaption>", page, re.S)]
     before = figures(read(work, "html", "one.html"))
     after = figures(read(back, "html", "one.html")) \
-        if os.path.exists(os.path.join(back, "html", "one.html")) else []
+        if os.path.exists(place(back, "html", "one.html")) else []
     return before and before == after
 
 
@@ -559,7 +667,7 @@ def word_math_in_list(work):
     import zipfile
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import docxtarget
-    with zipfile.ZipFile(os.path.join(work, "word", "one.docx")) as z:
+    with zipfile.ZipFile(place(work, "word", "one.docx")) as z:
         xml = z.read("word/document.xml").decode("utf-8")
     paragraphs = re.findall(r"<w:p>.*?</w:p>", xml, re.S)
     formula = [p for p in paragraphs if "oMathPara" in p and "x" in p]
@@ -749,24 +857,24 @@ def case_book(work):
     result = convert(work)
     log = result.stdout + result.stderr
     one = read(work, "html", "one.html") \
-        if os.path.exists(os.path.join(work, "html", "one.html")) else ""
+        if os.path.exists(place(work, "html", "one.html")) else ""
     two = read(work, "html", "two.html") \
-        if os.path.exists(os.path.join(work, "html", "two.html")) else ""
+        if os.path.exists(place(work, "html", "two.html")) else ""
     import yaml
     sample = yaml.safe_load(read(work, "project-sample.yaml")) \
-        if os.path.exists(os.path.join(work, "project-sample.yaml")) else {}
+        if os.path.exists(place(work, "project-sample.yaml")) else {}
     project = (sample or {}).get("project", {})
     sample_text = read(work, "latex-conversion-macros-sample.tex") \
-        if os.path.exists(os.path.join(work,
+        if os.path.exists(place(work,
                                        "latex-conversion-macros-sample.tex")) else ""
     missing_alt = read(work, "image-alt-missing.csv") \
-        if os.path.exists(os.path.join(work, "image-alt-missing.csv")) else ""
+        if os.path.exists(place(work, "image-alt-missing.csv")) else ""
     return [
         ("the master's \\include-s are the pages, the master's own text one more",
-         lambda: all(os.path.exists(os.path.join(work, "html", n + ".html"))
+         lambda: all(os.path.exists(place(work, "html", n + ".html"))
                      for n in ("book", "preface", "one", "two", "answers"))),
         ("a README beside the master is the repository's, not a page",
-         lambda: not os.path.exists(os.path.join(work, "html", "README.html"))),
+         lambda: not os.path.exists(place(work, "html", "README.html"))),
         ("the contents sample follows the master, roles from its divisions",
          lambda: project.get("contents") == [
              {"page": "book", "role": "front"},
@@ -799,7 +907,7 @@ def case_book(work):
          and 'aria-hidden="true"' in one),
         ("a drawing LaTeX can't make costs only itself",
          lambda: "1 of the book's 2 drawing(s)" in log
-         and os.path.exists(os.path.join(work, "rendered", "ch1", "one-1.svg"))
+         and os.path.exists(place(work, "rendered", "ch1", "one-1.svg"))
          if not why_no_drawings() else skip(why_no_drawings())),
         ("a drawing is rendered whole and keeps its figure's caption",
          lambda: re.search(r'<figure[^>]*>\s*(<div class="center">\s*)?'
@@ -828,8 +936,8 @@ def case_book(work):
         ("the author's tagging header declaration is the table's",
          lambda: re.search(r'<th[^>]*scope="col"[^>]*>Head one', one)),
         ("an overlay drawn on every page isn't a drawing of the text",
-         lambda: not os.path.exists(os.path.join(work, "rendered", "book.svg"))
-         and not os.path.exists(os.path.join(work, "rendered", "book-1.svg"))),
+         lambda: not os.path.exists(place(work, "rendered", "book.svg"))
+         and not os.path.exists(place(work, "rendered", "book-1.svg"))),
         ("latex-conversion-macros.tex is read after the preamble: \\suchthat as \\mid",
          lambda: "∣" in one or "&#x2223;" in one or "|</mo>" in one),
         ("a \\ref into another chapter goes to the page the label is on",
@@ -842,21 +950,21 @@ def case_book(work):
         ("in AsciiDoc, code beside a formula is unconstrained, so the reader takes both",
          lambda: re.search(r"``\+Let ?\+``latexmath:\[q = 0\]",
                            read(work, "adoc", "one.adoc")
-                           if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")
+                           if os.path.exists(place(work, "adoc", "one.adoc")) else "")
          is not None and asciidoc_math_reads_back(work)),
         ("read back from AsciiDoc, a table in a table keeps every cell, formulas in them too",
          lambda: asciidoc_math_reads_back(work)
          and len(re.findall(r"<t[dh]\b", read(work, "html", "one.html"))) ==
-         len(re.findall(r"<t[dh]\b", read(work, "adoc-back", "html", "one.html")))),
+         len(re.findall(r"<t[dh]\b", read(beside(work, "adoc-back"), "html", "one.html")))),
         ("read back from AsciiDoc, the rules stay in their list items, the lists whole",
          lambda: asciidoc_math_reads_back(work)
          and read(work, "html", "one.html").count("<ol") ==
-         read(work, "adoc-back", "html", "one.html").count("<ol")
+         read(beside(work, "adoc-back"), "html", "one.html").count("<ol")
          and read(work, "html", "one.html").count("<hr") ==
-         read(work, "adoc-back", "html", "one.html").count("<hr")),
+         read(beside(work, "adoc-back"), "html", "one.html").count("<hr")),
         ("in AsciiDoc, a formula that ran over a line is on one, where the reader takes it",
          lambda: "latexmath:[p + q]" in (read(work, "adoc", "one.adoc")
-                                         if os.path.exists(os.path.join(work, "adoc", "one.adoc")) else "")),
+                                         if os.path.exists(place(work, "adoc", "one.adoc")) else "")),
         ("read back from Markdown, every figure is a figure, a centered drawing's too",
          lambda: markdown_reads_back(work)),
         ("in Word, a formula inside a list item stays in the item",
@@ -867,7 +975,7 @@ def case_book(work):
          lambda: word_quote_reads_back(work)),
         ("a figure holding a table is reported as a Word loss",
          lambda: "figure-table" in (read(work, "fidelity.csv")
-                                    if os.path.exists(os.path.join(work, "fidelity.csv")) else "")),
+                                    if os.path.exists(place(work, "fidelity.csv")) else "")),
         ("the author's files are untouched",
          lambda: fingerprint(work) == before),
     ]
@@ -891,9 +999,9 @@ def case_tree_layout(work):
 
     flat, tree = os.path.join(work, "flat"), os.path.join(work, "tree")
     sources = os.path.join(tree, "src", "book")
-    write_book(flat, macros=True, epub=True)
+    write_book(flat, macros=True, epub=True, laid=False)
     os.makedirs(os.path.dirname(sources))
-    write_book(sources, macros=True, epub=True)
+    write_book(sources, macros=True, epub=True, laid=False)
     for name in ("conversion.yaml", "latex-conversion-macros.tex"):
         os.rename(os.path.join(sources, name), os.path.join(tree, name))
     for folder in (flat, tree):
@@ -901,12 +1009,12 @@ def case_tree_layout(work):
             fh.write("project:\n  identifier: org.example.latex\n  title: A Test Book\n")
     before = files(sources)
     env = dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC")
-    ran = [convert(flat, env), convert(tree, env)]
+    ran = [convert(flat, env, any_layout=True), convert(tree, env, any_layout=True)]
     pages = [{k: v for k, v in files(os.path.join(folder, "html")).items()
               if not k.startswith("intermediates" + os.sep)}
              for folder in (flat, os.path.join(tree, "output"))]
     books = [files(os.path.join(folder, "epub")) for folder in (flat, os.path.join(tree, "output"))]
-    one = read(tree, "output", "html", "one.html") \
+    one = open(os.path.join(tree, "output", "html", "one.html"), encoding="utf-8").read() \
         if os.path.exists(os.path.join(tree, "output", "html", "one.html")) else ""
     return [
         ("each layout's run succeeds",
@@ -930,15 +1038,15 @@ def case_masters(work):
     """Two masters: latex.main decides, and without it the run stops."""
     write_book(work, second_master=True, readme=False)
     stopped = convert(work)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("defaults:\n  latex:\n    main: workbook.tex\n"
                  "targets:\n  html:\n    format: html\n")
     chosen = convert(work)
     sample = read(work, "latex-conversion-macros-sample.tex") \
-        if os.path.exists(os.path.join(work,
+        if os.path.exists(place(work,
                                        "latex-conversion-macros-sample.tex")) else ""
     one = read(work, "html", "one.html") \
-        if os.path.exists(os.path.join(work, "html", "one.html")) else ""
+        if os.path.exists(place(work, "html", "one.html")) else ""
     return [
         ("two masters and no latex.main stop the run, naming both",
          lambda: stopped.returncode != 0
@@ -958,8 +1066,8 @@ def case_layout_tables(work):
     the PDF target and the latex target tag a layout table, is read as a
     layout table; a box tagged so, as a source copy writes one, is still a
     box, and a table tagged nothing is a data table."""
-    os.makedirs(work)
-    with open(os.path.join(work, "steps.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "steps.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{longtable}\n\\begin{document}\n"
                  "Steps:\n\n"
                  "{\\ifdefined\\tagpdfsetup\\tagpdfsetup{table/tagging=div}\\fi\n\n"
@@ -975,14 +1083,14 @@ def case_layout_tables(work):
                  "\\begin{tabular}{ll}\nMultiply each side by 4. & $x = 8$ \\\\\n"
                  "Subtract 1 from each side. & $x = 7$ \\\\\n\\end{tabular}\n"
                  "\\end{document}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
     page = read(work, "html", "steps.html") \
-        if os.path.exists(os.path.join(work, "html", "steps.html")) else ""
+        if os.path.exists(place(work, "html", "steps.html")) else ""
     missing = read(work, "table-captions-missing.csv") \
-        if os.path.exists(os.path.join(work, "table-captions-missing.csv")) else ""
+        if os.path.exists(place(work, "table-captions-missing.csv")) else ""
     tables = re.findall(r"(<div class=\"table-wrapper\"[^>]*>\s*)?<table([^>]*)>(.*?)</table>",
                         page, re.S)
     return [
@@ -1000,15 +1108,15 @@ def case_layout_tables(work):
 
 def case_single(work):
     """A document that \\include-s nothing is one page."""
-    os.makedirs(work)
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\begin{document}\n"
                  "\\section*{1.0 Review}\nText.\n\\section*{1.1 Parts}\n"
                  "More.\n\\end{document}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
-    page = os.path.join(work, "html", "notes.html")
+    page = place(work, "html", "notes.html")
     return [
         ("a document that includes nothing is one page, its sections in it",
          lambda: os.path.exists(page) and "1.1 Parts" in read(work, "html",
@@ -1024,7 +1132,7 @@ def case_babel_names(work):
     gave none, is in it in the book's page, by the name the reader knows;
     a name the reader knows, or one in a comment, left as written; the run
     saying how many, and the author's file as it was."""
-    os.makedirs(work)
+    project(work)
     master = ("\\documentclass{article}\n\\usepackage[french,english]{babel}\n"
               "\\babeltags{fr = francais}\n\\begin{document}\n"
               "Un \\foreignlanguage{francais}{mot}, un \\foreignlanguage{French}{autre}, "
@@ -1033,12 +1141,12 @@ def case_babel_names(work):
               "\\begin{otherlanguage}{French}\nUne phrase.\n\\end{otherlanguage}\n\n"
               "\\begin{otherlanguage*}{FRENCH}\nEncore une.\n\\end{otherlanguage*}\n\n"
               "A \\foreignlanguage{USenglish}{color}.\n\\end{document}\n")
-    with open(os.path.join(work, "noms.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "noms.tex"), "w", encoding="utf-8") as fh:
         fh.write(master)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
-    page = os.path.join(work, "html", "noms.html")
+    page = place(work, "html", "noms.html")
     body = re.sub(r"\s+", " ", read(page)[read(page).find("<body"):]) \
         if os.path.exists(page) else ""
     said = result.stdout + result.stderr
@@ -1062,18 +1170,18 @@ def case_babel_names(work):
 def case_language(work):
     """A LaTeX book's pages are in the language its preamble gives, babel's
     main language here, in a project in another."""
-    os.makedirs(work)
-    with open(os.path.join(work, "notas.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "notas.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage[english,spanish]{babel}\n"
                  "\\begin{document}\n\\section*{Repaso}\nUn texto.\n\\end{document}\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.notas\n  title: Notas\n"
                  "  language: en\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
-    page = os.path.join(work, "html", "notas.html")
-    drafted = os.path.join(work, "languages-new.csv")
+    page = place(work, "html", "notas.html")
+    drafted = place(work, "languages-new.csv")
     return [
         ("a LaTeX book's page is in babel's main language, its last",
          lambda: os.path.exists(page)
@@ -1097,7 +1205,7 @@ def case_inline_code(work):
     line doesn't close; and the author's files as they were."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    os.makedirs(work)
+    project(work)
     files = {
         "book.tex": "\\documentclass{book}\n\\usepackage{listings,minted,fancyvrb,ifthen}\n"
                     "\\newboolean{x}\n\\newenvironment{rouge}{}{}\n"
@@ -1111,16 +1219,16 @@ def case_inline_code(work):
                    "F \\Verb|\\begin{rouge}x\\end{rouge}| fin.\n",
     }
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.code\n  title: Code\n"
                  "  language: fr\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     page = read(work, "html", "one.html") if os.path.exists(
-        os.path.join(work, "html", "one.html")) else ""
+        place(work, "html", "one.html")) else ""
     text = re.sub(r"\s+", " ", page)
 
     def code(letter, words, attributes=""):
@@ -1178,17 +1286,17 @@ def case_babel_main(work):
     tagged = "  copy:\n    format: source\n    tagging: \"on\"\n"
 
     def book_at(name, master, language=None, targets=tagged):
-        path = os.path.join(work, name)
-        os.makedirs(path)
-        with open(os.path.join(path, "book.tex"), "w", encoding="utf-8") as fh:
+        path = place(work, name)
+        project(path)
+        with open(place(path, "book.tex"), "w", encoding="utf-8") as fh:
             fh.write(master)
-        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.main\n  title: A Main Language\n"
                      + (f"  language: {language}\n" if language else ""))
-        with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets)
         done = convert(path)
-        copy = os.path.join(path, "copy", "book.tex")
+        copy = place(path, "copy", "book.tex")
         return (read(path, "copy", "book.tex") if done.returncode == 0
                 and os.path.exists(copy) else ""), done.stdout + done.stderr
 
@@ -1220,7 +1328,7 @@ def case_babel_main(work):
 
     def page_of(name):
         """The book's page, its spaces one, or "" where it has none."""
-        page = os.path.join(work, name, "html", "book.html")
+        page = place(work, name, "html", "book.html")
         return re.sub(r"\s+", " ", read(page)) if os.path.exists(page) else ""
     again = ""
     if german:
@@ -1263,14 +1371,14 @@ def case_babel_main(work):
         if not text:
             return False
         tree = tempfile.mkdtemp(prefix="build-" + wanted[0] + "-", dir=work)
-        with open(os.path.join(tree, "book.tex"), "w", encoding="utf-8") as fh:
+        with open(place(tree, "book.tex"), "w", encoding="utf-8") as fh:
             fh.write(text.replace("\\begin{document}\n", "\\begin{document}\n"
                                   "\\typeout{MAIN=\\languagename}\n"
                                   "\\showhyphens{Zucker organization}\n"))
         done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                "book.tex"], cwd=tree, capture_output=True, text=True,
                               timeout=300, stdin=subprocess.DEVNULL)
-        log = read(tree, "book.log") if os.path.exists(os.path.join(tree, "book.log")) else ""
+        log = read(tree, "book.log") if os.path.exists(place(tree, "book.log")) else ""
         return built_or_why(done.returncode == 0 and "MAIN=%s\n" % wanted[0] in log
                             and (wanted[1] is None or re.search(
                                 r"\\TU/\S+ %s\b" % re.escape(wanted[1]), log) is not None),
@@ -1282,7 +1390,7 @@ def case_babel_main(work):
         "\\DocumentMetadata{\n  pdfversion=2.0, % for now, and 2.1 later\n"
         "  tagging=off, % until it builds\n  lang=de-DE % the book's\n}\n"
         "\\documentclass{article}\n\\usepackage[ngerman]{babel}\n" + body, "en")
-    page = os.path.join(work, "french", "html", "book.html")
+    page = place(work, "french", "html", "book.html")
     return [
         ("a book's own \\DocumentMetadata over lines is read without its comments and keeps "
          "them: a comma in one ends no key, so its lang is the book's and none is added, "
@@ -1428,7 +1536,7 @@ def case_babel_reading(work):
     found as before."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    os.makedirs(work)
+    project(work)
     files = {
         "book.tex": "\\documentclass{book}\n\\usepackage[ngerman,french,english]{babel}\n"
                     "\\usepackage{amsmath}\n\\usepackage{breqn}\n"
@@ -1512,17 +1620,17 @@ def case_babel_reading(work):
                    "Apr\\`es} after.\n",
     }
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.read\n  title: Read in Languages\n"
                  "  language: en\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
     page = read(work, "html", "one.html") if os.path.exists(
-        os.path.join(work, "html", "one.html")) else ""
+        place(work, "html", "one.html")) else ""
     text = re.sub(r"\s+", " ", page)
 
     def paragraph(*parts):
@@ -1680,32 +1788,32 @@ def case_dotted_include(work):
     week1, the master's own, whose words it took, its language in
     languages.csv not found; and so in the contents sample, and in the
     copy's line tagging its file in its language."""
-    os.makedirs(work)
+    project(work)
     master = ("\\documentclass{book}\n\\begin{document}\nWords the master sets itself.\n\n"
               "\\include{week1.5}\n\\end{document}\n")
     files = {"week1.tex": master,
              "week1.5.tex": "\\chapter{La demi-semaine}\nLes mots du fichier.\n"}
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "languages.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "languages.csv"), "w", encoding="utf-8") as fh:
         fh.write("source,language,found,drafted-by,reviewed\nweek1.5,fr,,,\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.week\n  title: A Week\n"
                  "  language: en-US\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  copy:\n    format: source\n    tagging: \"on\"\n")
     result = convert(work)
     said = result.stdout + result.stderr
 
     def page(stem):
-        path = os.path.join(work, "html", stem + ".html")
+        path = place(work, "html", stem + ".html")
         return read(path) if os.path.exists(path) else ""
     sample = read(work, "project-sample.yaml") \
-        if os.path.exists(os.path.join(work, "project-sample.yaml")) else ""
+        if os.path.exists(place(work, "project-sample.yaml")) else ""
     copy = read(work, "copy", "week1.tex") \
-        if os.path.exists(os.path.join(work, "copy", "week1.tex")) else ""
+        if os.path.exists(place(work, "copy", "week1.tex")) else ""
     return [
         ("a file \\include-d as week1.5 is the page week1.5, in French by languages.csv, "
          "and the master's own words are its page week1, in English",
@@ -1733,30 +1841,30 @@ def case_include_only(work):
                 "ch2.tex": "\\chapter{Deux}\nLes mots du second.\n"}
 
     def book(name, only, targets):
-        path = os.path.join(work, name)
-        os.makedirs(path)
+        path = place(work, name)
+        project(path)
         files = dict(chapters, **{"book.tex": (
             "\\documentclass{book}\n\\includeonly{%s}\n\\begin{document}\n"
             "\\include{ch1}\n\\include{ch2}\n\\end{document}\n" % only)})
         for file, text in files.items():
-            with open(os.path.join(path, file), "w", encoding="utf-8") as fh:
+            with open(place(path, file), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(path, "languages.csv"), "w", encoding="utf-8") as fh:
+        with open(place(path, "languages.csv"), "w", encoding="utf-8") as fh:
             fh.write("source,language,found,drafted-by,reviewed\nch2,fr,,,\n")
-        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.only\n  title: Only\n"
                      "  language: en-US\n")
-        with open(os.path.join(path, "conversion.yaml"), "w") as fh:
+        with open(place(path, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n"
                      "  copy:\n    format: source\n    tagging: \"on\"\n" + targets)
         done = convert(path)
-        copy = os.path.join(path, "copy", "book.tex")
+        copy = place(path, "copy", "book.tex")
         return (done.returncode, done.stdout + done.stderr,
                 read(copy) if os.path.exists(copy) else "", path)
 
     status, said, copy, path = book("left-out", "ch1", "  pdf:\n    format: pdf\n")
     let_status, let_said, let_copy, _ = book("let-in", " ch1 , ch2.tex", "")
-    pdf = os.path.join(path, "pdf", "org.example.only.pdf")
+    pdf = place(path, "pdf", "org.example.only.pdf")
 
     def pdf_words(file):
         return subprocess.run(["pdftotext", file, "-"], capture_output=True,
@@ -1764,7 +1872,7 @@ def case_include_only(work):
     return [
         ("a page \\includeonly leaves out, which the pages have, gets no line in the copy "
          "and isn't counted as tagged, where one it lets in, named with spaces and .tex, is",
-         lambda: os.path.exists(os.path.join(path, "html", "ch2.html"))
+         lambda: os.path.exists(place(path, "html", "ch2.html"))
          and "\\TIQfilelanguage{/ch2.tex}" not in copy and "\\TIQfilelanguage" not in copy
          and "(ch2 fr)" not in said
          and let_status == 0 and "\\TIQfilelanguage{/ch2.tex}{fr}" in let_copy
@@ -1800,16 +1908,16 @@ def case_opening_language(work):
     found = [latexsource.preamble_language(p) for p in preambles]
     pages = {}
     for name, options in (("tryonce", ""), ("autostyle", "[autostyle=true]")):
-        folder = os.path.join(work, name)
-        os.makedirs(folder)
-        with open(os.path.join(folder, "mots.tex"), "w", encoding="utf-8") as fh:
+        folder = place(work, name)
+        project(folder)
+        with open(place(folder, "mots.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\documentclass{article}\n" + babel + "\\usepackage%s{csquotes}\n"
                      "\\AtBeginDocument{\\selectlanguage{english}}\n\\begin{document}\n"
                      "A \\enquote{word} here.\n\\end{document}\n" % options)
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         convert(folder)
-        path = os.path.join(folder, "html", "mots.html")
+        path = place(folder, "html", "mots.html")
         pages[name] = read(path) if os.path.exists(path) else ""
     return [
         ("a \\selectlanguage in a hook at \\begin{document} is the book's language, before "
@@ -1852,7 +1960,7 @@ def case_pandoc_written(work):
     before its first \\item read with its terms, which every Pandoc's
     reader lost, but not code holding an environment, nor a description
     in an environment's or a command's definition."""
-    os.makedirs(work)
+    project(work)
     book = ("\\documentclass{book}\n\\usepackage{longtable,booktabs}\n" + DEFERRED_NOTES_PREAMBLE
             + "\\newenvironment{glossaire}{\\begin{description}}{\\end{description}}\n"
             "\\begin{document}\n\\chapter{Written}\nText.\\footnote{Plain note.}\n\n"
@@ -1870,16 +1978,16 @@ def case_pandoc_written(work):
             "\\newcommand{\\stopgl}{\\end{description}}\n"
             "\\newcommand{\\startgl}{\\begin{description}}\n"
             "\\startgl\n\\item[Fig] A fruit as well.\n\\stopgl\n\\end{document}\n")
-    with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write(book)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.written\n  title: Written\n"
                  "  language: en-US\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    path = os.path.join(work, "html", "book.html")
+    path = place(work, "html", "book.html")
     page = re.sub(r"\s+", " ", read(path)) if os.path.exists(path) else ""
     notes = re.findall(r'<li id="fn\d+"><p>([^<]*)<a href="#fnref', page)
     return [
@@ -1940,24 +2048,24 @@ def case_stop_line(work):
     import latexsource
     # A line the copy changed into two: the author's line it stands for.
     for folder, text in (("base", "a\nb\nc\nd\n"), ("copy", "a\nX\nY\nc\nd\n")):
-        os.makedirs(os.path.join(work, "lines", folder))
-        with open(os.path.join(work, "lines", folder, "book.tex"), "w") as fh:
+        os.makedirs(place(work, "lines", folder))
+        with open(place(work, "lines", folder, "book.tex"), "w") as fh:
             fh.write(text)
-    with open(os.path.join(work, "lines", "base", "reads.tex"), "w") as fh:
+    with open(place(work, "lines", "base", "reads.tex"), "w") as fh:
         fh.write("% \\include{x}\n\\input{y} % z\n")
-    lines = [latexsource.stop_place(os.path.join(work, "lines", "base"),
-                                    os.path.join(work, "lines", "copy"),
+    lines = [latexsource.stop_place(place(work, "lines", "base"),
+                                    place(work, "lines", "copy"),
                                     'Error at "%s" (line %d, column 1):' % (name, line))
              for name, line in (("book.tex", 3), ("book.tex", 4), ("book.tex", 1),
                                 ("other.tex", 2))]
     told = {}
     for label, files in stops.items():
-        folder = os.path.join(work, label)
-        os.makedirs(folder)
+        folder = place(work, label)
+        project(folder)
         for name, text in files.items():
-            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            with open(place(folder, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         result = convert(folder)
         told[label] = (result.returncode, result.stdout + result.stderr)
@@ -1991,11 +2099,11 @@ def case_stop_line(work):
              "\\include-s or \\input-s, and read alone, one.tex stops at its line 3."
              in told["first"][1]
          and "may be in one of them" not in told["first"][1]
-         and latexsource.reads_files(os.path.join(work, "first"), "book.tex", 3)
-         and not latexsource.reads_files(os.path.join(work, "first"), "book.tex", 1)
-         and not latexsource.reads_files(os.path.join(work, "lines", "base"), "book.tex", 9)
-         and not latexsource.reads_files(os.path.join(work, "lines", "base"), "reads.tex", 1)
-         and latexsource.reads_files(os.path.join(work, "lines", "base"), "reads.tex", 2)),
+         and latexsource.reads_files(place(work, "first"), "book.tex", 3)
+         and not latexsource.reads_files(place(work, "first"), "book.tex", 1)
+         and not latexsource.reads_files(place(work, "lines", "base"), "book.tex", 9)
+         and not latexsource.reads_files(place(work, "lines", "base"), "reads.tex", 1)
+         and latexsource.reads_files(place(work, "lines", "base"), "reads.tex", 2)),
     ]
 
 
@@ -2018,7 +2126,7 @@ def case_babel_environments(work):
     a declaration; the run saying what it read so."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    os.makedirs(work)
+    project(work)
     files = {
         "book.tex": "\\documentclass{book}\n\\usepackage[ngerman,french,english]{babel}\n"
                     "\\usepackage{listings}\n"
@@ -2074,17 +2182,17 @@ def case_babel_environments(work):
                    "\\end{otherlanguage*} fin.\n",
     }
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.envs\n  title: Environments\n"
                  "  language: en\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
     page = read(work, "html", "one.html") if os.path.exists(
-        os.path.join(work, "html", "one.html")) else ""
+        place(work, "html", "one.html")) else ""
     text = re.sub(r"\s+", " ", page)
 
     def paragraph(*parts):
@@ -2215,7 +2323,7 @@ def case_inline_breaks(work):
     saying what it read so, and the author's files as they were."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    os.makedirs(work)
+    project(work)
     files = {
         "book.tex": "\\documentclass{book}\n\\usepackage[normalem]{ulem}\n"
                     "\\usepackage[english,french]{babel}\n\\usepackage{csquotes}\n"
@@ -2239,32 +2347,32 @@ def case_inline_breaks(work):
                    "Sixteen \\enquote{un.\n\n\\pagebreak[4]\n\n\\medbreak\n\ndeux.} end.\n",
     }
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.breaks\n  title: Breaks\n"
                  "  language: fr\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
     page = read(work, "html", "one.html") if os.path.exists(
-        os.path.join(work, "html", "one.html")) else ""
+        place(work, "html", "one.html")) else ""
     text = re.sub(r"\s+", " ", page)
     # An English book, whose marks are Pandoc's, so the reader would take
     # an inner quotation in a split one's words for an outer one.
-    english = os.path.join(work, "english")
-    os.makedirs(english)
-    with open(os.path.join(english, "quotes.tex"), "w", encoding="utf-8") as fh:
+    english = beside(work, "english")
+    project(english)
+    with open(place(english, "quotes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage[english]{babel}\n"
                  "\\usepackage{csquotes}\n\\begin{document}\n"
                  "A \\enquote{one \\enquote{in} more\n\ntwo} end.\n\n"
                  "Then \\enquote{plain} after.\n\\end{document}\n")
-    with open(os.path.join(english, "conversion.yaml"), "w") as fh:
+    with open(place(english, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     english_run = convert(english)
     english_said = english_run.stdout + english_run.stderr
-    english_page = os.path.join(english, "html", "quotes.html")
+    english_page = place(english, "html", "quotes.html")
     english_text = re.sub(r"\s+", " ", html_module.unescape(read(english_page))) \
         if os.path.exists(english_page) else ""
 
@@ -2368,7 +2476,7 @@ def case_inline_blocks(work):
     were."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    os.makedirs(work)
+    project(work)
     files = {
         "book.tex": "\\documentclass{book}\n\\usepackage{amsmath,csquotes,hyperref}\n"
                     "\\usepackage[english,french]{babel}\n"
@@ -2406,17 +2514,17 @@ def case_inline_blocks(work):
                    "Y \\foreignlanguage{french}{bonjour\\sn{note} toi} fin.\n",
     }
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.blocks\n  title: Blocks\n"
                  "  language: fr\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
     page = read(work, "html", "one.html") if os.path.exists(
-        os.path.join(work, "html", "one.html")) else ""
+        place(work, "html", "one.html")) else ""
     text = re.sub(r"\s+", " ", page)
 
     def around(before, opening, block, closing, after):
@@ -2539,7 +2647,7 @@ def case_reading_forms(work):
     were."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    babel, poly = os.path.join(work, "babel"), os.path.join(work, "poly")
+    babel, poly = place(work, "babel"), place(work, "poly")
     books = {
         babel: {
             "book.tex": "\\documentclass{book}\n\\usepackage{url,soul,xcolor,hyperref}\n"
@@ -2579,17 +2687,17 @@ def case_reading_forms(work):
     }
     results, pages = {}, {}
     for folder, files in books.items():
-        os.makedirs(folder)
+        project(folder)
         for name, text in files.items():
-            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            with open(place(folder, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.forms\n  title: Forms\n"
                      "  language: en\n")
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         results[folder] = convert(folder)
-        page = os.path.join(folder, "html", "one.html")
+        page = place(folder, "html", "one.html")
         pages[folder] = re.sub(r"\s+", " ", read(folder, "html", "one.html")) \
             if os.path.exists(page) else ""
     said = results[babel].stdout + results[babel].stderr
@@ -2704,7 +2812,7 @@ def case_reading_macros(work):
     the run saying what it read so, and the author's files as they were."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    book, main = os.path.join(work, "book"), os.path.join(work, "main")
+    book, main = place(work, "book"), place(work, "main")
     books = {
         book: {
             "book.tex": "\\documentclass{book}\n\\usepackage{amsmath}\n"
@@ -2750,31 +2858,31 @@ def case_reading_macros(work):
     }
     results, pages = {}, {}
     for folder, files in books.items():
-        os.makedirs(folder)
+        project(folder)
         for name, text in files.items():
-            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            with open(place(folder, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.macros\n  title: Macros\n"
                      "  language: en\n")
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         results[folder] = convert(folder)
-        page = os.path.join(folder, "html", "one.html")
+        page = place(folder, "html", "one.html")
         pages[folder] = re.sub(r"\s+", " ", read(folder, "html", "one.html")) \
             if os.path.exists(page) else ""
     said = results[book].stdout + results[book].stderr
     told = results[main].stdout + results[main].stderr
     text = pages[book]
-    filed = os.path.join(work, "filed")
+    filed = place(work, "filed")
     os.makedirs(filed)
     # A \def's image macro whose description is a delimited argument, in
     # the source target's copy: TeX takes the braces off such an argument
     # where they're around it whole.
-    altdef = os.path.join(work, "altdef")
-    os.makedirs(altdef)
-    png(os.path.join(altdef, "chat.png"), (40, 40, 40))
-    png(os.path.join(altdef, "chien.png"), (80, 80, 80))
+    altdef = place(work, "altdef")
+    project(altdef)
+    png(place(altdef, "chat.png"), (40, 40, 40))
+    png(place(altdef, "chien.png"), (80, 80, 80))
     altdef_book = ("\\documentclass{article}\n\\usepackage{graphicx}\n"
                    "\\def\\figalt#1;#2;{\\includegraphics[width=1cm,alt=#2]{#1}}\n"
                    "\\def\\figbraced#1;#2;{\\includegraphics[width=1cm,alt={#2}]{#1}}\n"
@@ -2784,39 +2892,39 @@ def case_reading_macros(work):
                           ("image-alt.csv", 'Image,Alt\nchat.png,"Un chat, noir"\n'
                                             "chien.png,Un chien; noir\n"),
                           ("conversion.yaml", "targets:\n  copy:\n    format: source\n")):
-        with open(os.path.join(altdef, name), "w", encoding="utf-8") as fh:
+        with open(place(altdef, name), "w", encoding="utf-8") as fh:
             fh.write(content)
     altdef_run = convert(altdef)
     altdef_copy = read(altdef, "copy", "book.tex") \
-        if os.path.exists(os.path.join(altdef, "copy", "book.tex")) else ""
+        if os.path.exists(place(altdef, "copy", "book.tex")) else ""
     # A \\providecommand of \\Verb beside fancyvrb, which defines it.
-    provided = os.path.join(work, "provided")
-    os.makedirs(provided)
+    provided = place(work, "provided")
+    project(provided)
     for name, content in (("book.tex", "\\documentclass{book}\n\\usepackage{fancyvrb}\n"
                                        "\\providecommand{\\Verb}[1]{\\textsc{#1}}\n"
                                        "\\begin{document}\n\\include{one}\n\\end{document}\n"),
                           ("one.tex", "\\chapter{One}\nTapez \\Verb|a_b| ici.\n"),
                           ("conversion.yaml", "targets:\n  html:\n    format: html\n")):
-        with open(os.path.join(provided, name), "w", encoding="utf-8") as fh:
+        with open(place(provided, name), "w", encoding="utf-8") as fh:
             fh.write(content)
     convert(provided)
     provided_page = re.sub(r"\s+", " ", read(provided, "html", "one.html")) \
-        if os.path.exists(os.path.join(provided, "html", "one.html")) else ""
+        if os.path.exists(place(provided, "html", "one.html")) else ""
     # And beside fancyvrb loaded by a package of the book's own.
-    provided_sty = os.path.join(work, "provided-sty")
-    os.makedirs(provided_sty)
+    provided_sty = place(work, "provided-sty")
+    project(provided_sty)
     for name, content in (("book.tex", "\\documentclass{book}\n\\usepackage{maison}\n"
                                        "\\providecommand{\\Verb}[1]{\\textsc{#1}}\n"
                                        "\\begin{document}\n\\include{one}\n\\end{document}\n"),
                           ("maison.sty", "\\ProvidesPackage{maison}\n\\RequirePackage{fancyvrb}\n"),
                           ("one.tex", "\\chapter{One}\nTapez \\Verb|a_b| ici.\n"),
                           ("conversion.yaml", "targets:\n  html:\n    format: html\n")):
-        with open(os.path.join(provided_sty, name), "w", encoding="utf-8") as fh:
+        with open(place(provided_sty, name), "w", encoding="utf-8") as fh:
             fh.write(content)
     convert(provided_sty)
     provided_sty_page = re.sub(r"\s+", " ", read(provided_sty, "html", "one.html")) \
-        if os.path.exists(os.path.join(provided_sty, "html", "one.html")) else ""
-    with open(os.path.join(filed, "book.tex"), "w", encoding="utf-8") as fh:
+        if os.path.exists(place(provided_sty, "html", "one.html")) else ""
+    with open(place(filed, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\begin{filecontents*}[overwrite]{code.tex}\nx\n\\end{filecontents*}\n"
                  "\\documentclass{book}\n\\NewDocumentCommand\\code{m}{\\input{#1}}\n"
                  "\\begin{document}\n\\code{code.tex}\n\\input{code}\n\\end{document}\n")
@@ -2909,7 +3017,7 @@ def case_reading_macros(work):
          and "Avant \\figalt chat.png;{{Un chat, noir}}; et \\figbraced chien.png;"
              "{Un chien; noir}; fin." in altdef_copy),
         ("a chapter the book \\include-s through a \\def's delimited argument is a page",
-         lambda: os.path.exists(os.path.join(book, "html", "two.html"))
+         lambda: os.path.exists(place(book, "html", "two.html"))
          and "The second." in read(book, "html", "two.html")),
         ("a file the book writes with filecontents is there to read, as the reader reads "
          "it, \\input by the book's own xparse command too",
@@ -2936,7 +3044,7 @@ def case_reading_limits(work):
     run saying what it read so."""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexsource
-    french, english = os.path.join(work, "french"), os.path.join(work, "english")
+    french, english = place(work, "french"), place(work, "english")
     books = {
         french: {
             "book.tex": "\\documentclass{book}\n\\usepackage[english,french]{babel}\n"
@@ -2969,17 +3077,17 @@ def case_reading_limits(work):
     }
     results, pages = {}, {}
     for folder, files in books.items():
-        os.makedirs(folder)
+        project(folder)
         for name, text in files.items():
-            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            with open(place(folder, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.limits\n  title: Limits\n"
                      "  language: %s\n" % ("fr" if folder == french else "en"))
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         results[folder] = convert(folder)
-        page = os.path.join(folder, "html", "one.html")
+        page = place(folder, "html", "one.html")
         pages[folder] = re.sub(r"\s+", " ", read(folder, "html", "one.html")) \
             if os.path.exists(page) else ""
     said = results[english].stdout + results[english].stderr
@@ -3165,15 +3273,15 @@ def case_page_languages(work):
     def book_at(path, files, rows, targets, language="en-US", exists_ok=False):
         os.makedirs(path, exist_ok=exists_ok)
         for name, text in files.items():
-            os.makedirs(os.path.dirname(os.path.join(path, name)), exist_ok=True)
-            with open(os.path.join(path, name), "w", encoding="utf-8") as fh:
+            os.makedirs(os.path.dirname(place(path, name)), exist_ok=True)
+            with open(place(path, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(path, "languages.csv"), "w", encoding="utf-8") as fh:
+        with open(place(path, "languages.csv"), "w", encoding="utf-8") as fh:
             fh.write("source,language,found,drafted-by,reviewed\n" + rows)
-        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.languages\n  title: Two Languages\n"
                      + (f"  language: {language}\n" if language else ""))
-        with open(os.path.join(path, "conversion.yaml"), "a", encoding="utf-8") as fh:
+        with open(place(path, "conversion.yaml"), "a", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets)
         done = convert(path)
         return done.returncode, done.stdout + done.stderr
@@ -3182,7 +3290,7 @@ def case_page_languages(work):
               "  plain:\n    format: source\n    tagging: \"off\"\n")
     files = dict(LANGUAGES_FILES, **{"book.tex": LANGUAGES_MASTER})
     rows = "ch02,fr,,,\nch03,es,,,\nbook-1,de,,,\nbook,it,,,\npart2,fr,,,\n"
-    book = os.path.join(work, "book")
+    book = place(work, "book")
     status, said = book_at(book, files, rows, copies)
     master = read(book, "copy", "book.tex") if status == 0 else ""
     plain = read(book, "plain", "book.tex") if status == 0 else ""
@@ -3193,7 +3301,7 @@ def case_page_languages(work):
 
     # The copy made from the copy, laid over the author's tree, with ch02 in
     # Canadian French and no row for ch03.
-    again = os.path.join(work, "again")
+    again = beside(work, "again")
     laid = dict(files)
     if status == 0:
         laid.update({name: read(book, "copy", name) for name in files})
@@ -3202,14 +3310,14 @@ def case_page_languages(work):
     again_master = read(again, "copy", "book.tex") if again_status == 0 else ""
 
     # A book that declares no language, its pages in the default.
-    plainly = os.path.join(work, "undeclared")
+    plainly = place(work, "undeclared")
     plainly_status, _ = book_at(plainly, files, "",
                                 "  copy:\n    format: source\n    tagging: \"on\"\n", None)
     plainly_master = read(plainly, "copy", "book.tex") if plainly_status == 0 else ""
 
     # One that declares no language whose files say French: its copy in
     # French, every page with it.
-    french = os.path.join(work, "french")
+    french = place(work, "french")
     french_status, french_said = book_at(
         french, dict(files, **{"book.tex": LANGUAGES_MASTER.replace(
             "\\documentclass{book}\n", "\\documentclass{book}\n\\usepackage[french]{babel}\n")}),
@@ -3217,7 +3325,7 @@ def case_page_languages(work):
     french_master = read(french, "copy", "book.tex") if french_status == 0 else ""
 
     # One in American English by babel, in the default's English: none either.
-    american = os.path.join(work, "american")
+    american = place(work, "american")
     american_status, american_said = book_at(
         american, dict(files, **{"book.tex": LANGUAGES_MASTER.replace(
             "\\documentclass{book}\n", "\\documentclass{book}\n\\usepackage[american]{babel}\n")}),
@@ -3230,9 +3338,9 @@ def case_page_languages(work):
     # conditional, the reading taking the instructor's, Spanish, and then
     # an index, in the book's language, LaTeX's back matter closing the
     # answers' section.
-    editions = os.path.join(work, "editions")
+    editions = place(work, "editions")
     os.makedirs(editions)
-    with open(os.path.join(editions, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(editions, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  latex:\n    main: src/book.tex\n")
     editions_status, editions_said = book_at(editions, {
         "src/book.tex": "\\documentclass{book}\n\\usepackage{ifthen}\n\\newboolean{instructor}\n"
@@ -3254,10 +3362,10 @@ def case_page_languages(work):
     # nothing, Spanish whole.
     built = {}
     if not why:
-        built["pdf-book"] = book_at(os.path.join(work, "pdf-book"), files, rows,
+        built["pdf-book"] = book_at(place(work, "pdf-book"), files, rows,
                                     "  pdf:\n    format: pdf\n")
         built["notes"] = book_at(
-            os.path.join(work, "notes"),
+            place(work, "notes"),
             {"notes.tex": "\\documentclass{book}\n\\begin{document}\n\\chapter{Repaso}\n"
                           "Un texto.\n\\end{document}\n"},
             "notes,es,,,\n", "  pdf:\n    format: pdf\n" + copies)
@@ -3271,7 +3379,7 @@ def case_page_languages(work):
             import pikepdf
         except ImportError:
             return None
-        path = path or os.path.join(work, name, "pdf", pdf)
+        path = path or place(work, name, "pdf", pdf)
         if not os.path.exists(path):
             return []
         out = []
@@ -3306,14 +3414,14 @@ def case_page_languages(work):
             return None
         if not shutil.which("pdftotext"):
             return None
-        path = os.path.join(work, name, "pdf", pdf)
+        path = place(work, name, "pdf", pdf)
         return subprocess.run(["pdftotext", path, "-"], capture_output=True,
                               text=True).stdout if os.path.exists(path) else ""
 
     def builds(folder, name):
         """Whether a copy without tagging, the languages in it, builds as
         the author's own does, with pdfLaTeX."""
-        if not os.path.exists(os.path.join(folder, name)):
+        if not os.path.exists(place(folder, name)):
             return False
         done = subprocess.run(["latexmk", "-pdf", "-interaction=nonstopmode",
                                "-halt-on-error", name], cwd=folder,
@@ -3324,12 +3432,12 @@ def case_page_languages(work):
     def guarded():
         if why:
             return skip(why)
-        notes = os.path.join(work, "notes", "plain")
-        text = read(notes, "notes.tex") if os.path.exists(os.path.join(notes, "notes.tex")) \
+        notes = place(work, "notes", "plain")
+        text = read(notes, "notes.tex") if os.path.exists(place(notes, "notes.tex")) \
             else ""
         return "\\AddToHook{begindocument/end}[TIQ/language]{\\TIQpagelanguage{es}}" in text \
             and "\\DocumentMetadata" not in text and texremediate.LANGUAGES_BEGIN in plain \
-            and builds(notes, "notes.tex") and builds(os.path.join(book, "plain"), "book.tex")
+            and builds(notes, "notes.tex") and builds(place(book, "plain"), "book.tex")
 
     def tagged_later():
         """The one-page document's copy without tagging, built with it, as a
@@ -3338,15 +3446,15 @@ def case_page_languages(work):
         review)."""
         if why:
             return skip(why)
-        notes = os.path.join(work, "notes", "plain")
-        if not os.path.exists(os.path.join(notes, "notes.tex")):
+        notes = place(work, "notes", "plain")
+        if not os.path.exists(place(notes, "notes.tex")):
             return False
-        with open(os.path.join(notes, "later.tex"), "w", encoding="utf-8") as fh:
+        with open(place(notes, "later.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\DocumentMetadata{tagging=on}\n" + read(notes, "notes.tex"))
         done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                "later.tex"], cwd=notes, capture_output=True, text=True,
                               timeout=300, stdin=subprocess.DEVNULL)
-        found = tags(None, None, os.path.join(notes, "later.pdf"))
+        found = tags(None, None, place(notes, "later.pdf"))
         if found is None:
             return skip("no pikepdf to read the PDF's structure")
         return done.returncode == 0 and [lang for _, lang in found] == ["es", "es"]
@@ -3653,15 +3761,15 @@ def case_babel_languages(work):
     def book_at(path, files, rows, targets, exists_ok=False, language=None):
         os.makedirs(path, exist_ok=exists_ok)
         for name, text in files.items():
-            os.makedirs(os.path.dirname(os.path.join(path, name)), exist_ok=True)
-            with open(os.path.join(path, name), "w", encoding="utf-8") as fh:
+            os.makedirs(os.path.dirname(place(path, name)), exist_ok=True)
+            with open(place(path, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(path, "languages.csv"), "w", encoding="utf-8") as fh:
+        with open(place(path, "languages.csv"), "w", encoding="utf-8") as fh:
             fh.write("source,language,found,drafted-by,reviewed\n" + rows)
-        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.babel\n  title: Languages by Babel\n"
                      + (f"  language: {language}\n" if language else ""))
-        with open(os.path.join(path, "conversion.yaml"), "a", encoding="utf-8") as fh:
+        with open(place(path, "conversion.yaml"), "a", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets)
         done = convert(path)
         return done.returncode, done.stdout + done.stderr
@@ -3669,7 +3777,7 @@ def case_babel_languages(work):
     copies = ("  copy:\n    format: source\n    tagging: \"on\"\n"
               "  plain:\n    format: source\n    tagging: \"off\"\n")
     files = dict(BABEL_FILES, **{"book.tex": BABEL_MASTER})
-    book = os.path.join(work, "book")
+    book = place(work, "book")
     status, said = book_at(book, files, "ch03,es,,,\n",
                            copies + ("" if german else "  pdf:\n    format: pdf\n"))
     master = read(book, "copy", "book.tex") if status == 0 else ""
@@ -3678,7 +3786,7 @@ def case_babel_languages(work):
                "francais 1, klingon 1, latin 1, ngerman 1), each passage")
 
     # The copy made from the copy, laid over the author's tree.
-    again = os.path.join(work, "again")
+    again = beside(work, "again")
     laid = dict(files)
     if status == 0:
         laid.update({name: read(book, "copy", name) for name in files})
@@ -3696,14 +3804,14 @@ def case_babel_languages(work):
     # second's own \DocumentMetadata names en-US, which babel takes its
     # main language from, american, as it did in a tagged copy (the fifth
     # review).
-    english_status, english_said = book_at(os.path.join(work, "english"), {
+    english_status, english_said = book_at(place(work, "english"), {
         "book.tex": "\\documentclass{book}\n\\usepackage[english]{babel}\n\\begin{document}\n"
                     "\\include{one}\n\\include{two}\n\\end{document}\n",
         "one.tex": "\\selectlanguage{english}\n\\chapter{One}\nIn English.\n",
         "two.tex": "\\selectlanguage{english}\n\\chapter{Two}\nIn English too.\n"}, "",
         "  copy:\n    format: source\n    tagging: \"on\"\n", language="en-US")
     english_master = read(work, "english", "copy", "book.tex") if english_status == 0 else ""
-    paged = os.path.join(work, "english-page")
+    paged = place(work, "english-page")
     paged_status, paged_said = book_at(paged, {
         "book.tex": "\\DocumentMetadata{lang=en-US}\n\\documentclass{book}\n"
                     "\\usepackage[english]{babel}\n"
@@ -3720,7 +3828,7 @@ def case_babel_languages(work):
     # language of the table's without the region, whose first chapter's
     # file ends in English, the master setting text after it, and a page
     # languages.csv puts in English.
-    canadian = os.path.join(work, "canadian")
+    canadian = place(work, "canadian")
     canadian_status, _ = (1, "") if why else book_at(canadian, {
         "book.tex": "\\DocumentMetadata{lang=fr-CA}\n\\documentclass{book}\n"
                     "\\usepackage[english,french]{babel}\n\\begin{document}\n\\include{un}\n"
@@ -3733,7 +3841,7 @@ def case_babel_languages(work):
     # One whose babel doesn't begin a paragraph before it selects the
     # language of \foreignlanguage's words, as babel does where LaTeX has
     # no \GetDocumentProperties.
-    older = os.path.join(work, "older")
+    older = place(work, "older")
     older_status, _ = (1, "") if why else book_at(older, {
         "book.tex": "\\documentclass{book}\n\\usepackage[french,english]{babel}\n"
                     "\\makeatletter\n\\let\\bbl@beforeforeign\\@empty\n\\makeatother\n"
@@ -3753,7 +3861,7 @@ def case_babel_languages(work):
     # tabular begun inside a declaration's paragraph, each of the last four
     # a structure LaTeX's tagging ends before the group, the last by its
     # name, which tagpdf's debug code checks.
-    inline = os.path.join(work, "inline")
+    inline = place(work, "inline")
     inline_status, _ = (1, "") if german else book_at(inline, {
         "book.tex": "\\documentclass{book}\n\\usepackage[french,ngerman,english]{babel}\n"
                     "\\babeltags{fr = french, de = ngerman}\n\\begin{document}\n"
@@ -3778,9 +3886,9 @@ def case_babel_languages(work):
 
     # A book with another master beside its own, which latex.main doesn't
     # name, whose copy is written too.
-    masters = os.path.join(work, "masters")
+    masters = place(work, "masters")
     os.makedirs(masters)
-    with open(os.path.join(masters, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(masters, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  latex:\n    main: book.tex\n")
     masters_status, masters_said = book_at(masters, {
         "book.tex": "\\documentclass{book}\n\\usepackage[french,english]{babel}\n"
@@ -3795,7 +3903,7 @@ def case_babel_languages(work):
     answers = read(masters, "copy", "answers.tex") if masters_status == 0 else ""
 
     # A book that marks its passages with polyglossia, not babel.
-    poly_status, poly_said = book_at(os.path.join(work, "polyglossia"), {
+    poly_status, poly_said = book_at(place(work, "polyglossia"), {
         "book.tex": "\\documentclass{book}\n\\usepackage{polyglossia}\n"
                     "\\setmainlanguage{english}\n\\setotherlanguage{french}\n"
                     "\\begin{document}\n\\include{one}\n\\end{document}\n",
@@ -3803,7 +3911,7 @@ def case_babel_languages(work):
         "  copy:\n    format: source\n    tagging: \"on\"\n")
     poly_master = read(work, "polyglossia", "copy", "book.tex") if poly_status == 0 else ""
 
-    pdf = os.path.join(book, "pdf", "org.example.babel.pdf")
+    pdf = place(book, "pdf", "org.example.babel.pdf")
 
     def found():
         """The PDF's structure (pdf_structure), or a reason to skip."""
@@ -3856,7 +3964,7 @@ def case_babel_languages(work):
             return skip(german)
         if not shutil.which("pdftotext"):
             return skip("no pdftotext to place the PDF's words")
-        if done != 0 or not os.path.exists(os.path.join(folder, "copy", "book.tex")):
+        if done != 0 or not os.path.exists(place(folder, "copy", "book.tex")):
             return False
 
         def words(path):
@@ -3868,9 +3976,9 @@ def case_babel_languages(work):
             built = {}
             program, _, debug = engine.partition("+")
             for name, block_out in (("with", False), ("bare", True)):
-                there = os.path.join(folder, "%s-%s" % (name, engine))
-                if not os.path.exists(os.path.join(there, "book.pdf")):
-                    shutil.copytree(os.path.join(folder, "copy"), there, dirs_exist_ok=True)
+                there = beside(folder, "%s-%s" % (name, engine))
+                if not os.path.exists(place(there, "book.pdf")):
+                    shutil.copytree(place(folder, "copy"), there, dirs_exist_ok=True)
                     text = read(folder, "copy", "book.tex")
                     if block_out:
                         text = texremediate.BABEL_BLOCK.sub("", text)
@@ -3880,15 +3988,15 @@ def case_babel_languages(work):
                                       r"\\AtBeginDocument{\\tagpdfsetup{debug/log=v}}\n", text)
                         if "debug={tagpdf}" not in text:
                             return False
-                    with open(os.path.join(there, "book.tex"), "w", encoding="utf-8") as fh:
+                    with open(place(there, "book.tex"), "w", encoding="utf-8") as fh:
                         fh.write(text)
                     subprocess.run(["latexmk", "-" + program, "-interaction=nonstopmode",
                                     "-halt-on-error", "book.tex"], cwd=there,
                                    capture_output=True, text=True, timeout=600,
                                    stdin=subprocess.DEVNULL)
-                if not os.path.exists(os.path.join(there, "book.pdf")):
+                if not os.path.exists(place(there, "book.pdf")):
                     return False
-                built[name] = (os.path.join(there, "book.pdf"), [
+                built[name] = (place(there, "book.pdf"), [
                     re.sub(r"\s*\[on line \d+\]|\s*on input line \d+", "", warning)
                     for warning in re.findall(r"tagpdf(?: DEBUG)? Warning: [^\n]*",
                                               read(there, "book.log"))])
@@ -3931,17 +4039,17 @@ def case_babel_languages(work):
         Relation is not allowed!"), and its second a paragraph in French."""
         if why:
             return skip(why)
-        folder = os.path.join(masters, "copy")
-        if masters_status != 0 or not os.path.exists(os.path.join(folder, "answers.tex")):
+        folder = place(masters, "copy")
+        if masters_status != 0 or not os.path.exists(place(folder, "answers.tex")):
             return False
         done = subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode",
                                "-halt-on-error", "answers.tex"], cwd=folder,
                               capture_output=True, text=True, timeout=600,
                               stdin=subprocess.DEVNULL)
         log = read(folder, "answers.log") if os.path.exists(
-            os.path.join(folder, "answers.log")) else ""
+            place(folder, "answers.log")) else ""
         return done.returncode == 0 and "Relation is not allowed" not in log and page_check(
-            os.path.join(folder, "answers.pdf"),
+            place(folder, "answers.pdf"),
             [("H1", "en"), ("P", "en"), ("P", "en"), ("P", "fr")], 0,
             [("fr", "r\u00e9ponse"), ("fr", "une autre"), ("fr", "Premier paragraphe.")])
 
@@ -3950,7 +4058,7 @@ def case_babel_languages(work):
         in its label, is in the language around the label, as babel has it."""
         if german:
             return skip(german)
-        structure = pdf_structure(os.path.join(inline, "pdf", "org.example.babel.pdf"))
+        structure = pdf_structure(place(inline, "pdf", "org.example.babel.pdf"))
         if structure is None:
             return skip("no pikepdf or pdfinfo to read the PDF's structure")
         return inline_status == 0 and [
@@ -3961,7 +4069,7 @@ def case_babel_languages(work):
         does, with pdfLaTeX; the book's is in ngerman too."""
         if german:
             return skip(german)
-        if not os.path.exists(os.path.join(folder, "book.tex")):
+        if not os.path.exists(place(folder, "book.tex")):
             return False
         done = subprocess.run(["latexmk", "-pdf", "-interaction=nonstopmode",
                                "-halt-on-error", "book.tex"], cwd=folder,
@@ -3991,7 +4099,7 @@ def case_babel_languages(work):
          lambda: status == 0 and block + "\\begin{document}" in plain
          and "\\DocumentMetadata" not in plain
          and counted + " marked to be tagged in its language, which LaTeX does where the copy "
-             "is built with its tagging" in said and builds(os.path.join(book, "plain"))),
+             "is built with its tagging" in said and builds(place(book, "plain"))),
         ("in the PDF from the book's own files, \\foreignlanguage's words are each a Span in "
          "its language, in a paragraph, a heading, and its contents entry, babeltags' and "
          "babel's alias's French, Latin by babel's own tag, and an English word in the "
@@ -4026,18 +4134,18 @@ def case_babel_languages(work):
              "in its language as LaTeX reads it" in paged_said),
         ("and in its PDF, the Spanish page is Spanish though it opens with babel's "
          "English, which babel was in already, and its English quotation English",
-         lambda: page_check(os.path.join(paged, "pdf", "org.example.babel.pdf"), [
+         lambda: page_check(place(paged, "pdf", "org.example.babel.pdf"), [
              ("H1", "en-US"), ("P", "en-US"), ("H1", "es"), ("P", "es"), ("P", "en"),
              ("P", "es")], paged_status)),
         ("a page with no language of its own is in the book's, its region too, where "
          "babel's commands haven't selected another than babel's main language, and the "
          "master's text after a file in the one babel is left in there",
-         lambda: page_check(os.path.join(canadian, "pdf", "org.example.babel.pdf"), [
+         lambda: page_check(place(canadian, "pdf", "org.example.babel.pdf"), [
              ("H1", "fr-CA"), ("P", "fr-CA"), ("P", "en"), ("P", "en"), ("H1", "en"),
              ("P", "en")], canadian_status, [("fr", "mot")])),
         ("and where babel doesn't begin a paragraph before it selects the language of "
          "\\foreignlanguage's words, the paragraph they open keeps its own",
-         lambda: page_check(os.path.join(older, "pdf", "org.example.babel.pdf"), [
+         lambda: page_check(place(older, "pdf", "org.example.babel.pdf"), [
              ("H1", "en"), ("P", "en"), ("P", "en")], older_status, [("fr", "Bonjour")])),
         ("the book's other master gets them too, and the run counts its own, and says it's "
          "given babel's main= as the book is",
@@ -4058,7 +4166,7 @@ def case_babel_languages(work):
          "begins after that inside it is in its language, a note's paragraph, the paragraph "
          "after a display, \\foreignlanguage's words' too, the last paragraph whole, but not "
          "a list item's body; a \\selectlanguage there sets what begins after the paragraph",
-         lambda: page_check(os.path.join(inline, "pdf", "org.example.babel.pdf"), [
+         lambda: page_check(place(inline, "pdf", "org.example.babel.pdf"), [
              ("H1", "en"), ("P", "en"), ("P", "en"), ("P", "en"), ("P", "fr"), ("P", "en"),
              ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "en"), ("P", "fr"), ("P", "en"),
              ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "fr"), ("P", "en"), ("P", "en"),
@@ -4133,9 +4241,9 @@ def case_babel_hooks(work):
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import texremediate
     why = why_no_tex("no lualatex or latexmk to build the copy", "lualatex", "latexmk")
-    book = os.path.join(work, "book")
-    os.makedirs(book)
-    with open(os.path.join(book, "book.tex"), "w", encoding="utf-8") as fh:
+    book = place(work, "book")
+    project(book)
+    with open(place(book, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage[french,english]{babel}\n"
                  "\\begin{document}\n\\tableofcontents\n"
                  "\\section{Le \\foreignlanguage{french}{titre}}\n"
@@ -4144,14 +4252,14 @@ def case_babel_hooks(work):
                  "More English.\n\n"
                  "\\begin{otherlanguage}{french}\nUn paragraphe en fran\\c{c}ais.\n"
                  "\\end{otherlanguage}\n\nBack in English.\n\\end{document}\n")
-    with open(os.path.join(book, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(book, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.hooks\n  title: Hooks\n  language: en\n")
-    with open(os.path.join(book, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(book, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  copy:\n    format: source\n    tagging: \"on\"\n")
     done = convert(book)
     said = done.stdout + done.stderr
     copy = read(book, "copy", "book.tex") if done.returncode == 0 \
-        and os.path.exists(os.path.join(book, "copy", "book.tex")) else ""
+        and os.path.exists(place(book, "copy", "book.tex")) else ""
     installed = subprocess.run(["kpsewhich", "babel.sty"], capture_output=True, text=True,
                                stdin=subprocess.DEVNULL).stdout.strip() \
         if shutil.which("kpsewhich") else ""
@@ -4168,20 +4276,20 @@ def case_babel_hooks(work):
         if why or not copy:
             builds[name] = (None, why or "no copy")
             return builds[name]
-        there = os.path.join(work, name)
-        shutil.copytree(os.path.join(book, "copy"), there)
+        there = place(work, name)
+        shutil.copytree(place(book, "copy"), there)
         if name == "old":
             if BABEL_DECLARES not in original:
                 builds[name] = (None, "the installed babel.sty doesn't declare its hooks as "
                                       "babel 26.11 to 26.14 do, so it can't be made 26.9's")
                 return builds[name]
-            with open(os.path.join(there, "babel.sty"), "w", encoding="utf-8",
+            with open(place(there, "babel.sty"), "w", encoding="utf-8",
                       errors="surrogateescape") as fh:
                 fh.write(original.replace(BABEL_DECLARES, "\\NewHook{babel/#1}"))
         subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode", "-halt-on-error",
                         "book.tex"], cwd=there, capture_output=True, text=True, timeout=600,
                        stdin=subprocess.DEVNULL)
-        pdf = os.path.join(there, "book.pdf")
+        pdf = place(there, "book.pdf")
         builds[name] = (pdf if os.path.exists(pdf) else "", None)
         return builds[name]
 
@@ -4232,13 +4340,14 @@ def case_babel_hooks(work):
 
 def case_unbuilt(work):
     """A file the book's own build makes, not made yet: the run stops."""
-    os.makedirs(os.path.join(work, "figures"))
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    os.makedirs(place(work, "figures"))
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\begin{document}\nText.\n"
                  "\\input{figures/venn.tex}\n\\end{document}\n")
-    with open(os.path.join(work, "figures", "Makefile"), "w") as fh:
+    with open(place(work, "figures", "Makefile"), "w") as fh:
         fh.write("all:\n\tfig2dev -L pstex_t venn.fig > venn.tex\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
@@ -4246,7 +4355,7 @@ def case_unbuilt(work):
         ("a file the book's own build makes, missing, stops the run",
          lambda: result.returncode != 0 and "figures/venn.tex" in said
          and "figures/Makefile" in said and "Nothing was converted" in said
-         and not os.path.exists(os.path.join(work, "html"))),
+         and not os.path.exists(place(work, "html"))),
     ]
 
 
@@ -4261,10 +4370,10 @@ def tools_alone(work, *programs):
     for program in ("pandoc", "file") + programs:
         found = shutil.which(program)
         if found:
-            os.symlink(found, os.path.join(tools, program))
-    with open(os.path.join(tools, "python3"), "w") as fh:
+            os.symlink(found, place(tools, program))
+    with open(place(tools, "python3"), "w") as fh:
         fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
-    os.chmod(os.path.join(tools, "python3"), 0o755)
+    os.chmod(place(tools, "python3"), 0o755)
     return tools, dict(os.environ, PATH=tools)
 
 
@@ -4281,15 +4390,16 @@ def case_unmade_images(work):
     and file alone (tools_alone), then a pdftocairo that fails as well, so
     the case runs alike wherever it runs, and then, where poppler-utils is
     installed, its pdftocairo."""
-    os.makedirs(os.path.join(work, "img"))
-    pdf(os.path.join(work, "img", "diagram.pdf"))
-    pdf(os.path.join(work, "img", "logo.pdf"))
-    pdf(os.path.join(work, "img", "chart.pdf"))
-    with open(os.path.join(work, "img", "shape.eps"), "w") as fh:
+    project(work)
+    os.makedirs(place(work, "img"))
+    pdf(place(work, "img", "diagram.pdf"))
+    pdf(place(work, "img", "logo.pdf"))
+    pdf(place(work, "img", "chart.pdf"))
+    with open(place(work, "img", "shape.eps"), "w") as fh:
         fh.write("%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n"
                  "newpath 0 0 moveto 10 10 lineto stroke\nshowpage\n")
-    png(os.path.join(work, "img", "square.png"), (90, 90, 90))
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    png(place(work, "img", "square.png"), (90, 90, 90))
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n"
                  "\\newcommand{\\logo}{\\includegraphics[height=1em,alt={A logo.}]{img/logo.pdf}}\n"
                  "\\newcommand{\\Image}[2]{\\includegraphics[width=#1,alt={A chart.}]{#2}}\n"
@@ -4304,14 +4414,14 @@ def case_unmade_images(work):
                  "\\caption{A shape}\\label{fig:shape}\n\\end{figure}\n\n"
                  "A square: \\includegraphics[alt={A square.}]{img/square}.\n"
                  "\\end{document}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  word:\n    format: docx\n")
     tools, lacking = tools_alone(work)
     result = convert(work, env=lacking)
     said = result.stdout + result.stderr
 
     def page_of(folder):
-        path = os.path.join(folder, "html", "notes.html")
+        path = place(folder, "html", "notes.html")
         return read(folder, "html", "notes.html") if os.path.exists(path) else ""
     page = page_of(work)
 
@@ -4319,15 +4429,15 @@ def case_unmade_images(work):
         """The Word file holds the square alone, and read back as a source,
         it gives the page its square and the figure's caption."""
         import zipfile
-        docx = os.path.join(work, "word", "notes.docx")
+        docx = place(work, "word", "notes.docx")
         if not os.path.exists(docx):
             return False
         with zipfile.ZipFile(docx) as z:
             media = [n for n in z.namelist() if n.startswith("word/media/")]
-        back = os.path.join(work, "back")
-        os.makedirs(back)
-        shutil.copy(docx, back)
-        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        back = beside(work, "back")
+        project(back)
+        shutil.copy(docx, into(back))
+        with open(place(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         convert(back, env=lacking)
         again = page_of(back)
@@ -4338,13 +4448,13 @@ def case_unmade_images(work):
     # saying so after a warning and before another error, as pdftocairo
     # does; each run noted.
     runs = work + "-runs.txt"
-    with open(os.path.join(tools, "pdftocairo"), "w") as fh:
+    with open(place(tools, "pdftocairo"), "w") as fh:
         fh.write("#!/bin/sh\necho \"$@\" >> %s\n"
                  "echo 'Syntax Warning: May not be a PDF file (continuing anyway)' >&2\n"
                  "echo 'Syntax Error: Couldn'\"'\"'t find trailer dictionary' >&2\n"
                  "echo 'Syntax Error: Couldn'\"'\"'t read xref table' >&2\n"
                  "exit 1\n" % shlex.quote(runs))
-    os.chmod(os.path.join(tools, "pdftocairo"), 0o755)
+    os.chmod(place(tools, "pdftocairo"), 0o755)
     again = work + "-failing"
     shutil.copytree(work, again, ignore=shutil.ignore_patterns("html", "word", "back"))
     failing = convert(again, env=lacking)
@@ -4363,18 +4473,18 @@ def case_unmade_images(work):
                         "poppler-utils)")
         if not made_page:
             shutil.copytree(work, made, ignore=shutil.ignore_patterns("html", "word", "back"))
-            os.remove(os.path.join(tools, "pdftocairo"))
-            os.symlink(real, os.path.join(tools, "pdftocairo"))
+            os.remove(place(tools, "pdftocairo"))
+            os.symlink(real, place(tools, "pdftocairo"))
             convert(made, env=lacking)
             made_page.append(page_of(made))
         sources = dict((alt, src) for src, alt in re.findall(
             r'<img\b[^>]*?src="([^"]*)"[^>]*?alt="([^"]*)"', made_page[0]))
-        svg = os.path.join(made, "rendered", "img", "diagram.svg")
+        svg = place(made, "rendered", "img", "diagram.svg")
         root = re.search(r"<svg\b[^>]*>", open(svg, encoding="utf-8").read()).group(0) \
             if os.path.exists(svg) else ""
         return "<embed" not in made_page[0] \
             and 'width="40pt"' in root and 'height="20pt"' in root \
-            and os.path.isfile(os.path.join(made, "rendered", "img", "diagram.pdf")) \
+            and os.path.isfile(place(made, "rendered", "img", "diagram.pdf")) \
             and sources.get("A logo.", "").endswith("rendered/img/logo.svg") \
             and sources.get("A crest.", "").endswith("rendered/img/logo.svg") \
             and sources.get("A diagram.", "").endswith("rendered/img/diagram.svg") \
@@ -4423,30 +4533,31 @@ def case_scaled_images(work):
     inch, by its pHYs) and a PDF's page (pdfinfo's crop box), as LuaLaTeX
     sets them; one with a width of its own too left as the reader reads
     it; and the run says how many."""
-    os.makedirs(os.path.join(work, "img"))
+    project(work)
+    os.makedirs(place(work, "img"))
     raw = b"".join(b"\x00" + bytes((90, 90, 90)) * 144 for _ in range(72))
 
     def chunk(kind, data):
         body = kind + data
         return (struct.pack(">I", len(data)) + body
                 + struct.pack(">I", zlib.crc32(body) & 0xffffffff))
-    with open(os.path.join(work, "img", "wide.png"), "wb") as fh:
+    with open(place(work, "img", "wide.png"), "wb") as fh:
         fh.write(b"\x89PNG\r\n\x1a\n"
                  + chunk(b"IHDR", struct.pack(">IIBBBBB", 144, 72, 8, 2, 0, 0, 0))
                  + chunk(b"pHYs", struct.pack(">IIB", 5669, 5669, 1))
                  + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
-    pdf(os.path.join(work, "img", "plot.pdf"))
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    pdf(place(work, "img", "plot.pdf"))
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
                  "\\section{Scaled}\nHalf: \\includegraphics[scale=.5,alt={A half square.}]"
                  "{img/wide}. Doubled: \\includegraphics[scale=2, alt={A doubled plot.}]"
                  "{img/plot.pdf}. Sized: \\includegraphics[width=3cm,scale=.5,"
                  "alt={A sized square.}]{img/wide.png}.\n\\end{document}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    path = os.path.join(work, "html", "notes.html")
+    path = place(work, "html", "notes.html")
     page = read(work, "html", "notes.html") if os.path.exists(path) else ""
 
     def style(alt):
@@ -4496,12 +4607,12 @@ def case_steady_drawings(work):
     os.environ["SOURCE_DATE_EPOCH"] = "1700000000"
     try:
         for n in (1, 2):
-            base, scratch = os.path.join(work, f"book{n}"), os.path.join(work, f"scratch{n}")
+            base, scratch = place(work, f"book{n}"), place(work, f"scratch{n}")
             os.makedirs(base)
             os.makedirs(scratch)
             latexsource.render(base, scratch, preamble, [("rendered/line.svg", drawing)],
                                lambda said: None)
-            kept = os.path.join(base, "rendered", "line.pdf")
+            kept = place(base, "rendered", "line.pdf")
             with open(kept, "rb") if os.path.exists(kept) else open(os.devnull, "rb") as fh:
                 made.append(fh.read())
     finally:
@@ -4530,19 +4641,19 @@ def case_kept_images(work):
         return [("a kept PDF image is read again",
                  lambda: skip("no pdftocairo to make a PDF image an SVG (sudo apt install "
                               "poppler-utils)"))]
-    os.makedirs(os.path.join(work, "figures"))
-    image = os.path.join(work, "figures", "plot.pdf")
+    os.makedirs(place(work, "figures"))
+    image = place(work, "figures", "plot.pdf")
     pdf(image, word="Plotword")
     record, first, again = {}, {}, {}
     name, why = latexsource.convert_graphic(work, work, "figures/plot.pdf", record, first)
-    beside = os.path.join(work, "rendered", "figures", "plot.pdf")
+    beside = place(work, "rendered", "figures", "plot.pdf")
     shutil.copyfile(image, beside)
     latexsource.convert_graphic(work, work, "figures/plot.pdf", record, again)
     embedded = latexbuild.unembedded_fonts(beside) == set()
     tool = latexbuild.embedding_tool()
     preamble = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\n"
     source = "\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}"
-    with open(os.path.join(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
+    with open(place(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
         json.dump({name: hashlib.sha256((preamble + "\n" + source).encode()).hexdigest()}, fh)
     kept = latexsource.render(work, work, preamble, [(name, source)], lambda said: None)
     drawn = why_no_drawings() is None
@@ -4561,14 +4672,14 @@ def case_kept_images(work):
                     if "/ToUnicode" in font else None for font in pdfglyphs.fonts(done)]
     # A PDF image whose Type 3 font names its glyph minus.case and maps it
     # to nothing, as Ghostscript leaves matplotlib's EPS.
-    type3_pdf(os.path.join(work, "figures", "minus.pdf"))
+    type3_pdf(place(work, "figures", "minus.pdf"))
     glyphs = {}
     latexsource.convert_graphic(work, work, "figures/minus.pdf", record, glyphs)
-    minus = os.path.join(work, "rendered", "figures", "minus.pdf")
+    minus = place(work, "rendered", "figures", "minus.pdf")
     first_mapped = mapped(minus)
     # Read again, its PDF one kept before glyphs were given their text, as
     # a book read before this was: given them now.
-    shutil.copyfile(os.path.join(work, "figures", "minus.pdf"), minus)
+    shutil.copyfile(place(work, "figures", "minus.pdf"), minus)
     glyphs_again = {}
     latexsource.convert_graphic(work, work, "figures/minus.pdf", record, glyphs_again)
     # A drawing that includes it, as a figure's drawing may: the page LaTeX
@@ -4580,15 +4691,15 @@ def case_kept_images(work):
     # And a drawing LaTeX can't make, its SVG made before and recorded, a
     # PDF image's PDF beside it under its name: its SVG kept, alone.
     broken = "\\begin{tikzpicture}\\undefinedcommandhere\\end{tikzpicture}"
-    old_svg = os.path.join(work, "rendered", "figures", "broken.svg")
-    shutil.copyfile(os.path.join(work, "rendered", "figures", "minus.svg"), old_svg)
-    stale = os.path.join(work, "rendered", "figures", "broken.pdf")
+    old_svg = place(work, "rendered", "figures", "broken.svg")
+    shutil.copyfile(place(work, "rendered", "figures", "minus.svg"), old_svg)
+    stale = place(work, "rendered", "figures", "broken.pdf")
     shutil.copyfile(image, stale)
-    with open(os.path.join(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
+    with open(place(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
         recorded = json.load(fh)
     recorded["rendered/figures/broken.svg"] = hashlib.sha256(
         (preamble + "\n" + broken).encode()).hexdigest()
-    with open(os.path.join(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
+    with open(place(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
         json.dump(recorded, fh)
     said = []
     kept_svg = latexsource.render(work, work, preamble, [("rendered/figures/broken.svg", broken)],
@@ -4600,16 +4711,16 @@ def case_kept_images(work):
     # written part of a page, the drawing is its SVG alone, the part gone.
     plain = "\\begin{tikzpicture}\\draw (0,0) circle (1);\\end{tikzpicture}"
     circle = "rendered/figures/circle.svg"
-    shutil.copyfile(os.path.join(work, "rendered", "figures", "minus.svg"),
-                    os.path.join(work, circle))
-    with open(os.path.join(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
+    shutil.copyfile(place(work, "rendered", "figures", "minus.svg"),
+                    place(work, circle))
+    with open(place(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
         recorded = json.load(fh)
     recorded[circle] = hashlib.sha256((preamble + "\n" + plain).encode()).hexdigest()
-    with open(os.path.join(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
+    with open(place(work, "rendered", ".rendered.json"), "w", encoding="utf-8") as fh:
         json.dump(recorded, fh)
-    taken = os.path.join(work, "rendered", "figures", "circle.pdf")
+    taken = place(work, "rendered", "figures", "circle.pdf")
     shutil.copyfile(image, taken)
-    before = os.path.getmtime(os.path.join(work, circle))
+    before = os.path.getmtime(place(work, circle))
     which, run = latexsource.shutil.which, latexsource.subprocess.run
     unseparated = []
     try:
@@ -4617,7 +4728,7 @@ def case_kept_images(work):
         alone = latexsource.render(work, work, preamble, [(circle, plain)], unseparated.append)
     finally:
         latexsource.shutil.which = which
-    unmade = os.path.getmtime(os.path.join(work, circle)) == before
+    unmade = os.path.getmtime(place(work, circle)) == before
     gone = not os.path.exists(taken)
 
     def failing(command, *args, **kwargs):
@@ -4634,14 +4745,14 @@ def case_kept_images(work):
                                                            square)], lambda said: None)
     finally:
         latexsource.subprocess.run = run
-    leftovers = [f for f in os.listdir(os.path.join(work, "render")) if "-page-" in f] \
-        if os.path.isdir(os.path.join(work, "render")) else []
+    leftovers = [f for f in os.listdir(place(work, "render")) if "-page-" in f] \
+        if os.path.isdir(place(work, "render")) else []
 
     def own_pdf():
         if not os.path.exists(beside):
             return False
         text = subprocess.run(["pdftotext", beside, "-"], capture_output=True, text=True).stdout
-        with open(os.path.join(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
+        with open(place(work, "rendered", ".rendered.json"), encoding="utf-8") as fh:
             record = json.load(fh)
         return "Plotword" not in text and record.get("rendered/figures/plot.pdf") == record.get(name)
     return [
@@ -4677,13 +4788,13 @@ def case_kept_images(work):
          "and no part of a page is left",
          lambda: skip("no LaTeX to make drawings") if not drawn
          else partly == ["rendered/figures/square.svg"] and not leftovers
-         and not os.path.exists(os.path.join(work, "rendered", "figures", "square.pdf"))),
+         and not os.path.exists(place(work, "rendered", "figures", "square.pdf"))),
         ("a drawing that includes it has the image's glyph given its text in the page LaTeX "
          "made of it",
          lambda: skip("no pikepdf to read the PDF") if first_mapped is None
          else skip("no LaTeX to make drawings") if not drawn
          else drew.get("graphics_glyphs") == 1 and {0: "2212"} in mapped(
-             os.path.join(work, "rendered", "figures", "holding.pdf"))),
+             place(work, "rendered", "figures", "holding.pdf"))),
     ]
 
 
@@ -4693,29 +4804,30 @@ def case_unmade_svg(work):
     \\includesvg, which needs Inkscape and takes no alt text, and the run
     says so, the one way the suite's other cases can't take where it
     runs."""
-    os.makedirs(os.path.join(work, "img"))
-    with open(os.path.join(work, "img", "circle.svg"), "w") as fh:
+    project(work)
+    os.makedirs(place(work, "img"))
+    with open(place(work, "img", "circle.svg"), "w") as fh:
         fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
                  '<circle cx="20" cy="20" r="15" fill="black"/></svg>\n')
-    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("# Circles\n\nA circle:\n\n![A black circle.](img/circle.svg)\n")
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: circles\n  title: Circles\n  language: en\n"
                  "  contents:\n  - one\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  latex:\n    format: latex\n")
     _, lacking = tools_alone(work)
     result = convert(work, env=lacking)
     said = result.stdout + result.stderr
     one = read(work, "latex", "one.tex") \
-        if os.path.exists(os.path.join(work, "latex", "one.tex")) else ""
+        if os.path.exists(place(work, "latex", "one.tex")) else ""
     return [
         ("without rsvg-convert, the latex target leaves its SVG picture to LaTeX's "
          "\\includesvg, beside it, and the run says so",
          lambda: result.returncode == 0 and re.search(r"\\includesvg(\[[^]]*\])?\{img/circle",
                                                       one) is not None
-         and os.path.exists(os.path.join(work, "latex", "img", "circle.svg"))
-         and not os.path.exists(os.path.join(work, "latex", "img", "circle.pdf"))
+         and os.path.exists(place(work, "latex", "img", "circle.svg"))
+         and not os.path.exists(place(work, "latex", "img", "circle.pdf"))
          and "WARNING: 1 SVG image(s) weren't made PDF (img/circle.svg first): rsvg-convert "
          "is needed (sudo apt install librsvg2-bin)" in said),
     ]
@@ -4737,16 +4849,17 @@ FIG2DEV_PAIR = ("\\begin{picture}(0,0)%\n\\includegraphics{figures/f.png}%\n"
 def case_source(work):
     """The source target: alt text from the sidecar written into the
     author's own files, as keys LaTeX's tagging reads."""
-    os.makedirs(os.path.join(work, "figures"))
-    png(os.path.join(work, "sq.png"), (128, 128, 128))
-    png(os.path.join(work, "sq2.png"), (64, 64, 64))
-    png(os.path.join(work, "sq3.png"), (32, 32, 32))
-    png(os.path.join(work, "sq4.png"), (16, 16, 16))
-    png(os.path.join(work, "sq5.png"), (8, 8, 8))
-    png(os.path.join(work, "figures", "f.png"), (0, 0, 0))
-    with open(os.path.join(work, "figures", "f.fig"), "w") as fh:
+    project(work)
+    os.makedirs(place(work, "figures"))
+    png(place(work, "sq.png"), (128, 128, 128))
+    png(place(work, "sq2.png"), (64, 64, 64))
+    png(place(work, "sq3.png"), (32, 32, 32))
+    png(place(work, "sq4.png"), (16, 16, 16))
+    png(place(work, "sq5.png"), (8, 8, 8))
+    png(place(work, "figures", "f.png"), (0, 0, 0))
+    with open(place(work, "figures", "f.fig"), "w") as fh:
         fh.write("#FIG 3.2\n")
-    with open(os.path.join(work, "figures", "f.tex"), "w") as fh:
+    with open(place(work, "figures", "f.tex"), "w") as fh:
         fh.write(FIG2DEV_PAIR)
     source = ("\\documentclass[pdftex,12pt]{article}\n\\usepackage{graphicx}\n"
               "\\usepackage{tikz}\n\\usepackage{amsthm}\n\\usepackage[english]{babel}\n"
@@ -4775,22 +4888,22 @@ def case_source(work):
               "\\begin{tabular}{cc}\nItem & Count \\\\\nx & 3 \\\\\ny & 4 \\\\\n\\end{tabular}\n\n"
               "% \\includegraphics{sq} in a comment\n"
               "\\end{document}\n")
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write(source)
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nsq.png,A gray square: 50% shaded\n"
                  "rendered/notes-1.svg,Two boxes\nrendered/notes-2.svg,A rising line\n"
                  "figures/f.png,[decorative]\n"
                  "rendered/figures/f.svg,A figure from xfig\n"
                  "sq2.png,A darker square\nsq3.png,A third square\n"
                  "sq4.png,A fourth square\nsq5.png,A fifth [square]\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
                  "  kept:\n    format: source\n    latex_definitions: \"off\"\n"
                  "  plainmath:\n    format: source\n    tagging: \"on\"\n"
                  "    latex_mathml: \"off\"\n")
-    with open(os.path.join(work, "latex-conversion-macros.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "latex-conversion-macros.tex"), "w", encoding="utf-8") as fh:
         fh.write("% For reading.\n\\renewcommand{\\suchthat}{\\mid}\n")
     before = fingerprint(work)
     first = convert(work, without_tagging_status(work))
@@ -4799,15 +4912,15 @@ def case_source(work):
     # beside the book, where kpsewhich looks first: dated before any LaTeX
     # this runs on, amsthm rated currently incompatible, babel unchecked,
     # and graphicx not in it.
-    with open(os.path.join(work, "latex-tagging-status.ltx"), "w") as fh:
+    with open(place(work, "latex-tagging-status.ltx"), "w") as fh:
         fh.write("\\ProvidesFile{latex-tagging-status.ltx}[2020-01-01]\n"
                  "\\@kernel@tagging@status{article}{cls}{4}\n"
                  "\\@kernel@tagging@status{amsthm}{sty}{2}\n"
                  "\\@kernel@tagging@status{babel}{sty}{0}\n")
     # A person's header decision for the table, from the census's row.
-    new = os.path.join(work, "table-headers-new.csv")
+    new = place(work, "table-headers-new.csv")
     rows = list(csv.DictReader(open(new, encoding="utf-8-sig"))) if os.path.exists(new) else []
-    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n" + "".join("%s,first-row\n" % r["key"] for r in rows
                                             if "Name" in r.get("preview", ""))
                  + "".join("%s,layout\n" % r["key"] for r in rows
@@ -4815,14 +4928,14 @@ def case_source(work):
     before = fingerprint(work, skip_dirs=("fixed", "tagged", "kept", "plainmath", "build"))
     result = convert(work)
     said = result.stdout + result.stderr
-    fixed = os.path.join(work, "fixed")
+    fixed = place(work, "fixed")
     notes = read(work, "fixed", "notes.tex") \
-        if os.path.exists(os.path.join(fixed, "notes.tex")) else ""
+        if os.path.exists(place(fixed, "notes.tex")) else ""
     pair = read(work, "fixed", "figures", "f.tex") \
-        if os.path.exists(os.path.join(fixed, "figures", "f.tex")) else ""
+        if os.path.exists(place(fixed, "figures", "f.tex")) else ""
 
     tagged = read(work, "tagged", "notes.tex") \
-        if os.path.exists(os.path.join(work, "tagged", "notes.tex")) else ""
+        if os.path.exists(place(work, "tagged", "notes.tex")) else ""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import texremediate
 
@@ -4831,12 +4944,12 @@ def case_source(work):
         if given), built with engine, passes times: (exit status, log) of
         the last. A formula's MathML is attached on the pass after the one
         that makes it."""
-        build = os.path.join(work, "build-" + os.path.basename(tree) + "-" + engine)
-        shutil.copytree(work, build, ignore=shutil.ignore_patterns(
+        build = beside(work, "build-" + os.path.basename(tree) + "-" + engine)
+        shutil.copytree(into(work), build, ignore=shutil.ignore_patterns(
             "fixed", "tagged", "kept", "plainmath", "html", "build*", "rendered"))
         shutil.copytree(tree, build, dirs_exist_ok=True)
         if text is not None:
-            with open(os.path.join(build, "notes.tex"), "w", encoding="utf-8") as fh:
+            with open(place(build, "notes.tex"), "w", encoding="utf-8") as fh:
                 fh.write(text)
         for _ in range(passes):
             done = subprocess.run([engine, "-interaction=nonstopmode", "notes.tex"],
@@ -4847,7 +4960,7 @@ def case_source(work):
         why = why_no_tex("no lualatex to build the tagged copy", "lualatex")
         if why:
             return skip(why)
-        status, log = build(os.path.join(work, "tagged"), "lualatex", passes=2)
+        status, log = build(place(work, "tagged"), "lualatex", passes=2)
         return status == 0 and "para hooks differ" not in log \
             and "Parent-Child" not in log and "already defined" not in log
 
@@ -4860,7 +4973,7 @@ def case_source(work):
             import pikepdf
         except ImportError:
             return skip("no pikepdf to read the tagged PDF's structure")
-        path = os.path.join(work, "build-tagged-lualatex", "notes.pdf")
+        path = os.path.join(beside(work, "build-tagged-lualatex"), "notes.pdf")
         if not os.path.exists(path):
             return False
         alts = []
@@ -4889,7 +5002,7 @@ def case_source(work):
             import pikepdf
         except ImportError:
             return skip("no pikepdf to read the tagged PDF's structure")
-        path = os.path.join(work, "build-tagged-lualatex", "notes.pdf")
+        path = os.path.join(beside(work, "build-tagged-lualatex"), "notes.pdf")
         if not os.path.exists(path):
             return False
         found = []
@@ -4919,7 +5032,7 @@ def case_source(work):
             import pikepdf
         except ImportError:
             return skip("no pikepdf to read the tagged PDF's structure")
-        path = os.path.join(work, "build-tagged-lualatex", "notes.pdf")
+        path = os.path.join(beside(work, "build-tagged-lualatex"), "notes.pdf")
         if not os.path.exists(path):
             return False
         names = []
@@ -4939,7 +5052,7 @@ def case_source(work):
         why = why_no_tex("no pdflatex to build the tagged copy untagged", "pdflatex")
         if why:
             return skip(why)
-        status, _ = build(os.path.join(work, "tagged"), "pdflatex",
+        status, _ = build(place(work, "tagged"), "pdflatex",
                           re.sub(r"\\DocumentMetadata\{[^}]*\}\n", "", tagged))
         return status == 0
 
@@ -4948,8 +5061,8 @@ def case_source(work):
         why = why_no_tex("no pdflatex to build the remediated copy", "pdflatex")
         if why:
             return skip(why)
-        build = os.path.join(work, "build")
-        shutil.copytree(work, build, ignore=shutil.ignore_patterns(
+        build = beside(work, "build")
+        shutil.copytree(into(work), build, ignore=shutil.ignore_patterns(
             "fixed", "html", "build", "rendered"))
         shutil.copytree(fixed, build, dirs_exist_ok=True)
         done = subprocess.run([engine, "-interaction=nonstopmode", "notes.tex"],
@@ -4970,9 +5083,9 @@ def case_source(work):
             return skip(why)
         sys.path.insert(0, os.path.join(ROOT, "lib"))
         import texremediate
-        here = os.path.join(work, "keys-older")
+        here = place(work, "keys-older")
         os.makedirs(here, exist_ok=True)
-        shutil.copy(os.path.join(work, "sq.png"), here)
+        shutil.copy(place(work, "sq.png"), into(here))
         older = ("\\makeatletter\n"
                  "\\long\\def\\picture#1{\\pictur@#1}\n"
                  "\\expandafter\\let\\csname pgfk@/tikz/alt/.@cmd\\endcsname\\@undefined\n"
@@ -4992,7 +5105,7 @@ def case_source(work):
                 "\\end{document}\n")
         built = {}
         for name, block in (("with", texremediate.KEYS_SKIPPED), ("without", "")):
-            with open(os.path.join(here, name + ".tex"), "w", encoding="utf-8") as fh:
+            with open(place(here, name + ".tex"), "w", encoding="utf-8") as fh:
                 fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n"
                          "\\usepackage{tikz}\n" + older + block + body)
             done = subprocess.run([engine, "-interaction=nonstopmode", "-halt-on-error",
@@ -5079,7 +5192,7 @@ def case_source(work):
                            r"(?:.*\n)*?\\begin\{document\}", notes) is not None
          and "definition(s) from latex-conversion-macros.tex" in said),
         ("latex_definitions off keeps them to the conversion",
-         lambda: os.path.exists(os.path.join(work, "kept", "notes.tex"))
+         lambda: os.path.exists(place(work, "kept", "notes.tex"))
          and "\\mid" not in read(work, "kept", "notes.tex")),
         ("without the tagging status data, the run says how to install it",
          lambda: "tlmgr install latex-tagging-status" in first_said),
@@ -5104,7 +5217,7 @@ def case_source(work):
          and "tagged where the text has them" in said),
         ("and the tagged PDF's figure is where the text has it", figure_in_place),
         ("latex_mathml off: tagged, the book's fonts kept, and the run says so",
-         lambda: os.path.exists(os.path.join(work, "plainmath", "notes.tex"))
+         lambda: os.path.exists(place(work, "plainmath", "notes.tex"))
          and "\\DocumentMetadata" in read(work, "plainmath", "notes.tex")
          and "unicode-math" not in read(work, "plainmath", "notes.tex")
          and "latex_mathml is \"off\"" in said),
@@ -5115,56 +5228,56 @@ def case_source(work):
 def case_own_fonts(work):
     """A tagged copy of a book whose fonts are its own: they're kept, and
     the run says its formulas get no MathML, which unicode-math would."""
-    os.makedirs(work)
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\input{fonts}\n\\begin{document}\n"
                  "A formula: $x^2 + 1$.\n\\end{document}\n")
     # In a file the preamble inputs, as GIAM keeps its definitions.
-    with open(os.path.join(work, "fonts.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "fonts.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\usepackage{mathptmx}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    copy = os.path.join(work, "tagged", "notes.tex")
+    copy = place(work, "tagged", "notes.tex")
     # Fonts set in a style of the book's own, beside it: the same.
-    styled = os.path.join(work, "styled")
-    os.makedirs(styled)
-    with open(os.path.join(styled, "notes.tex"), "w", encoding="utf-8") as fh:
+    styled = beside(work, "styled")
+    project(styled)
+    with open(place(styled, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{bookstyle}\n\\begin{document}\n"
                  "A formula: $x^2 + 1$.\n\\end{document}\n")
-    with open(os.path.join(styled, "bookstyle.sty"), "w", encoding="utf-8") as fh:
+    with open(place(styled, "bookstyle.sty"), "w", encoding="utf-8") as fh:
         fh.write("\\ProvidesPackage{bookstyle}\n\\RequirePackage{newtxtext}\n"
                  "\\RequirePackage{newtxmath}\n")
-    with open(os.path.join(styled, "conversion.yaml"), "w") as fh:
+    with open(place(styled, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
     styled_said = convert(styled)
     styled_said = styled_said.stdout + styled_said.stderr
-    styled_copy = os.path.join(styled, "tagged", "notes.tex")
+    styled_copy = place(styled, "tagged", "notes.tex")
     # bm's bold, whose letters TeX's own fonts lack under unicode-math.
-    bold = os.path.join(work, "bold")
-    os.makedirs(bold)
-    with open(os.path.join(bold, "notes.tex"), "w", encoding="utf-8") as fh:
+    bold = beside(work, "bold")
+    project(bold)
+    with open(place(bold, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{bm}\n"
                  "\\begin{document}\nBold: $\\bm{x} + \\boldsymbol{\\alpha}$, and a poor man's: "
                  "$\\pmb{\\hat{p}_1 - b}$.\n\\end{document}\n")
-    with open(os.path.join(bold, "conversion.yaml"), "w") as fh:
+    with open(place(bold, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
     bold_said = convert(bold)
     bold_said = bold_said.stdout + bold_said.stderr
-    bold_copy = os.path.join(bold, "tagged", "notes.tex")
+    bold_copy = place(bold, "tagged", "notes.tex")
 
     def bold_builds():
         why = why_no_tex("no lualatex to build the copy", "lualatex")
         if why:
             return skip(why)
-        tree = os.path.join(bold, "build")
+        tree = beside(bold, "build")
         os.makedirs(tree)
-        shutil.copy(bold_copy, os.path.join(tree, "notes.tex"))
+        shutil.copy(bold_copy, place(tree, "notes.tex"))
         done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                "notes.tex"], cwd=tree, capture_output=True, text=True,
                               timeout=300)
-        log = read(tree, "notes.log") if os.path.exists(os.path.join(tree, "notes.log")) else ""
+        log = read(tree, "notes.log") if os.path.exists(place(tree, "notes.log")) else ""
         return done.returncode == 0 and "Missing character" not in log
     return [
         ("a book whose fonts are its own keeps them, and the run says its formulas get no MathML",
@@ -5193,17 +5306,17 @@ def case_static_face(work):
     \\DocumentMetadata), not as luaotfload embeds a variable font, whose
     accented letters have no parts. Skipped where TeX hasn't Josefin Sans
     (TeX Live's josefin)."""
-    os.makedirs(work)
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{fontspec}\n"
                  "\\setmainfont{JosefinSans}[Extension=.ttf, UprightFont=*-Regular, "
                  "BoldFont=*-Bold]\n\\begin{document}\n"
                  "Accented letters, \u0177 and \u012b, and in bold, \\textbf{\u0177}.\n"
                  "\\end{document}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
     result = convert(work)
-    copy = os.path.join(work, "tagged", "notes.tex")
+    copy = place(work, "tagged", "notes.tex")
 
     def embedded():
         why = why_no_tex("no lualatex to build the copy", "lualatex")
@@ -5220,13 +5333,13 @@ def case_static_face(work):
         except ImportError:
             return skip("no pikepdf to read the PDF's fonts")
         import pdftext
-        tree = os.path.join(work, "build")
+        tree = beside(work, "build")
         os.makedirs(tree)
-        shutil.copy(copy, os.path.join(tree, "notes.tex"))
+        shutil.copy(copy, place(tree, "notes.tex"))
         done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                "notes.tex"], cwd=tree, capture_output=True, text=True,
                               timeout=300)
-        path = os.path.join(tree, "notes.pdf")
+        path = place(tree, "notes.pdf")
         if not built_or_why(done.returncode == 0 and os.path.exists(path), done.stdout):
             return False
         glyphs = pdftext.truetype_glyphs(path)
@@ -5284,30 +5397,30 @@ def case_book_pdf_seeded(work):
     why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
     if why:
         return [(label, lambda: skip(why))]
-    book = os.path.join(work, "book")
-    os.makedirs(book)
-    with open(os.path.join(book, "book.tex"), "w", encoding="utf-8") as fh:
+    book = place(work, "book")
+    project(book)
+    with open(place(book, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\title{Drawn}\n\\begin{document}\n"
                  "Drawn: \\uniformdeviate 1000000, \\BookOwn.\n\\end{document}\n")
-    with open(os.path.join(book, ".latexmkrc"), "w", encoding="utf-8") as fh:
+    with open(place(book, ".latexmkrc"), "w", encoding="utf-8") as fh:
         fh.write("$lualatex = 'lualatex -synctex=0 %O %S';\n"
                  "$pre_tex_code = '\\\\def\\\\BookOwn{its own code kept}';\n")
-    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+    with open(place(book, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n    pdf:\n      from: book\n")
     env = dict(os.environ, SOURCE_DATE_EPOCH="1700000000")
     built = []
     for _ in range(2):
         for made in ("pdf", "rendered"):
-            shutil.rmtree(os.path.join(book, made), ignore_errors=True)
+            shutil.rmtree(place(book, made), ignore_errors=True)
         done = convert(book, env=env)
-        path = os.path.join(book, "pdf", "book.pdf")
+        path = place(book, "pdf", "book.pdf")
         with open(path, "rb") if os.path.exists(path) else open(os.devnull, "rb") as fh:
             built.append((done.returncode, fh.read()))
     def own_code():
         if not shutil.which("pdftotext"):
             return skip("no pdftotext to read the PDF")
         return "its own code kept" in subprocess.run(
-            ["pdftotext", os.path.join(book, "pdf", "book.pdf"), "-"],
+            ["pdftotext", place(book, "pdf", "book.pdf"), "-"],
             capture_output=True, text=True).stdout
     return [(label, lambda: built[0][0] == built[1][0] == 0 and built[0][1]
              and built[0][1] == built[1][1]),
@@ -5339,18 +5452,18 @@ def case_book_pdf(work):
             # Builds with pdfLaTeX, as the conversion reads it, and stops
             # with LuaLaTeX, as the PDF target builds it.
             ("broken", "\\ifdefined\\directlua\\TIQundefined\\fi\n", "  pdf:\n    format: pdf\n")):
-        book = os.path.join(work, name)
-        os.makedirs(book)
-        png(os.path.join(book, "sq.png"), (128, 128, 128))
-        with open(os.path.join(book, "book.tex"), "w", encoding="utf-8") as fh:
+        book = place(work, name)
+        project(book)
+        png(place(book, "sq.png"), (128, 128, 128))
+        with open(place(book, "book.tex"), "w", encoding="utf-8") as fh:
             fh.write(BOOK_MASTER.replace("\\begin{document}", extra + "\\begin{document}"))
-        with open(os.path.join(book, "one.tex"), "w", encoding="utf-8") as fh:
+        with open(place(book, "one.tex"), "w", encoding="utf-8") as fh:
             fh.write(BOOK_CHAPTER + (PLOT_FIGURE if name == "pages" else ""))
         if name == "pages":
-            raster_pdf(os.path.join(book, "plot.pdf"), word="Plotword")
-        with open(os.path.join(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
+            raster_pdf(place(book, "plot.pdf"), word="Plotword")
+        with open(place(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
             fh.write("Image,Alt\nsq.png,A gray square\nrendered/plot.svg,A heat map\n")
-        with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+        with open(place(book, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n" + targets)
         result = convert(book)
         books[name] = (book, result.returncode, result.stdout + result.stderr)
@@ -5359,7 +5472,7 @@ def case_book_pdf(work):
         """The PDF's text: nothing for a PDF that wasn't built, whose checks
         fail, and None for one with no pdftotext to read it, whose checks
         skip."""
-        path = os.path.join(books[name][0], "pdf", "book.pdf")
+        path = place(books[name][0], "pdf", "book.pdf")
         if not os.path.exists(path):
             return ""
         if not shutil.which("pdftotext"):
@@ -5372,7 +5485,7 @@ def case_book_pdf(work):
         header cells)."""
         import pikepdf
         alts, mathml, containers, heads = [], 0, 0, 0
-        path = os.path.join(books["book"][0], "pdf", "book.pdf")
+        path = place(books["book"][0], "pdf", "book.pdf")
 
         def walk(node):
             nonlocal mathml, containers, heads
@@ -5417,7 +5530,7 @@ def case_book_pdf(work):
             import pypdf  # noqa: F401
         except ImportError:
             return skip("no pypdf for the output check to read the PDF")
-        report = os.path.join(books["book"][0], "output-check.csv")
+        report = place(books["book"][0], "output-check.csv")
         if not os.path.exists(report):
             return False
         with open(report, encoding="utf-8-sig") as fh:
@@ -5430,7 +5543,7 @@ def case_book_pdf(work):
         if not verapdf:
             return skip("no veraPDF to check the PDF")
         done = subprocess.run([verapdf, "-f", "ua2", "--format", "text",
-                               os.path.join(books["book"][0], "pdf", "book.pdf")],
+                               place(books["book"][0], "pdf", "book.pdf")],
                               capture_output=True, text=True)
         return done.stdout.strip().startswith("PASS")
 
@@ -5464,7 +5577,7 @@ def case_book_pdf(work):
         except ImportError:
             return skip("no pypdf to read the PDF")
         import math
-        path = os.path.join(books["pages"][0], "pdf", "book.pdf")
+        path = place(books["pages"][0], "pdf", "book.pdf")
         if not os.path.exists(path):
             return False
         found = []
@@ -5501,14 +5614,14 @@ def case_book_pdf(work):
         sys.path.insert(0, os.path.join(ROOT, "lib"))
         import latexbuild
         folder = books["pages"][0]
-        kept = os.path.join(folder, "rendered", "plot.pdf")
-        latex = os.path.join(folder, "latex")
+        kept = place(folder, "rendered", "plot.pdf")
+        latex = place(folder, "latex")
         tex = "".join(read(folder, "latex", f) for f in os.listdir(latex)
                       if f.endswith(".tex")) if os.path.isdir(latex) else ""
-        with open(os.path.join(folder, "rendered", "plot.svg"), encoding="utf-8") as fh:
+        with open(place(folder, "rendered", "plot.svg"), encoding="utf-8") as fh:
             root = re.search(r"<svg\b[^>]*>", fh.read()).group(0)
         images = []
-        for page in pypdf.PdfReader(os.path.join(folder, "pdf", "book.pdf")).pages:
+        for page in pypdf.PdfReader(place(folder, "pdf", "book.pdf")).pages:
             for image in page.images:
                 obj = image.indirect_reference.get_object() if image.indirect_reference else {}
                 images.append((obj.get("/Width"), obj.get("/Height"), obj.get("/Filter"),
@@ -5516,7 +5629,7 @@ def case_book_pdf(work):
         smoothed = latexbuild.embedding_tool() != "gs"
         return "Plotword" in found and (128, 128, "/FlateDecode", smoothed) in images \
             and latexbuild.unembedded_fonts(kept) == set() \
-            and os.path.isfile(os.path.join(latex, "rendered", "plot.pdf")) \
+            and os.path.isfile(place(latex, "rendered", "plot.pdf")) \
             and "rendered/plot.pdf" in tex and "plot.svg" not in tex \
             and 'width="40pt"' in root and 'height="48pt"' in root
 
@@ -5533,15 +5646,15 @@ def case_book_pdf(work):
         if found is None:
             return skip("no pdftotext to read the PDF")
         folder = books["pages"][0]
-        latex = os.path.join(folder, "latex")
+        latex = place(folder, "latex")
         tex = "".join(read(folder, "latex", f) for f in os.listdir(latex)
                       if f.endswith(".tex")) if os.path.isdir(latex) else ""
-        kept = os.path.join(folder, "rendered", "one-1.pdf")
+        kept = place(folder, "rendered", "one-1.pdf")
         own = subprocess.run(["pdftotext", kept, "-"], capture_output=True,
                              text=True).stdout if os.path.isfile(kept) else ""
         return "Drawword" in own and "Drawword" in found \
-            and os.path.isfile(os.path.join(folder, "rendered", "one-1.svg")) \
-            and os.path.isfile(os.path.join(latex, "rendered", "one-1.pdf")) \
+            and os.path.isfile(place(folder, "rendered", "one-1.svg")) \
+            and os.path.isfile(place(latex, "rendered", "one-1.pdf")) \
             and "rendered/one-1.pdf" in tex and "one-1.svg" not in tex
 
     def pages_pass_ua2():
@@ -5551,7 +5664,7 @@ def case_book_pdf(work):
         if pages_unbuilt():
             return skip(pages_unbuilt())
         done = subprocess.run([verapdf, "-f", "ua2", "--format", "text",
-                               os.path.join(books["pages"][0], "pdf", "book.pdf")],
+                               place(books["pages"][0], "pdf", "book.pdf")],
                               capture_output=True, text=True)
         return done.stdout.strip().startswith("PASS")
 
@@ -5568,7 +5681,7 @@ def case_book_pdf(work):
             return skip("no pikepdf to read the PDF")
         import pdftext
         for name in ("book", "pages"):
-            path = os.path.join(books[name][0], "pdf", "book.pdf")
+            path = place(books[name][0], "pdf", "book.pdf")
             if not os.path.exists(path):
                 return False
             found = text(name)
@@ -5614,27 +5727,27 @@ def case_struck_out(work):
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import texremediate
-    os.makedirs(work)
+    project(work)
     master = ("\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{cancel}\n"
               "\\newcommand{\\cbezier}{a curve of the book's own}\n\\begin{document}\n"
               "A term struck out, $\\cancel{3}x$, and \\cbezier.\n\\end{document}\n")
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write(master)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    copy = os.path.join(work, "tagged", "notes.tex")
+    copy = place(work, "tagged", "notes.tex")
     # A book with a picture and no cancel, copied with picture_paths as it
     # is by default and off: pict2e in the first copy, the run saying so,
     # and none in the second.
-    pictures = os.path.join(work, "pictures")
-    os.makedirs(pictures)
-    with open(os.path.join(pictures, "drawn.tex"), "w", encoding="utf-8") as fh:
+    pictures = beside(work, "pictures")
+    project(pictures)
+    with open(place(pictures, "drawn.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\begin{document}\nA circle, "
                  "\\begin{picture}(9,9)\\put(4,4){\\circle{8}}\\end{picture}.\n"
                  "\\end{document}\n")
-    with open(os.path.join(pictures, "conversion.yaml"), "w") as fh:
+    with open(place(pictures, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  paths:\n    format: source\n    tagging: \"on\"\n"
                  "  fonts:\n    format: source\n    tagging: \"on\"\n"
                  "    picture_paths: \"off\"\n")
@@ -5644,14 +5757,14 @@ def case_struck_out(work):
     def build(name, text):
         """(LaTeX's exit status, the PDF's path, its text) for text, built
         untagged or as it says, in a folder of its own."""
-        folder = os.path.join(work, name)
+        folder = place(work, name)
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "page.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "page.tex"), "w", encoding="utf-8") as fh:
             fh.write(text)
         done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                "page.tex"], cwd=folder, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL, timeout=300)
-        pdf = os.path.join(folder, "page.pdf")
+        pdf = place(folder, "page.pdf")
         found = subprocess.run(["pdftotext", pdf, "-"], capture_output=True,
                                text=True).stdout if os.path.exists(pdf) else ""
         return done.returncode, pdf, found
@@ -5816,18 +5929,18 @@ def case_code_label(work):
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import texremediate
-    os.makedirs(work)
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{fancyvrb}\n\\begin{document}\n"
                  "\\begin{enumerate}\n\\item Labelfirst.\n\\item\n\\begin{Verbatim}\n"
                  "Labelcode\n\\end{Verbatim}\n\\item Labelthird.\n\\end{enumerate}\n"
                  "\\end{document}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
                  "  pdf:\n    format: pdf\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    copy = os.path.join(work, "tagged", "notes.tex")
+    copy = place(work, "tagged", "notes.tex")
     hook = "cmd / FV@ListVSpace / before"
 
     def labels():
@@ -5841,7 +5954,7 @@ def case_code_label(work):
         except ImportError:
             return skip("no pikepdf to read the PDF")
         import pdftext
-        path = os.path.join(work, "pdf", "book.pdf")
+        path = place(work, "pdf", "book.pdf")
         if not os.path.exists(path):
             return False
         rows = {}
@@ -5917,18 +6030,18 @@ def case_code_lines(work):
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import texremediate
-    os.makedirs(work)
-    with open(os.path.join(work, "code.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "code.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{fancyvrb}\n\\begin{document}\n"
                  "Two blocks.\n\\begin{verbatim}\nfirst line\n  second line\n"
                  "\\end{verbatim}\nBetween them.\n\\begin{Verbatim}\nthird line\nfourth line\n"
                  "\\end{Verbatim}\n\\end{document}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
                  "  pdf:\n    format: pdf\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    copy = os.path.join(work, "tagged", "code.tex")
+    copy = place(work, "tagged", "code.tex")
     hook = "oer / code-lines"
 
     def roles():
@@ -5939,7 +6052,7 @@ def case_code_lines(work):
             import pikepdf  # noqa: F401
         except ImportError:
             return skip("no pikepdf to read the PDF")
-        return code_roles(os.path.join(work, "pdf", "book.pdf")) == ("/P", "/Sub")
+        return code_roles(place(work, "pdf", "book.pdf")) == ("/P", "/Sub")
 
     def tagged(body):
         texts = {"b.tex": "\\documentclass{article}\n\\usepackage{listings}\n"
@@ -5999,8 +6112,8 @@ def case_line_breaks(work):
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
     import texremediate
-    os.makedirs(work)
-    with open(os.path.join(work, "notes.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{book}\n\\begin{document}\n\\tableofcontents\n"
                  "\\part{Partone}\n\\chapter{Alphaone\\\\Alphatwo}\n"
                  "\\section{Gammaone\\\\\nGammatwo}\n"
@@ -6070,10 +6183,10 @@ def case_line_breaks(work):
                  "\\parbox{1cm}{\\hyphenpenalty=10000 Ennoone\\enspace Ennotwo}\n"
                  "\\end{document}\n")
     own = work + "-own"
-    os.makedirs(own)
+    project(own)
     # A \@gnewline of the book's own, which puts a slash before the break,
     # and a \@no@lnbk, \linebreak's, which puts a bar there.
-    with open(os.path.join(own, "own.tex"), "w", encoding="utf-8") as fh:
+    with open(place(own, "own.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\makeatletter\n"
                  "\\def\\@gnewline#1{\\ifvmode\\@nolnerr\\else\\unskip\\ /\\nobreak\\hfil"
                  "\\break\\fi}\n"
@@ -6085,7 +6198,7 @@ def case_line_breaks(work):
     config = ("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
               "  pdf:\n    format: pdf\n")
     for folder in (work, own):
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write(config)
     # The second book again, with a latexmk that stops as it does when
     # the system ends LuaLaTeX: LaTeX's log, if there is one, has no error.
@@ -6093,20 +6206,20 @@ def case_line_breaks(work):
     shutil.copytree(own, halted)
     stand_in = os.path.join(work, "..", os.path.basename(work) + "-latexmk")
     os.makedirs(stand_in, exist_ok=True)
-    with open(os.path.join(stand_in, "latexmk"), "w") as fh:
+    with open(place(stand_in, "latexmk"), "w") as fh:
         fh.write("#!/bin/sh\n"
                  "echo \"Latexmk: Errors, so I did not complete making targets\" >&2\n"
                  "echo \"  lualatex: Command for 'lualatex' gave return code 137\" >&2\n"
                  "exit 12\n")
-    os.chmod(os.path.join(stand_in, "latexmk"), 0o755)
+    os.chmod(place(stand_in, "latexmk"), 0o755)
     result = convert(work)
     said = result.stdout + result.stderr
     convert(own)
     halt = convert(halted, env=dict(os.environ, PATH=os.path.abspath(stand_in) + os.pathsep
                                     + os.environ["PATH"]))
     halt_said = halt.stdout + halt.stderr
-    copy = os.path.join(work, "tagged", "notes.tex")
-    pdf_path = os.path.join(work, "pdf", "book.pdf")
+    copy = place(work, "tagged", "notes.tex")
+    pdf_path = place(work, "pdf", "book.pdf")
 
     def why_not():
         """A reason to skip reading the PDF, or None."""
@@ -6144,8 +6257,8 @@ def case_line_breaks(work):
         if why:
             return skip(why)
         import pdftext
-        path = os.path.join(folder, "pdf", name) if os.path.isdir(os.path.join(folder, "pdf")) \
-            else os.path.join(folder, name)
+        path = place(folder, "pdf", name) if os.path.isdir(place(folder, "pdf")) \
+            else place(folder, name)
         return list(pdftext.marked_text(path).values()) if os.path.exists(path) else []
 
     def spaced():
@@ -6398,9 +6511,9 @@ def case_line_breaks(work):
         if not subprocess.run(["kpsewhich", "amsbook.cls"], capture_output=True,
                               text=True).stdout.strip():
             return skip("no amsbook here")
-        folder = os.path.join(work, "amsbook")
+        folder = place(work, "amsbook")
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "ams.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "ams.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\DocumentMetadata{tagging=on,pdfstandard=ua-2,lang=en-US}\n"
                      "\\documentclass{amsbook}\n" + latexbuild.LINE_BREAK_SPACE
                      + "\\begin{document}\n\\tableofcontents\n\\listoffigures\n"
@@ -6416,7 +6529,7 @@ def case_line_breaks(work):
         # The heading's text in the structure: LaTeX 2026-11-01 tags its
         # number as a Lbl of its own, in a marked content sequence of its
         # own, where 2026-06-01's "CHAPTER 1" was one sequence.
-        structure = pdf_structure(os.path.join(folder, "ams.pdf"))
+        structure = pdf_structure(place(folder, "ams.pdf"))
         if structure is None:
             return skip("no pikepdf or pdfinfo to read the PDF's structure")
         return any(role == "H1" and text.startswith("CHAPTER 1 ")
@@ -6447,24 +6560,24 @@ def case_line_breaks(work):
         if not os.path.exists(copy):
             return False
         text = read(work, "tagged", "notes.tex")
-        folder = os.path.join(work, "pdftex")
+        folder = place(work, "pdftex")
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "dvi.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "dvi.tex"), "w", encoding="utf-8") as fh:
             fh.write(text)
-        with open(os.path.join(folder, "untagged.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "untagged.tex"), "w", encoding="utf-8") as fh:
             fh.write(re.sub(r"\\DocumentMetadata\{[^}]*\}\n", "", text))
         dvi = subprocess.run(["latex", "-interaction=nonstopmode", "dvi.tex"], cwd=folder,
                              capture_output=True, text=True, timeout=120)
         pdf = subprocess.run(["pdflatex", "-interaction=nonstopmode", "untagged.tex"],
                              cwd=folder, capture_output=True, text=True, timeout=120)
-        shutil.copy(os.path.join(folder, "untagged.tex"), os.path.join(folder, "lua.tex"))
+        shutil.copy(place(folder, "untagged.tex"), place(folder, "lua.tex"))
         lua = subprocess.run(["lualatex", "-interaction=nonstopmode", "lua.tex"],
                              cwd=folder, capture_output=True, text=True, timeout=300)
         if dvi.returncode or pdf.returncode or lua.returncode or not os.path.exists(
-                os.path.join(folder, "dvi.dvi")) or not os.path.exists(
-                os.path.join(folder, "lua.pdf")):
+                place(folder, "dvi.dvi")) or not os.path.exists(
+                place(folder, "lua.pdf")):
             return False
-        with open(os.path.join(folder, "untagged.pdf"), "rb") as fh:
+        with open(place(folder, "untagged.pdf"), "rb") as fh:
             return b"PdfTeX-Space" not in fh.read()
 
     def justified():
@@ -6476,9 +6589,9 @@ def case_line_breaks(work):
         if not subprocess.run(["kpsewhich", "ragged2e.sty"], capture_output=True,
                               text=True).stdout.strip():
             return skip("no ragged2e here")
-        folder = os.path.join(work, "ragged2e")
+        folder = place(work, "ragged2e")
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "r2e.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "r2e.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\DocumentMetadata{tagging=on,pdfstandard=ua-2,lang=en-US}\n"
                      "\\documentclass{article}\n\\usepackage{ragged2e}\n"
                      + latexbuild.LINE_BREAK_SPACE + "\\begin{document}\n"
@@ -6552,7 +6665,7 @@ def case_line_breaks(work):
          or ("latexmk ended with status 12, saying:" in halt_said
              and "gave return code 137" in halt_said
              and "wasn't built" in halt_said
-             and not os.path.exists(os.path.join(halted, "pdf", "book.pdf")))),
+             and not os.path.exists(place(halted, "pdf", "book.pdf")))),
         ("its PDF, built from its own LaTeX, has a space between the lines of each \\\\, "
          "\\newline, and \\linebreak in its text, none inside a word a \\linebreak breaks, "
          "one space where \\nolinebreak keeps two words together, and a table's rows as "
@@ -6664,12 +6777,12 @@ def case_class_contents(work):
     with two footnotes in succession, builds, where its \\title, its
     \\author, and its notes each stopped LaTeX, and has them too, the
     marks a comma apart, as memoir sets them."""
-    ams, art, memoir = (os.path.join(work, name) for name in ("amsbook", "amsart", "memoir"))
+    ams, art, memoir = (place(work, name) for name in ("amsbook", "amsart", "memoir"))
     for folder, cls, extra, unit in ((ams, "amsbook", "\\listoffigures\n", "chapter"),
                                      (art, "amsart", "\\listoffigures\n", "section"),
                                      (memoir, "memoir", "", "chapter")):
         os.makedirs(folder)
-        with open(os.path.join(folder, "book.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "book.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\documentclass{" + cls + "}\n\\title{Classed}\n"
                      + ("" if folder == art else "\\author{Classauthor}\n")
                      + "\\begin{document}\n"
@@ -6679,7 +6792,7 @@ def case_class_contents(work):
                         else "") + "\n"
                      "\\begin{figure}\\centering\\rule{1cm}{1cm}\\caption{Classfigure}"
                      "\\end{figure}\n\\end{document}\n")
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
                      "  pdf:\n    format: pdf\n")
     ams_done, art_done, memoir_done = convert(ams), convert(art), convert(memoir)
@@ -6693,7 +6806,7 @@ def case_class_contents(work):
         why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
         if why:
             return skip(why)
-        path = os.path.join(folder, "pdf", "book.pdf")
+        path = place(folder, "pdf", "book.pdf")
         if not os.path.exists(path):
             return False
         if not shutil.which("pdftotext"):
@@ -6721,16 +6834,16 @@ def case_class_contents(work):
             return skip(why)
         sys.path.insert(0, os.path.join(ROOT, "lib"))
         import latexbuild
-        folder = os.path.join(work, "amsart-untagged")
+        folder = place(work, "amsart-untagged")
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "art.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "art.tex"), "w", encoding="utf-8") as fh:
             fh.write("\\documentclass{amsart}\n" + latexbuild.LINE_BREAK_SPACE
                      + "\\begin{document}\n\\tableofcontents\n\\listoffigures\n"
                      "\\section{Artone}\nText.\n\\begin{figure}\\caption{Artfigure}"
                      "\\end{figure}\n\\end{document}\n")
         subprocess.run(["lualatex", "-interaction=nonstopmode", "art.tex"], cwd=folder,
                        capture_output=True, text=True, timeout=300)
-        if not os.path.exists(os.path.join(folder, "art.toc")):
+        if not os.path.exists(place(folder, "art.toc")):
             return False
         toc = read(folder, "art.toc")
         return "Artone" in toc and "Contents" not in toc and toc.count("List of Figures") == 1
@@ -6738,15 +6851,15 @@ def case_class_contents(work):
     def loaded_classes():
         sys.path.insert(0, os.path.join(ROOT, "lib"))
         import texremediate
-        folder = os.path.join(work, "own-class")
+        folder = place(work, "own-class")
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "mybook.cls"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "mybook.cls"), "w", encoding="utf-8") as fh:
             fh.write("\\NeedsTeXFormat{LaTeX2e}\n\\ProvidesClass{mybook}\n"
                      "\\LoadClass[12pt]{amsbook}\n")
-        with open(os.path.join(folder, "ourbook.cls"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "ourbook.cls"), "w", encoding="utf-8") as fh:
             fh.write("\\ProvidesClass{ourbook}\n% \\LoadClass{book}\n"
                      "\\LoadClassWithOptions{mybook}\n")
-        with open(os.path.join(folder, "plainer.cls"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "plainer.cls"), "w", encoding="utf-8") as fh:
             fh.write("\\ProvidesClass{plainer}\n\\LoadClass{book}\n")
         found = {}
         for cls in ("ourbook", "plainer"):
@@ -6766,7 +6879,7 @@ def case_class_contents(work):
             import pikepdf
         except ImportError:
             return skip("no pikepdf to read the PDF")
-        path = os.path.join(folder, "pdf", "book.pdf")
+        path = place(folder, "pdf", "book.pdf")
         if not os.path.exists(path):
             return False
         with pikepdf.open(path) as found, found.open_metadata() as meta:
@@ -6818,9 +6931,9 @@ def case_class_contents(work):
         copy."""
         sys.path.insert(0, os.path.join(ROOT, "lib"))
         import texremediate
-        folder = os.path.join(work, "titles")
+        folder = place(work, "titles")
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "mymemoir.cls"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "mymemoir.cls"), "w", encoding="utf-8") as fh:
             fh.write("\\ProvidesClass{mymemoir}\n\\LoadClass{memoir}\n")
 
         def copy(cls, preamble="", body="Text.\n"):
@@ -6926,13 +7039,13 @@ def case_caption_notes(work):
     two of the minipage's letters and set its text twice under it; and the
     caption package's \\captionbox. Each takes one number, the notes after
     them theirs, and the run counts them."""
-    lt, box = os.path.join(work, "longtable"), os.path.join(work, "captionbox")
+    lt, box = place(work, "longtable"), place(work, "captionbox")
     for folder in (lt, box):
         os.makedirs(folder)
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n"
                      "  pdf:\n    format: pdf\n")
-    with open(os.path.join(lt, "book.tex"), "w", encoding="utf-8") as fh:
+    with open(place(lt, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{book}\n\\usepackage{longtable}\n\\makeatletter\n"
                  "\\providecommand\\captionof[1]{\\def\\@captype{#1}\\caption}\n\\makeatother\n"
                  "\\begin{document}\n\\chapter{Capnotes}\n"
@@ -6945,7 +7058,7 @@ def case_caption_notes(work):
                  "\\noindent\\begin{minipage}{\\linewidth}\n\\centering\\rule{1cm}{1cm}\n"
                  "\\captionof{figure}{Mpcaption\\protect\\footnote{Mpnote.}}\n"
                  "\\end{minipage}\n\nCaptext.\\footnote{Ltnotec.}\n\\end{document}\n")
-    with open(os.path.join(box, "book.tex"), "w", encoding="utf-8") as fh:
+    with open(place(box, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{book}\n\\usepackage{caption}\n\\begin{document}\n"
                  "\\chapter{Boxnotes}\n\\begin{figure}\\centering\n"
                  "\\captionbox{Boxcaption\\protect\\footnotemark}{\\rule{8cm}{1cm}}\n"
@@ -6960,7 +7073,7 @@ def case_caption_notes(work):
         why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
         if why:
             return skip(why)
-        path = os.path.join(folder, "pdf", "book.pdf")
+        path = place(folder, "pdf", "book.pdf")
         if not os.path.exists(path):
             return False
         if not shutil.which("pdftotext"):
@@ -7018,7 +7131,7 @@ def case_line_measure(work):
     words = " ".join(("official sufficient efficient difficult affluent office coffee effort "
                       "afford different").split() * 8)
     poem = "\\\\\n".join("A short line of a poem, %d." % i for i in range(12))
-    with open(os.path.join(work, "lines.tex"), "w", encoding="utf-8") as fh:
+    with open(place(work, "lines.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n" + latexbuild.LINE_LENGTH + "\\begin{document}\n"
                  + words + ".\n\n" + poem + "\n\\end{document}\n")
 
@@ -7030,11 +7143,11 @@ def case_line_measure(work):
             return skip("no pdftotext to read the PDF")
         subprocess.run(["lualatex", "-interaction=nonstopmode", "lines.tex"], cwd=work,
                        capture_output=True, timeout=300, stdin=subprocess.DEVNULL)
-        log = os.path.join(work, "lines.log")
+        log = place(work, "lines.log")
         with open(log, encoding="utf-8", errors="replace") if os.path.exists(log) \
                 else io.StringIO() as fh:
             measured = latexbuild.LINE_MEASURED.findall(fh.read())
-        text = subprocess.run(["pdftotext", "-raw", os.path.join(work, "lines.pdf"), "-"],
+        text = subprocess.run(["pdftotext", "-raw", place(work, "lines.pdf"), "-"],
                               capture_output=True, text=True).stdout
         rows = [row.strip() for row in text.split("\n") if row.strip()]
         last = next((i for i, row in enumerate(rows) if row.endswith("different.")), None)
@@ -7059,30 +7172,31 @@ def case_pdf_copy(work):
     if why:
         return [("the PDF build's copy of the book keeps its links and .latexmkrc",
                  lambda: skip(why))]
-    book = os.path.join(work, "book")
-    os.makedirs(os.path.join(work, "shared", "figs"))
-    os.makedirs(book)
-    png(os.path.join(work, "shared", "figs", "a.png"), (0, 0, 128))
-    os.symlink(os.path.join("..", "shared", "figs"), os.path.join(book, "figs"))
+    book = place(work, "book")
+    os.makedirs(place(work, "shared", "figs"))
+    project(book)
+    png(place(work, "shared", "figs", "a.png"), (0, 0, 128))
+    os.symlink(os.path.relpath(place(work, "shared", "figs"), into(book)),
+               place(book, "figs"))
     # A package of the book's own in a folder its .latexmkrc adds to
     # TEXINPUTS, so the book builds only with its .latexmkrc.
-    os.makedirs(os.path.join(book, "tex"))
-    with open(os.path.join(book, "tex", "notestyle.sty"), "w") as fh:
+    os.makedirs(place(book, "tex"))
+    with open(place(book, "tex", "notestyle.sty"), "w") as fh:
         fh.write("\\ProvidesPackage{notestyle}\n\\newcommand{\\notemark}{FROM THE STYLE}\n")
-    with open(os.path.join(book, "notes.tex"), "w", encoding="utf-8") as fh:
+    with open(place(book, "notes.tex"), "w", encoding="utf-8") as fh:
         fh.write("\\documentclass{article}\n\\usepackage{graphicx}\n\\usepackage{notestyle}\n"
                  "\\title{Notes}\n\\begin{document}\n\\notemark. A linked figure: "
                  "\\includegraphics[width=1cm]{figs/a}.\n"
                  "See \\ref{nope} and \\cite{nobody}.\n\\end{document}\n")
-    with open(os.path.join(book, ".latexmkrc"), "w") as fh:
+    with open(place(book, ".latexmkrc"), "w") as fh:
         fh.write("$out_dir = 'elsewhere';\n$pdf_mode = 1;\nensure_path('TEXINPUTS', './tex//');\n")
-    with open(os.path.join(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nfigs/a.png,A blue square\n")
-    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+    with open(place(book, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n")
     result = convert(book)
     said = result.stdout + result.stderr
-    pdf = os.path.join(book, "pdf", "book.pdf")
+    pdf = place(book, "pdf", "book.pdf")
 
     def figure():
         try:
@@ -7124,9 +7238,9 @@ def case_other_masters(work):
     loaded, so an old test for pdfTeX (\\ifx\\pdfoutput\\undefined, which
     LuaTeX doesn't define) takes it for pdfTeX, and the pdfTeX commands in
     that branch (\\ifnum\\pdfoutput, \\pdfinfo) work."""
-    os.makedirs(work)
-    png(os.path.join(work, "sq.png"), (128, 128, 128))
-    png(os.path.join(work, "sq2.png"), (64, 64, 64))
+    project(work)
+    png(place(work, "sq.png"), (128, 128, 128))
+    png(place(work, "sq2.png"), (64, 64, 64))
     files = {
         "book.tex": "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n"
                     "\\input{shared}\n\\end{document}\n",
@@ -7145,31 +7259,31 @@ def case_other_masters(work):
                            "targets:\n  tagged:\n    format: source\n    tagging: \"on\"\n",
     }
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     # Executable, as many of GIAM's files are: the copy keeps the mode.
-    os.chmod(os.path.join(work, "only.tex"), 0o755)
+    os.chmod(place(work, "only.tex"), 0o755)
     result = convert(work)
     said = result.stdout + result.stderr
-    tagged = os.path.join(work, "tagged")
+    tagged = place(work, "tagged")
 
     def copied(name):
-        path = os.path.join(tagged, name)
+        path = place(tagged, name)
         return read(work, "tagged", name) if os.path.exists(path) else ""
 
     def build(engine, metadata=True):
         """The tree with the copy laid over it, the workbook built with engine."""
-        tree = os.path.join(work, "build-" + engine)
-        shutil.copytree(work, tree, ignore=shutil.ignore_patterns("tagged", "build-*"))
+        tree = beside(work, "build-" + engine)
+        shutil.copytree(into(work), tree, ignore=shutil.ignore_patterns("tagged", "build-*"))
         shutil.copytree(tagged, tree, dirs_exist_ok=True)
         if not metadata:
-            path = os.path.join(tree, "workbook.tex")
+            path = place(tree, "workbook.tex")
             text = read(tree, "workbook.tex")
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(re.sub(r"\\DocumentMetadata\{[^}]*\}\n", "", text))
         done = subprocess.run([engine, "-interaction=nonstopmode", "workbook.tex"],
                               cwd=tree, capture_output=True, text=True, timeout=300)
-        return done.returncode, os.path.join(tree, "workbook.pdf")
+        return done.returncode, place(tree, "workbook.pdf")
 
     def builds_tagged():
         why = why_no_tex("no lualatex to build the workbook", "lualatex")
@@ -7211,10 +7325,10 @@ def case_other_masters(work):
          lambda: copied("workbook.tex") != "" and "alt={Another square}" in copied("only.tex")
          and "workbook.tex with 1 file(s) only it reaches" in said),
         ("a file written into the copy keeps the author's mode",
-         lambda: os.path.exists(os.path.join(tagged, "only.tex"))
-         and os.stat(os.path.join(tagged, "only.tex")).st_mode & 0o777 == 0o755
-         and os.stat(os.path.join(tagged, "shared.tex")).st_mode & 0o777
-         == os.stat(os.path.join(work, "shared.tex")).st_mode & 0o777),
+         lambda: os.path.exists(place(tagged, "only.tex"))
+         and os.stat(place(tagged, "only.tex")).st_mode & 0o777 == 0o755
+         and os.stat(place(tagged, "shared.tex")).st_mode & 0o777
+         == os.stat(place(work, "shared.tex")).st_mode & 0o777),
         ("tagged, the other master gets \\DocumentMetadata first, then luatex85 for its "
          "pdfTeX test, which is left as it was",
          lambda: copied("workbook.tex").startswith("\\DocumentMetadata{")
@@ -7285,24 +7399,24 @@ def case_review_macros(work):
     does what it did: no group around it, a bare alt argument braced, a
     call's own keys holding the description, and what can't be written
     without changing something else named."""
-    os.makedirs(work)
+    project(work)
     for name, rgb in (("sq", (128, 0, 0)), ("circ", (0, 0, 128)), ("tri", (0, 128, 0)),
                       ("star", (128, 128, 0)), ("dot", (0, 0, 0)), ("mark", (64, 64, 64)),
                       ("icon", (32, 32, 32)), ("plain", (200, 200, 200)),
                       ("bare", (16, 16, 16)), ("key", (48, 48, 48)), ("wide", (96, 96, 96))):
-        png(os.path.join(work, name + ".png"), rgb)
-    with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
+        png(place(work, name + ".png"), rgb)
+    with open(place(work, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write(REVIEW_MACROS)
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nsq.png,\"A square, red\"\ncirc.png,\"A circle, blue\"\n"
                  "tri.png,A triangle from the sidecar\nstar.png,A star\n"
                  "dot.png,A centered dot\nmark.png,A mark\nicon.png,An icon\n"
                  "bare.png,A bare one\nkey.png,A key\nwide.png,A wide one\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  tagged:\n    format: source\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    path = os.path.join(work, "tagged", "book.tex")
+    path = place(work, "tagged", "book.tex")
     copy = read(work, "tagged", "book.tex") if os.path.exists(path) else ""
 
     def built():
@@ -7315,9 +7429,9 @@ def case_review_macros(work):
             import pikepdf  # noqa: F401
         except ImportError:
             return "pikepdf"
-        tree = os.path.join(work, "build")
-        shutil.copytree(work, tree, ignore=shutil.ignore_patterns("tagged", "build"))
-        shutil.copy(path, os.path.join(tree, "book.tex"))
+        tree = beside(work, "build")
+        shutil.copytree(into(work), tree, ignore=shutil.ignore_patterns("tagged", "build"))
+        shutil.copy(path, place(tree, "book.tex"))
         for _ in range(2):
             done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                    "book.tex"], cwd=tree, capture_output=True, text=True,
@@ -7335,9 +7449,9 @@ def case_review_macros(work):
                 if kids is not None:
                     for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]):
                         walk(kid)
-        with pikepdf.open(os.path.join(tree, "book.pdf")) as doc:
+        with pikepdf.open(place(tree, "book.pdf")) as doc:
             walk(doc.Root.StructTreeRoot)
-        text = subprocess.run(["pdftotext", os.path.join(tree, "book.pdf"), "-"],
+        text = subprocess.run(["pdftotext", place(tree, "book.pdf"), "-"],
                               capture_output=True, text=True).stdout \
             if shutil.which("pdftotext") else "See Figure 1."
         return alts, text
@@ -7401,14 +7515,15 @@ def case_latex_target(work):
     file per chapter, read back as a LaTeX source to the same pages. Its
     SVG picture only where rsvg-convert makes it a PDF (why_no_svg): the
     target writes \\includesvg without, which no build here takes."""
-    os.makedirs(os.path.join(work, "img"))
-    png(os.path.join(work, "img", "square.png"), (90, 90, 90))
-    png(os.path.join(work, "img", "a+b.png"), (30, 30, 30))
-    with open(os.path.join(work, "img", "circle.svg"), "w") as fh:
+    project(work)
+    os.makedirs(place(work, "img"))
+    png(place(work, "img", "square.png"), (90, 90, 90))
+    png(place(work, "img", "a+b.png"), (30, 30, 30))
+    with open(place(work, "img", "circle.svg"), "w") as fh:
         fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
                  '<circle cx="20" cy="20" r="15" fill="black"/></svg>\n')
     circle = "" if why_no_svg() else "![A black circle.](img/circle.svg)\n\n"
-    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("# Shapes\n\nA square:\n\n![A gray square.](img/square.png)\n\n"
                  "The area is $s^2$,[^area] and the next chapter has [circles](two.md#circles).\n\n"
                  "| Shape | Sides |\n|---|---|\n| Square | 4 |\n| Triangle | 3 |\n\n"
@@ -7419,7 +7534,7 @@ def case_latex_target(work):
                  "Its side is $s$.[^side]\n\n"
                  "[^area]: Computed so:\n\n    ```python\n    area = s * s  # 100%\n    ```\n\n"
                  "[^side]: ```python\n    side = s  # one side\n    ```\n")
-    with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Circles {#circles}\n\n" + circle +
                  "Its area is $\\pi r^2$.\n\n1. Draw it.\n2. Measure it.\n\n"
                  "So $$A = \\pi r^2.$$\\\nQ.E.D.\n\n"
@@ -7449,7 +7564,7 @@ def case_latex_target(work):
                  # Every character of ASCII, each of those the writer escapes.
                  "```python\nx = %s  # every character\n```\n\nAnd inline: `%s`{.python}.\n"
                  % (ASCII, ASCII.replace("`", "")))
-    with open(os.path.join(work, "three.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "three.md"), "w", encoding="utf-8") as fh:
         fh.write("# Figures\n\nSee [the triangle](#pascal).\n\n"
                  "<figure id=\"pascal\"><table><tbody><tr><td>1</td></tr><tr><td>1</td>"
                  "<td>1</td></tr></tbody></table><figcaption>The first rows of Pascal's "
@@ -7465,40 +7580,41 @@ def case_latex_target(work):
                  "```python\nsides = 3  # a triangle\n```\n\n"
                  "Its [lorry]{lang=en-GB} is grey.\n\n"
                  "::: {lang=en-GB}\nA paragraph spelt so.\n\n## Holiday\n\nIts fortnight.\n:::\n")
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - one\n  - two\n  - three\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  latex:\n    format: latex\n"
                  "  adoc:\n    format: asciidoc\n")
     result = convert(work)
     said = result.stdout + result.stderr
-    out = os.path.join(work, "latex")
+    out = place(work, "latex")
     master = read(work, "latex", "shapes.tex") \
-        if os.path.exists(os.path.join(out, "shapes.tex")) else ""
-    one = read(work, "latex", "one.tex") if os.path.exists(os.path.join(out, "one.tex")) else ""
-    two = read(work, "latex", "two.tex") if os.path.exists(os.path.join(out, "two.tex")) else ""
+        if os.path.exists(place(out, "shapes.tex")) else ""
+    one = read(work, "latex", "one.tex") if os.path.exists(place(out, "one.tex")) else ""
+    two = read(work, "latex", "two.tex") if os.path.exists(place(out, "two.tex")) else ""
     three = read(work, "latex", "three.tex") \
-        if os.path.exists(os.path.join(out, "three.tex")) else ""
+        if os.path.exists(place(out, "three.tex")) else ""
     with open(os.path.join(BIN, "highlighting.theme"), encoding="utf-8") as fh:
         comment = json.load(fh)["text-styles"]["Comment"]["text-color"]
     comment_rgb = ",".join("%.2f" % (int(comment[i:i + 2], 16) / 255) for i in (1, 3, 5))
 
-    back = os.path.join(work, "back")
+    back = beside(work, "back")
     read_back = []
 
     def reading():
         """The latex target read back as a LaTeX source, once."""
         if not read_back:
-            shutil.copytree(out, back)
-            with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+            project(back)
+            shutil.copytree(out, into(back), dirs_exist_ok=True)
+            with open(place(back, "conversion.yaml"), "w") as fh:
                 fh.write("defaults:\n  latex:\n    main: shapes.tex\n"
                          "targets:\n  html:\n    format: html\n")
             read_back.append(convert(back))
         return read_back[0]
 
     def page(folder, stem):
-        path = os.path.join(folder, "html", stem + ".html")
+        path = place(folder, "html", stem + ".html")
         return read(folder, "html", stem + ".html") if os.path.exists(path) else ""
 
     def code_texts(text):
@@ -7520,13 +7636,13 @@ def case_latex_target(work):
         compare = os.path.join(HERE, "..", "util", "compare-output.py")
         same = []
         for stem in ("one", "two"):
-            a, b = os.path.join(work, "cmp-a-" + stem), os.path.join(work, "cmp-b-" + stem)
+            a, b = place(work, "cmp-a-" + stem), place(work, "cmp-b-" + stem)
             os.makedirs(a)
             os.makedirs(b)
-            shutil.copy(os.path.join(work, "html", stem + ".html"), a)
-            if not os.path.exists(os.path.join(back, "html", stem + ".html")):
+            shutil.copy(place(work, "html", stem + ".html"), into(a))
+            if not os.path.exists(place(back, "html", stem + ".html")):
                 return False
-            shutil.copy(os.path.join(back, "html", stem + ".html"), b)
+            shutil.copy(place(back, "html", stem + ".html"), into(b))
             done = subprocess.run([sys.executable, compare, a, b],
                                   capture_output=True, text=True)
             same.append("1 identical" in done.stdout)
@@ -7541,7 +7657,7 @@ def case_latex_target(work):
         done = subprocess.run([engine, "-lualatex", "-interaction=nonstopmode",
                                "shapes.tex"], cwd=out, capture_output=True,
                               text=True, timeout=600)
-        return done.returncode == 0 and os.path.exists(os.path.join(out, "shapes.pdf"))
+        return done.returncode == 0 and os.path.exists(place(out, "shapes.pdf"))
 
     def fitted():
         """The master's build, by latexmk (builds), kept the long sum's fit
@@ -7551,7 +7667,7 @@ def case_latex_target(work):
                          "latexmk", "lualatex")
         if why:
             return skip(why)
-        aux = os.path.join(out, "shapes.aux")
+        aux = place(out, "shapes.aux")
         text = read(work, "latex", "shapes.aux") if os.path.exists(aux) else ""
         return "\\OERFitState{" in text and "\\OERFitRun{2}" in text
 
@@ -7570,16 +7686,16 @@ def case_latex_target(work):
             return skip(why)
         again = work + "-edited"
         shutil.copytree(work, again)
-        with open(os.path.join(again, "two.md"), encoding="utf-8") as fh:
+        with open(place(again, "two.md"), encoding="utf-8") as fh:
             text = fh.read()
-        with open(os.path.join(again, "two.md"), "w", encoding="utf-8") as fh:
+        with open(place(again, "two.md"), "w", encoding="utf-8") as fh:
             fh.write(text.replace("A long sum:", "A longer sum: $$T = "
                                   + LONG_SUM.replace("a_", "b_") + " + c$$\n\nA long sum:"))
         convert(again)
         done = subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode",
-                               "shapes.tex"], cwd=os.path.join(again, "latex"),
+                               "shapes.tex"], cwd=place(again, "latex"),
                               capture_output=True, text=True, timeout=600)
-        log = os.path.join(again, "latex", "shapes.log")
+        log = place(again, "latex", "shapes.log")
         if done.returncode or not os.path.exists(log):
             return False
         with open(log, encoding="utf-8", errors="replace") as fh:
@@ -7600,16 +7716,16 @@ def case_latex_target(work):
             return skip(why)
         again = work + "-in-place"
         shutil.copytree(out, again)
-        with open(os.path.join(again, "two.tex"), encoding="utf-8") as fh:
+        with open(place(again, "two.tex"), encoding="utf-8") as fh:
             text = fh.read()
         if text.count(LONG_SUM) != 1:
             return False
-        with open(os.path.join(again, "two.tex"), "w", encoding="utf-8") as fh:
+        with open(place(again, "two.tex"), "w", encoding="utf-8") as fh:
             fh.write(text.replace(LONG_SUM, "a_{1} + a_{2}"))
         done = subprocess.run(["latexmk", "-lualatex", "-interaction=nonstopmode",
                                "shapes.tex"], cwd=again, capture_output=True, text=True,
                               timeout=600)
-        log = os.path.join(again, "shapes.log")
+        log = place(again, "shapes.log")
         if done.returncode or not os.path.exists(log):
             return False
         with open(log, encoding="utf-8", errors="replace") as fh:
@@ -7631,7 +7747,7 @@ def case_latex_target(work):
             return skip(why)
         again = work + "-old-aux"
         shutil.copytree(out, again)
-        aux = os.path.join(again, "shapes.aux")
+        aux = place(again, "shapes.aux")
         if not os.path.exists(aux):
             return False
         with open(aux, encoding="utf-8") as fh:
@@ -7644,7 +7760,7 @@ def case_latex_target(work):
         done = subprocess.run(["latexmk", "-g", "-lualatex", "-interaction=nonstopmode",
                                "shapes.tex"], cwd=again, capture_output=True, text=True,
                               timeout=600)
-        return done.returncode == 0 and os.path.exists(os.path.join(again, "shapes.pdf"))
+        return done.returncode == 0 and os.path.exists(place(again, "shapes.pdf"))
 
     def read_files_digested():
         """The fitting's macros (latexbuild.FIT_MACROS) in a document of
@@ -7666,13 +7782,13 @@ def case_latex_target(work):
             return " + ".join("%s_{%d}" % (letter, k) for k in range(1, count + 1))
 
         def write(name, text):
-            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            with open(place(folder, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
 
         def build():
             subprocess.run(["lualatex", "-interaction=nonstopmode", "doc.tex"], cwd=folder,
                            capture_output=True, timeout=300, stdin=subprocess.DEVNULL)
-            log = os.path.join(folder, "doc.log")
+            log = place(folder, "doc.log")
             with open(log, encoding="utf-8", errors="replace") if os.path.exists(log) \
                     else io.StringIO() as fh:
                 return fh.read()
@@ -7685,7 +7801,7 @@ def case_latex_target(work):
             build()
         found = []
         for name, letter in (("early.tex", "a"), ("plain.tex", "b")):
-            with open(os.path.join(folder, name), encoding="utf-8") as fh:
+            with open(place(folder, name), encoding="utf-8") as fh:
                 text = fh.read()
             write(name, text.replace(terms(letter, 40), terms(letter, 50)))
             found.append("TextbookImprover fit: %s has changed since the fits were decided"
@@ -7700,36 +7816,36 @@ def case_latex_target(work):
          lambda: "Shapes" in one and "Circles" in two and "\\mainmatter" not in one
          and "\\begin{document}" not in one + two),
         ("the images are beside them, each with its alt text",
-         lambda: os.path.exists(os.path.join(out, "img", "square.png"))
+         lambda: os.path.exists(place(out, "img", "square.png"))
          and re.search(r"alt=\{A\s+gray\s+square\.\}", one)),
         ("and the SVG made PDF, with its alt text",
          lambda: skip(why_no_svg()) if why_no_svg()
-         else os.path.exists(os.path.join(out, "img", "circle.pdf"))
+         else os.path.exists(place(out, "img", "circle.pdf"))
          and re.search(r"alt=\{A\s+black\s+circle\.\}", two)
          and "includesvg" not in two),
         ("the run says what it wrote", lambda: "shapes.tex and 3 file(s)" in said),
         ("in AsciiDoc, italics close before a footnote, whose own italics then can't end them",
          lambda: re.search(r"__footnote:\[__Euler", read(work, "adoc", "two.adoc")
-                           if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")
+                           if os.path.exists(place(work, "adoc", "two.adoc")) else "")
          is not None),
         ("in AsciiDoc, a + in an image's name is percent-encoded, which the reader takes",
          lambda: "image:img/a%2Bb.png[" in (read(work, "adoc", "two.adoc")
-                                            if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")),
+                                            if os.path.exists(place(work, "adoc", "two.adoc")) else "")),
         ("in AsciiDoc, a bracket in a link's text is a character reference the reader takes",
          lambda: "[&#91;compare&#93;]" in (read(work, "adoc", "two.adoc")
-                                           if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")),
+                                           if os.path.exists(place(work, "adoc", "two.adoc")) else "")),
         ("in AsciiDoc, a table written as HTML inside another keeps its cells",
          lambda: "<td>zeta</td>" in (read(work, "adoc", "two.adoc")
-                                     if os.path.exists(os.path.join(work, "adoc", "two.adoc")) else "")),
+                                     if os.path.exists(place(work, "adoc", "two.adoc")) else "")),
         ("a figure holding only a table: its caption is the table's, not lost",
          lambda: "\\caption{The first rows of Pascal" in three
          and three.count("\\begin{longtable}") == 1),
         ("in AsciiDoc, a figure holding only a table gives the table its caption and id",
          lambda: re.search(r"\[\[pascal\]\]\n\.The first rows of Pascal",
                            read(work, "adoc", "three.adoc")
-                           if os.path.exists(os.path.join(work, "adoc", "three.adoc")) else "")
+                           if os.path.exists(place(work, "adoc", "three.adoc")) else "")
          is not None and "adoc,three,figure-table," in (read(work, "fidelity.csv")
-                         if os.path.exists(os.path.join(work, "fidelity.csv")) else "")),
+                         if os.path.exists(place(work, "fidelity.csv")) else "")),
         ("a figure in a figure, or in a div in one: one figure, one caption",
          lambda: three.count("\\begin{figure}") == 2
          and three.count("\\caption{A small example}") == 1
@@ -7947,28 +8063,29 @@ def case_documents(work):
     each a page in the order given, its large-type title the page's; the
     copy writes each, made to build with tagging; the PDF target builds a
     PDF of each."""
-    os.makedirs(os.path.join(work, "src"))
+    project(work)
+    os.makedirs(place(work, "src"))
     # Topic B reaches a file and an image from its own folder, src/, as its
     # author builds it there.
-    os.makedirs(os.path.join(work, "src", "shared"))
-    os.makedirs(os.path.join(work, "src", "img"))
-    png(os.path.join(work, "src", "img", "dot.png"), (0, 0, 0))
+    os.makedirs(place(work, "src", "shared"))
+    os.makedirs(place(work, "src", "img"))
+    png(place(work, "src", "img", "dot.png"), (0, 0, 0))
     for name, text in (("src/Topic A One.tex", TOPIC_A), ("src/Topic B Two.tex", TOPIC_B),
                        ("src/shared/note.tex", "A NOTE FROM ITS FOLDER.\n"),
                        ("Combined.tex", BINDER)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nsrc/img/dot.png,A black dot\n")
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.course\n  title: Course 101\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     stopped = convert(work)
     told = stopped.stdout + stopped.stderr
     pdf_why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
     pdf = not pdf_why
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("defaults:\n  latex:\n    main:\n      - src/Topic B Two.tex\n"
                  "      - src/Topic A One.tex\n"
                  "targets:\n  html:\n    format: html\n"
@@ -7978,17 +8095,17 @@ def case_documents(work):
     said = listed.stdout + listed.stderr
 
     def page(name):
-        path = os.path.join(work, "html", name)
+        path = place(work, "html", name)
         return read(work, "html", name) if os.path.exists(path) else ""
 
     def copy(name):
-        path = os.path.join(work, "tagged", "src", name)
+        path = place(work, "tagged", "src", name)
         return read(work, "tagged", "src", name) if os.path.exists(path) else ""
     a, b = page("Topic-A-One.html"), page("Topic-B-Two.html")
     sample = sample_text(work)
     tagged = copy("Topic A One.tex")
     # A pattern names them too, in sorted order.
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
                  "targets:\n  html:\n    format: html\n")
     pattern = convert(work)
@@ -7996,11 +8113,11 @@ def case_documents(work):
     # The documents grouped under one entry, and a Word target merging the
     # group: one file, opening at the group's Heading 1, each document a
     # Heading 2 titled as its page is, its title's \textrm and all.
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.course\n  title: Course 101\n"
                  "  contents:\n  - title: The Topics\n    items:\n    - Topic-A-One\n"
                  "    - Topic-B-Two\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
                  "targets:\n  docx:\n    format: docx\n    merge: groups\n")
     merged = convert(work)
@@ -8008,8 +8125,8 @@ def case_documents(work):
     # (the binder gone): latex.main says it's a book, and the cartridge
     # isn't taken for one to unpack.
     import zipfile
-    os.remove(os.path.join(work, "Combined.tex"))
-    with zipfile.ZipFile(os.path.join(work, "org.example.course.imscc"), "w") as z:
+    os.remove(place(work, "Combined.tex"))
+    with zipfile.ZipFile(place(work, "org.example.course.imscc"), "w") as z:
         z.writestr("imsmanifest.xml", '<?xml version="1.0"?><manifest identifier="m" '
                    'xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1"/>')
     rerun = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
@@ -8019,10 +8136,10 @@ def case_documents(work):
     # A page of the book's, as HTML, beside its masters (as that cartridge
     # unpacked halfway left FINC 308's): an earlier run's, not a source, so
     # the page is still the document's.
-    with open(os.path.join(work, "Topic-A-One.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "Topic-A-One.html"), "w", encoding="utf-8") as fh:
         fh.write("<html><head><title>Old</title></head><body><h1>Old</h1>"
                  "<p>AN OLD PAGE WRITTEN BESIDE THE BOOK.</p></body></html>")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
                  "targets:\n  html:\n    format: html\n")
     beside = convert(work)
@@ -8031,7 +8148,7 @@ def case_documents(work):
 
     def word_headings():
         import zipfile
-        path = os.path.join(work, "docx", "The-Topics.docx")
+        path = place(work, "docx", "The-Topics.docx")
         if not os.path.exists(path):
             return []
         with zipfile.ZipFile(path) as z:
@@ -8052,7 +8169,7 @@ def case_documents(work):
             return skip("no pikepdf to read the PDFs")
         titles = []
         for name in ("Topic-A-One.pdf", "Topic-B-Two.pdf"):
-            path = os.path.join(work, "pdf", name)
+            path = place(work, "pdf", name)
             if not os.path.exists(path):
                 return False
             with pikepdf.open(path) as found, found.open_metadata() as meta:
@@ -8065,7 +8182,7 @@ def case_documents(work):
             return skip(pdf_why)
         if not shutil.which("pdftotext"):
             return skip("no pdftotext to read the PDF")
-        path = os.path.join(work, "pdf", "Topic-A-One.pdf")
+        path = place(work, "pdf", "Topic-A-One.pdf")
         if not os.path.exists(path):
             return False
         return test(subprocess.run(["pdftotext", path, "-"], capture_output=True,
@@ -8099,7 +8216,7 @@ def case_documents(work):
             return skip("no veraPDF to check the PDFs")
         for name in ("Topic-A-One.pdf", "Topic-B-Two.pdf"):
             done = subprocess.run([verapdf, "-f", "ua2", "--format", "text",
-                                   os.path.join(work, "pdf", name)],
+                                   place(work, "pdf", name)],
                                   capture_output=True, text=True)
             if not done.stdout.strip().startswith("PASS"):
                 return False
@@ -8118,7 +8235,7 @@ def case_documents(work):
         ("a document below the book's directory reaches a file and an image from its "
          "own folder, as its author builds it there",
          lambda: "A NOTE FROM ITS FOLDER." in b and re.search(r'<img[^>]*alt="A black dot"', b)
-         and os.path.exists(os.path.join(work, "tagged", "src", "shared", "note.tex"))
+         and os.path.exists(place(work, "tagged", "src", "shared", "note.tex"))
          and "\\includegraphics[alt={A black dot},width=1cm]{img/dot}" in copy("Topic B Two.tex")),
         ("a pattern in latex.main names them in sorted order",
          lambda: pattern.returncode == 0
@@ -8348,7 +8465,7 @@ def case_pieces(work):
     # The sample's probe, each formula found by its mark: a macro whose
     # expansion breaks its paragraph doesn't shift the rest onto the wrong
     # macros.
-    probe_dir = os.path.join(work, "probe")
+    probe_dir = place(work, "probe")
     os.makedirs(probe_dir, exist_ok=True)
     probed = latexsource.probe(
         probe_dir, "\\documentclass{article}\n\\newcommand{\\bad}{a$\\par$b}\n"
@@ -8443,7 +8560,7 @@ def case_pieces(work):
             from pypdf import PdfReader
         except ImportError:
             return skip("no pypdf to read the figure")
-        source, dest = os.path.join(work, "heat.pdf"), os.path.join(work, "heat-embedded.pdf")
+        source, dest = place(work, "heat.pdf"), place(work, "heat-embedded.pdf")
         os.makedirs(work, exist_ok=True)
         raw = raster_pdf(source)
         if not latexbuild.embed_fonts(source, dest, "gs"):
@@ -8457,7 +8574,7 @@ def case_pieces(work):
         why = why_no_tex("no lualatex for the copies' builds", "lualatex")
         if why:
             return skip(why)
-        folder = os.path.join(work, "fancy")
+        folder = place(work, "fancy")
         os.makedirs(folder, exist_ok=True)
         texts = {"f.tex": "\\documentclass{book}\n\\usepackage{fancyhdr}\n"
                           "\\usepackage[explicit]{titlesec}\n\\pagestyle{fancy}\n"
@@ -8465,7 +8582,7 @@ def case_pieces(work):
                           "{\\thesection\\quad #1}{1em}{}\n\\begin{document}\n"
                           "\\chapter{One}\n\\section{A}\nText.\n\\end{document}\n"}
         texremediate.tag(texts, "f.tex", "en", True, ("ua-2",), None)
-        with open(os.path.join(folder, "f.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "f.tex"), "w", encoding="utf-8") as fh:
             fh.write(texts["f.tex"])
         done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                "f.tex"], cwd=folder, capture_output=True, text=True,
@@ -8505,7 +8622,7 @@ def case_pieces(work):
     epub_spec = importlib.util.spec_from_file_location("build_epub", os.path.join(BIN, "build-epub.py"))
     build_epub = importlib.util.module_from_spec(epub_spec)
     epub_spec.loader.exec_module(build_epub)
-    titled_epub = os.path.join(work, "titled.epub")
+    titled_epub = place(work, "titled.epub")
     with zipfile.ZipFile(titled_epub, "w") as z:
         z.writestr("mimetype", "application/epub+zip")
         z.writestr("EPUB/text/ch001.xhtml", "<html><head><title>ch001</title></head><body>"
@@ -8560,7 +8677,7 @@ def case_pieces(work):
         why = why_no_tex("no lualatex for the copies' builds", "lualatex")
         if why:
             return skip(why)
-        folder = os.path.join(work, "pagestyles")
+        folder = place(work, "pagestyles")
         os.makedirs(folder, exist_ok=True)
         texts = {"p.tex": "\\documentclass{book}\n\\usepackage[pagestyles]{titlesec}\n"
                           "\\settitlemarks{chapter,section}\n"
@@ -8568,7 +8685,7 @@ def case_pieces(work):
                           "\\pagestyle{main}\n\\begin{document}\n\\chapter{One}\nText.\n"
                           "\\end{document}\n"}
         texremediate.tag(texts, "p.tex", "en", True, ("ua-2",), None)
-        with open(os.path.join(folder, "p.tex"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "p.tex"), "w", encoding="utf-8") as fh:
             fh.write(texts["p.tex"])
         done = subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error",
                                "p.tex"], cwd=folder, capture_output=True, text=True,
@@ -9404,7 +9521,7 @@ def pdf_numbers(work, said):
     except ImportError:
         return skip("no pypdf to read the PDF")
     text = " ".join(" ".join((p.extract_text() or "").split()) for p in pypdf.PdfReader(
-        os.path.join(work, "pdf", "org.example.custom.pdf")).pages)
+        place(work, "pdf", "org.example.custom.pdf")).pages)
     # An eqnarray's numbers twice: beside its rows, and in the references to
     # them, which alone would hold them whatever LaTeX numbered the rows.
     return all(n in text for n in ("(2.1)", "(2.2)", "(2.3)", "(2.4a)", "(2.4b)", "(2.5)",
@@ -9429,7 +9546,7 @@ def page_layout_kept(work, said):
         return skip("no pypdf to read the PDF")
     import math
     found = []
-    for page in pypdf.PdfReader(os.path.join(work, "pdf", "org.example.custom.pdf")).pages:
+    for page in pypdf.PdfReader(place(work, "pdf", "org.example.custom.pdf")).pages:
         def visit(text, cm, tm, font, size):
             if "The spread" in text:
                 found.append((size * math.hypot(tm[0], tm[1]) * math.hypot(cm[0], cm[1]),
@@ -9444,25 +9561,26 @@ def case_customized(work):
     page per chapter, its images found and its constructs read; the sample
     suggesting its alt-text argument be passed on, and, adopted, the pages
     and the source target's copy carrying it; a stray brace named."""
+    project(work)
     for name, text in CUSTOM_FILES.items():
-        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        os.makedirs(place(work, os.path.dirname(name)), exist_ok=True)
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     for path, rgb in (("ch_one/figures/square/square.png", (200, 0, 0)),
                       ("ch_one/figures/panels/circle.png", (0, 0, 200)),
                       ("ch_one/figures/triangle/triangle.png", (0, 150, 0)),
                       ("ch_two/figures/star/star.png", (90, 90, 90)),
                       ("ch_two/figures/hexagon/hexagon.png", (120, 0, 120))):
-        os.makedirs(os.path.dirname(os.path.join(work, path)), exist_ok=True)
-        png(os.path.join(work, path), rgb)
+        os.makedirs(os.path.dirname(place(work, path)), exist_ok=True)
+        png(place(work, path), rgb)
     first = convert(work)
     first_said = first.stdout + first.stderr
     contents_sample = sample_text(work)
-    sample_path = os.path.join(work, "latex-conversion-macros-sample.tex")
+    sample_path = place(work, "latex-conversion-macros-sample.tex")
     sample = read(work, "latex-conversion-macros-sample.tex") \
         if os.path.exists(sample_path) else ""
     first_one = read(work, "html", "ch_one.html") \
-        if os.path.exists(os.path.join(work, "html", "ch_one.html")) else ""
+        if os.path.exists(place(work, "html", "ch_one.html")) else ""
     # The sample's definitions adopted, as a person would, a decision made
     # for the review's image, and a source target with tagging on.
     adopted, taking = [], False
@@ -9473,13 +9591,13 @@ def case_customized(work):
         elif taking:
             adopted.append(line[2:])
     adopted = "\n".join(adopted)
-    with open(os.path.join(work, "latex-conversion-macros.tex"), "w") as fh:
+    with open(place(work, "latex-conversion-macros.tex"), "w") as fh:
         fh.write(adopted + "\n")
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nch_one/figures/triangle/triangle.png,\"A triangle, from the sidecar\"\n")
     pdf_why = why_no_tex("no lualatex for the PDF", "lualatex")
     pdf = not pdf_why
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
                  + "  epub:\n    format: epub3\n  docx:\n    format: docx\n"
@@ -9496,34 +9614,34 @@ def case_customized(work):
         if pdf else None
     alone_said = alone.stdout + alone.stderr if alone else ""
     alone_tex = read(work, "pdf", "book.tex") \
-        if os.path.exists(os.path.join(work, "pdf", "book.tex")) else ""
+        if os.path.exists(place(work, "pdf", "book.tex")) else ""
 
     def page(name):
-        path = os.path.join(work, "html", name)
+        path = place(work, "html", name)
         return read(work, "html", name) if os.path.exists(path) else ""
     one, two = page("ch_one.html"), page("ch_two.html")
     copyright_page = page("copyright.html")
-    copy_path = os.path.join(work, "tagged", "ch_one", "TeX", "review.tex")
+    copy_path = place(work, "tagged", "ch_one", "TeX", "review.tex")
     review_copy = read(work, "tagged", "ch_one", "TeX", "review.tex") \
         if os.path.exists(copy_path) else ""
     main_copy = read(work, "tagged", "main.tex") \
-        if os.path.exists(os.path.join(work, "tagged", "main.tex")) else ""
+        if os.path.exists(place(work, "tagged", "main.tex")) else ""
     # A brace the book never closes, in a style file the preamble reads.
     broken = os.path.join(work, "..", os.path.basename(work) + "-brace")
-    os.makedirs(os.path.join(broken, "style"))
-    with open(os.path.join(broken, "main.tex"), "w") as fh:
+    os.makedirs(place(broken, "style"))
+    with open(place(broken, "main.tex"), "w") as fh:
         fh.write("\\documentclass{book}\n\\input{style/style}\n\\begin{document}\n"
                  "Text.\n\\end{document}\n")
-    with open(os.path.join(broken, "style", "style.tex"), "w") as fh:
+    with open(place(broken, "style", "style.tex"), "w") as fh:
         fh.write("\\newcommand{\\a}{A}\n{\n\\newcommand{\\b}{B}\n")
-    with open(os.path.join(broken, "conversion.yaml"), "w") as fh:
+    with open(place(broken, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     stopped = convert(broken)
     told = stopped.stdout + stopped.stderr
 
     def epub_links():
         import zipfile
-        path = os.path.join(work, "epub", "org.example.custom.epub")
+        path = place(work, "epub", "org.example.custom.epub")
         if not os.path.exists(path):
             return False
         with zipfile.ZipFile(path) as z:
@@ -9541,7 +9659,7 @@ def case_customized(work):
         document and toc.ncx alike, has its heading's formula as text, not
         its MathML or its TeX, and the package declares no MathML there."""
         import zipfile
-        path = os.path.join(work, "epub", "org.example.custom.epub")
+        path = place(work, "epub", "org.example.custom.epub")
         if not os.path.exists(path):
             return False
         with zipfile.ZipFile(path) as z:
@@ -9561,7 +9679,7 @@ def case_customized(work):
         """Each of the EPUB's chapter files is titled by its heading's text, a
         formula's as text, not its TeX (the appendix's title holds one)."""
         import zipfile
-        path = os.path.join(work, "epub", "org.example.custom.epub")
+        path = place(work, "epub", "org.example.custom.epub")
         if not os.path.exists(path):
             return False
         with zipfile.ZipFile(path) as z:
@@ -9579,7 +9697,7 @@ def case_customized(work):
         ("chapters \\include-d by the book's own macro are pages, each with its review, "
          "and a file of definitions \\include-d in the body is none",
          lambda: "The review of chapter one." in one and "Review two" in two
-         and not os.path.exists(os.path.join(work, "html", "headers.html"))
+         and not os.path.exists(place(work, "html", "headers.html"))
          and "have nothing to read" in said and "headers" in said),
         ("an image behind a macro whose file is \\chapterfolder/figures/#3/#3, the folder "
          "set at each chapter's start, or made of two arguments, is found",
@@ -9608,7 +9726,7 @@ def case_customized(work):
              and "equal length. Its center filled" in row.get("CurrentAlt", "")
              for row in rows) and all(re.search(r"\.(png|jpe?g|svg|pdf)$", row.get("Image") or "")
                                       for row in rows))(
-             list(csv.DictReader(open(os.path.join(work, "image-alt-missing.csv"),
+             list(csv.DictReader(open(place(work, "image-alt-missing.csv"),
                                       encoding="utf-8-sig", newline=""))))),
         ("and the source target's copy writes a decision in the argument the adopted "
          "definition passes on, and the definitions after the preamble",
@@ -9655,11 +9773,11 @@ def case_customized(work):
          and re.search(r"<h1[^>]*>Copyright</h1>", copyright_page)
          and 'copyright as "Copyright"' in said),
         ("a LICENSE.md beside a LaTeX book isn't a page, and a comment in a package list "
-         "isn't a package", lambda: not os.path.exists(os.path.join(work, "html", "LICENSE.html"))
+         "isn't a package", lambda: not os.path.exists(place(work, "html", "LICENSE.html"))
          and "%tocloft" not in said),
         ("the PDF built from the pages takes an alt text of two paragraphs, and a formula "
          "in a color the book defines",
-         lambda: os.path.exists(os.path.join(work, "pdf", "org.example.custom.pdf"))
+         lambda: os.path.exists(place(work, "pdf", "org.example.custom.pdf"))
          if pdf else skip(pdf_why)),
         ("and the type size and margins the book's preamble gives, not Pandoc's 10pt in "
          "the book class's margins", lambda: page_layout_kept(work, said)
@@ -9797,7 +9915,7 @@ def case_customized(work):
         ("and the PDF from the pages numbers them as the pages do, its references to them "
          "found", lambda: pdf_numbers(work, said) if pdf else skip(pdf_why)),
         ("and the Word file sets each as a display formula of its own, its number after it",
-         lambda: word_formulas(os.path.join(work, "docx", "ch_two.docx"))),
+         lambda: word_formulas(place(work, "docx", "ch_two.docx"))),
         ("a chapter's title in a framed box is the page's H1 and title, out of the box, "
          "the box's text after it",
          lambda: "<title>Second chapter</title>" in two
@@ -9919,33 +10037,33 @@ def case_unsupported(work):
     if why:
         return [("a book set with packages tagging can't take builds tagged",
                  lambda: skip(why))]
-    os.makedirs(work)
-    with open(os.path.join(work, "book.tex"), "w", encoding="utf-8") as fh:
+    project(work)
+    with open(place(work, "book.tex"), "w", encoding="utf-8") as fh:
         fh.write(UNSUPPORTED_MASTER)
-    with open(os.path.join(work, "shapestyle.sty"), "w", encoding="utf-8") as fh:
+    with open(place(work, "shapestyle.sty"), "w", encoding="utf-8") as fh:
         fh.write(UNSUPPORTED_STYLE)
-    pdf(os.path.join(work, "plot.pdf"), word="Plot")
+    pdf(place(work, "plot.pdf"), word="Plot")
     # A figure in a folder beside the book, which it links to.
     shared = os.path.abspath(os.path.join(work, "..", os.path.basename(work) + "-shared"))
     os.makedirs(shared)
-    pdf(os.path.join(shared, "linked.pdf"), word="Link")
-    os.symlink(shared, os.path.join(work, "shared"))
-    with open(os.path.join(shared, "linked.pdf"), "rb") as fh:
+    pdf(place(shared, "linked.pdf"), word="Link")
+    os.symlink(shared, place(work, "shared"))
+    with open(place(shared, "linked.pdf"), "rb") as fh:
         linked_original = fh.read()
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nrendered/plot.svg,A blue bar labeled Plot\n"
                  "rendered/shared/linked.svg,A blue bar labeled Link\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  tagged:\n    format: source\n    tagging: \"on\"\n"
                  "  pdf:\n    format: pdf\n")
-    with open(os.path.join(work, "plot.pdf"), "rb") as fh:
+    with open(place(work, "plot.pdf"), "rb") as fh:
         original = fh.read()
     result = convert(work)
     said = result.stdout + result.stderr
-    built = os.path.join(work, "pdf", "book.pdf")
+    built = place(work, "pdf", "book.pdf")
     copy = read(work, "tagged", "book.tex") \
-        if os.path.exists(os.path.join(work, "tagged", "book.tex")) else ""
+        if os.path.exists(place(work, "tagged", "book.tex")) else ""
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import latexbuild
 
@@ -10006,13 +10124,13 @@ def case_unsupported(work):
             import pypdf  # noqa: F401
         except ImportError:
             return skip("no pypdf to read the figure's fonts")
-        fixed = os.path.join(work, "tagged", "plot.pdf")
-        fixed_linked = os.path.join(work, "tagged", "shared", "linked.pdf")
-        with open(os.path.join(work, "plot.pdf"), "rb") as fh:
+        fixed = place(work, "tagged", "plot.pdf")
+        fixed_linked = place(work, "tagged", "shared", "linked.pdf")
+        with open(place(work, "plot.pdf"), "rb") as fh:
             unchanged = fh.read() == original
-        with open(os.path.join(shared, "linked.pdf"), "rb") as fh:
+        with open(place(shared, "linked.pdf"), "rb") as fh:
             unchanged = unchanged and fh.read() == linked_original
-        return latexbuild.unembedded_fonts(os.path.join(work, "plot.pdf")) == {"Helvetica"} \
+        return latexbuild.unembedded_fonts(place(work, "plot.pdf")) == {"Helvetica"} \
             and os.path.exists(fixed) and latexbuild.unembedded_fonts(fixed) == set() \
             and latexbuild.unembedded_fonts(fixed_linked) == set() and unchanged \
             and "2 of the book's PDF figures written in the copy with their fonts embedded" \
@@ -10142,20 +10260,21 @@ def case_parts(work):
     page of its own, as is a chapter it sets itself, its chapters grouped
     under it in the contents; and every reference given LaTeX's number,
     where the reader numbers its own way, with the captions it drops."""
+    project(work)
     for name, text in PARTS_FILES.items():
-        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        os.makedirs(place(work, os.path.dirname(name)), exist_ok=True)
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    png(os.path.join(work, "sq.png"), (90, 90, 90))
+    png(place(work, "sq.png"), (90, 90, 90))
     result = convert(work)
     said = result.stdout + result.stderr
     import yaml
     sample = yaml.safe_load(read(work, "project-sample.yaml")) \
-        if os.path.exists(os.path.join(work, "project-sample.yaml")) else {}
+        if os.path.exists(place(work, "project-sample.yaml")) else {}
     contents = ((sample or {}).get("project") or {}).get("contents")
 
     def page(name):
-        path = os.path.join(work, "html", name + ".html")
+        path = place(work, "html", name + ".html")
         return read(work, "html", name + ".html") if os.path.exists(path) else ""
 
     def text(name):
@@ -10171,12 +10290,12 @@ def case_parts(work):
         """With the sample's contents adopted, the EPUB's contents hold each
         part's chapters under it, the part's page opening it once."""
         import zipfile
-        with open(os.path.join(work, "project.yaml"), "w") as fh:
+        with open(place(work, "project.yaml"), "w") as fh:
             yaml.safe_dump({"project": sample["project"]}, fh)
-        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  epub:\n    format: epub3\n")
         convert(work)
-        path = os.path.join(work, "epub", "book.epub")
+        path = place(work, "epub", "book.epub")
         if not os.path.exists(path):
             return False
         with zipfile.ZipFile(path) as z:
@@ -10418,18 +10537,18 @@ def case_bibliography_place(work):
         "one.tex": "\\chapter{One}\nAs Knuth says \\cite{knuth}.\n",
         "appa.tex": "\\chapter{Answers}\nThe answers.\n",
     }
-    os.makedirs(work)
+    project(work)
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     convert(work)
     import yaml
     sample = yaml.safe_load(read(work, "project-sample.yaml")) \
-        if os.path.exists(os.path.join(work, "project-sample.yaml")) else {}
+        if os.path.exists(place(work, "project-sample.yaml")) else {}
     contents = ((sample or {}).get("project") or {}).get("contents") or []
 
     def numbered():
-        with open(os.path.join(work, "project.yaml"), "w") as fh:
+        with open(place(work, "project.yaml"), "w") as fh:
             yaml.safe_dump({"project": dict(sample["project"], numbering=True)}, fh)
         convert(work)
         found = re.search(r"<title>(.*?)</title>", read(work, "html", contents[-1]["page"] + ".html")) \
@@ -10451,20 +10570,20 @@ def case_bibliography(work):
     biblatex's, made by Pandoc's citeproc; and biblatex's full citations."""
     said = {}
     for name, text in BIB_FILES.items():
-        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        os.makedirs(place(work, os.path.dirname(name)), exist_ok=True)
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     for book in ("plain", "natbib", "biblatex", "own", "fullcite", "natround", "natnum",
                  "harvard", "macro", "sub", "citepkg", "nodb", "natsuper", "natmiss", "natay",
                  "citenosort", "citenocomp", "authyear", "dupkey"):
-        with open(os.path.join(work, book, "conversion.yaml"), "w") as fh:
+        with open(place(work, book, "conversion.yaml"), "w") as fh:
             fh.write(("defaults:\n  latex:\n    main: src/topic.tex\n" if book == "sub"
                       else "") + "targets:\n  html:\n    format: html\n")
-        done = convert(os.path.join(work, book))
+        done = convert(place(work, book))
         said[book] = done.stdout + done.stderr
 
     def page(book, name):
-        path = os.path.join(work, book, "html", name + ".html")
+        path = place(work, book, "html", name + ".html")
         return read(work, book, "html", name + ".html") if os.path.exists(path) else ""
 
     def flat(book, name):
@@ -10922,9 +11041,9 @@ def case_cited_pdf(work):
     why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
     if why:
         return [("a biblatex book's PDF from its pages is built", lambda: skip(why))]
-    book = os.path.join(work, "cited")
-    os.makedirs(os.path.join(book, "cfg"))
-    png(os.path.join(book, "sq.png"), (128, 128, 128))
+    book = place(work, "cited")
+    os.makedirs(place(book, "cfg"))
+    png(place(book, "sq.png"), (128, 128, 128))
     for name, text in (("book.tex", CITED_BOOK), ("refs.bib", NAT_BIB),
                        ("image-alt.csv", "Image,Alt\nsq.png,A gray square\n"),
                        (os.path.join("cfg", "meta.md"), "---\nlof: true\n---\n"),
@@ -10932,10 +11051,10 @@ def case_cited_pdf(work):
                         "org.example.cited\n  language: en-US\n"),
                        ("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n    pdf:\n"
                         "      from: pages\n      metadata: cfg/meta.md\n")):
-        with open(os.path.join(book, name), "w", encoding="utf-8") as fh:
+        with open(place(book, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    convert(book)
-    path = os.path.join(book, "pdf", "org.example.cited.pdf")
+    convert(book, top=("cfg",))
+    path = place(book, "pdf", "org.example.cited.pdf")
     found = {"entries": [], "links": [], "text": ""}
     if os.path.exists(path):
         import pikepdf
@@ -10987,20 +11106,20 @@ def case_floats(work):
     numbers; and a page's title with no one heading to be it."""
     said = {}
     for name, text in FLOAT_FILES.items():
-        os.makedirs(os.path.join(work, os.path.dirname(name)), exist_ok=True)
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        os.makedirs(place(work, os.path.dirname(name)), exist_ok=True)
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     for book in ("floats", "review", "floatrow"):
-        png(os.path.join(work, book, "sq.png"), (90, 90, 90))
+        png(place(work, book, "sq.png"), (90, 90, 90))
     for book in ("floats", "memoir", "amsbook", "article", "notes", "untitled", "review",
                  "floatrow", "koma", "amsfront", "titled", "escaped"):
-        with open(os.path.join(work, book, "conversion.yaml"), "w") as fh:
+        with open(place(work, book, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-        done = convert(os.path.join(work, book))
+        done = convert(place(work, book))
         said[book] = done.stdout + done.stderr
 
     def page(book, name):
-        path = os.path.join(work, book, "html", name + ".html")
+        path = place(work, book, "html", name + ".html")
         return read(work, book, "html", name + ".html") if os.path.exists(path) else ""
 
     def text(book, name):
@@ -11085,22 +11204,23 @@ def case_no_contents(work):
     project.contents generates, as it does the template's, in the PDF's
     own LaTeX (a latex target) as in the PDF; without it the page is
     there, where contents puts it."""
-    os.makedirs(work)
+    project(work)
     for stem, text in (("one", "# One\n\nText.\n"), ("two", "# Two\n\nMore.\n"),
                        ("meta", "---\ntoc: false\n---\n")):
-        with open(os.path.join(work, stem + ".md"), "w", encoding="utf-8") as fh:
+        with open(named(work, "meta.md") if stem == "meta" else place(work, stem + ".md"),
+                  "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: shapes\n  title: Shapes\n  language: en\n"
                  "  contents:\n  - generate: toc\n    name: Contents\n  - one\n  - two\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  latex:\n    format: latex\n    pdf:\n      metadata: meta.md\n"
                  "  plain:\n    format: latex\n")
     result = convert(work)
     said = result.stdout + result.stderr
 
     def master(target):
-        path = os.path.join(work, target, "shapes.tex")
+        path = place(work, target, "shapes.tex")
         return read(work, target, "shapes.tex") if os.path.exists(path) else ""
     return [
         ("toc: false leaves out the contents page project.contents generates, and the run "
@@ -11189,7 +11309,7 @@ def run_cases(cases, keep):
     failed = 0
     try:
         for label, case in cases:
-            directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
+            directory = place(work, re.sub(r"[^\w-]+", "-", label))
             del RUNS[:]
             before = failed
             try:

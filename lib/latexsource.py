@@ -5226,7 +5226,7 @@ def resolve_graphic(base, name, dirs, counter=None):
                 if exact and os.path.isfile(P(base).source(candidate)):
                     return candidate
                 if not exact:
-                    found = case_match(base, candidate)
+                    found = case_match(P(base).sources(), candidate)
                     if found:
                         if counter is not None:
                             counter["graphics_case"] = counter.get("graphics_case", 0) + 1
