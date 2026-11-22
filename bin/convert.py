@@ -616,7 +616,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             + (", ..." if len(found.in_place) > 4 else "") + "). To save one as PowerPoint "
             "again, delete its PowerPoint file.")
         for name, pptx in found.in_place:
-            original, saved = P(base).source(name), P(base).media(pptx)
+            original, saved = P(base).source(name), P(base).source(pptx)
             if os.path.getmtime(original) > os.path.getmtime(saved):
                 say(f"WARNING: {name} is newer than {pptx}, which is read in its place: if {name} "
                     f"has changes {pptx} hasn't, delete {pptx} and run again, which saves it anew.")
@@ -667,7 +667,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
     saved = []
     for name, target in to_save:
         try:
-            decksave.save(program, P(base).source(name), P(base).media(target))
+            decksave.save(program, P(base).source(name), P(base).source(target))
         except decksave.SaveError as exc:
             say(f"ERROR: {name} couldn't be saved as PowerPoint: {exc}.")
             SAVE_FAILED += 1
@@ -679,7 +679,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             "original isn't read again. Correct the PowerPoint file, or the sidecars, not the "
             "original; to save one again, delete its PowerPoint file.")
     for name, target in saved:
-        objects = decksave.objects_without_pictures(P(base).media(target))
+        objects = decksave.objects_without_pictures(P(base).source(target))
         if objects:
             say(f"NOTE: LibreOffice gave {objects} embedded object(s) in {target} no picture, "
                 "so they're left out, as the run says of each"
@@ -1035,10 +1035,20 @@ def run_unpacker(base, part, upstream, into=None):
     if unpacker == "archive":
         sources = os.path.join(project, "src", part) if into else P(base).sources(part)
         os.makedirs(sources, exist_ok=True)
-        (extract_tar if real.lower().endswith(TAR_ENDINGS) else extract_zip)(real, sources)
+        notes = (extract_tar if real.lower().endswith(TAR_ENDINGS) else extract_zip)(real, sources)
         if not into:
             unpacking.write_record(base, part, unpacker, options, name)
-        return
+            if notes:
+                # What the archive held that wasn't written (a link, a path
+                # leading out of the folder), where a person will see it.
+                report = P(base).report("unpack-report.csv", part)
+                os.makedirs(os.path.dirname(report), exist_ok=True)
+                with open(report, "w", newline="", encoding=sidecars.CSV_ENCODING) as fh:
+                    writer = sidecars.csv_writer(fh)
+                    writer.writerow(["Where", "Check", "Detail"])
+                    writer.writerows(notes)
+                return report
+        return None
     command = [sys.executable, os.path.join(HERE, UNPACKER_SCRIPTS[unpacker]), real,
                "-o", project, "--part", part, "--from-run"] + options
     if unpacker == "cnx":
@@ -1050,6 +1060,7 @@ def run_unpacker(base, part, upstream, into=None):
         die(f"Unpacking {name} for the part {part} failed:\n"
             + (done.stderr.strip() or done.stdout.strip()) + "\nNothing was converted.")
     pass_on(done)
+    return None
 
 
 def unpack_upstream(base, part, check_only=False, status=False):
@@ -1074,9 +1085,11 @@ def unpack_upstream(base, part, check_only=False, status=False):
         if check_only or status:
             say(f"{where} is empty: {name} would be unpacked into it.")
             return
-        run_unpacker(base, part, upstream)
+        report = run_unpacker(base, part, upstream)
         count = len(unpacking.hashes(sources))
-        say(f"{name} unpacked into {where} ({count} file(s)), which was empty.")
+        say(f"{name} unpacked into {where} ({count} file(s)), which was empty."
+            + (f" {report} lists what it held that wasn't written."
+               if report else ""))
         return
     record = unpacking.read_record(base, part)
     if record is None:

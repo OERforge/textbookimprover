@@ -78,7 +78,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
+sys.path.insert(0, HERE)
 import deckrun  # noqa: E402
+import laidout  # noqa: E402
 import pptxcheck  # noqa: E402
 import pptxfonts  # noqa: E402
 import pptxorder  # noqa: E402
@@ -3059,14 +3061,14 @@ def parts_deck(path):
 
 
 def case_crops(work):
-    path = parts_deck(os.path.join(work, "parts.pptx"))
+    path = parts_deck(place(work, "parts.pptx"))
     d = pptxparse.read(path)
     crops = [[s.crop for s in slide.shapes if s.image] for slide in d.slides]
     filled = rect(5, "Filled", SPOT3).replace(
         '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
         '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom><a:blipFill><a:blip r:embed="rId2"/>'
         '<a:srcRect t="10000" b="20000"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>')
-    odd = pptxparse.read(deck(os.path.join(work, "odd.pptx"), [{"shapes": [
+    odd = pptxparse.read(deck(place(work, "odd.pptx"), [{"shapes": [
         title(2, "Odd"), cropped(3, "rId2", SPOT, ("25.5%", "-10000", "0", "125000")),
         pic(4, "rId2", SPOT2), filled, cropped(6, "rId2", SPOT4, (None, "60000", None, "60000"))],
         "images": {"rId2": RED}}]))
@@ -3091,7 +3093,7 @@ def case_crops(work):
             ("slide 1, Picture 6", "pptx-object-no-alt"),
             ("slide 2, Picture 3", "pptx-alt-same-for-crops"),
             ("slide 2, Picture 6", "pptx-object-no-alt")], found
-    titled = pptxparse.read(deck(os.path.join(work, "titled.pptx"), [
+    titled = pptxparse.read(deck(place(work, "titled.pptx"), [
         {"shapes": [title(2, "A"), cropped(3, "rId2", SPOT, LEFT, "Icons | Freepik")],
          "images": {"rId2": PARTS}},
         {"shapes": [title(2, "B"), cropped(3, "rId2", SPOT, RIGHT, "Icons | Freepik")],
@@ -3110,15 +3112,15 @@ def case_crops(work):
                   ("slide 2, Picture 3", "pptx-alt-page-title"),
                   ("slide 4, Picture 3", "pptx-alt-same-for-crops"),
                   ("slide 5, Picture 3", "pptx-alt-same-for-crops")], found
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
-    parts_deck(os.path.join(folder, "parts.pptx"))
-    deck(os.path.join(folder, "logo.pptx"), [
+    folder = place(work, "decks")
+    project(folder)
+    parts_deck(place(folder, "parts.pptx"))
+    deck(place(folder, "logo.pptx"), [
         {"shapes": [title(2, "Logo"), cropped(3, "rId2", SPOT, LEFT),
                     pic(4, "rId3", SPOT2, "Marketing Mix Explained | Quizlet")],
          "images": {"rId2": BLUE, "rId3": WEB}}], logo=True)
     run = convert(folder, "--check-only")
-    alt = {r[0]: r for r in rows_of(os.path.join(folder, "image-alt-missing.csv"))}
+    alt = {r[0]: r for r in rows_of(place(folder, "image-alt-missing.csv"))}
     parts_key, bare_key = (rem.image_key(hashlib.sha256(data).hexdigest()) + ".png"
                            for data in (PARTS, BARE))
     blue_key, web_key = (rem.image_key(hashlib.sha256(data).hexdigest()) + ".png"
@@ -3134,14 +3136,15 @@ def case_crops(work):
             "Two icons"] \
         and alt["parts/slide-257/shape-6"][2:5] == [
             "parts.pptx slide 2", "missing (picture)" + crop_reason % bare_key, ""] \
-        and all(os.path.isfile(os.path.join(folder, k)) for k in (parts_key, bare_key)) \
+        and all(os.path.isfile(laidout.projectpaths.of(folder).report_picture(k))
+                for k in (parts_key, bare_key)) \
         and "has a row of its own, keyed on its shape" in run.stderr, (sorted(alt), run.stderr[-600:])
     yield "a picture with a copy on a layout keeps its one row, whose key can name that copy", \
         alt.get(blue_key, [""] * 5)[2] == "logo.pptx slide 1; logo.pptx layout or master", alt.get(blue_key)
     yield "a page's title copied as alt text has a row, which says so", \
         alt.get(web_key, [""] * 5)[3] == "a web page's title", alt.get(web_key)
     alike_key = rem.image_key(hashlib.sha256(ALIKE).hexdigest()) + ".png"
-    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Image", "Alt"], [parts_key, "Two icons, described once"],
                                   [alike_key, "A dot, described once"],
                                   [bare_key, "[decorative]"]])
@@ -3152,22 +3155,22 @@ def case_crops(work):
         "note; one for copies cropped alike, or decorative, isn't", \
         len(said) == 1 and said[0].startswith("NOTE: 1 row(s) of image-alt.csv give one alt text") \
         and parts_key[:-4] + ": parts.pptx slide 1, parts.pptx slide 2" in said[0], noted.stderr[-800:]
-    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Image", "Alt"], [parts_key, "Two icons, described once"],
                                   ["parts/slide-256/shape-3", "The left icon"]])
     one = convert(folder, "--check-only")
     yield "nor one that gives one alt text to the only copy no row of its own describes", \
         not any(l.startswith("NOTE:") and "cropped" in l for l in one.stderr.splitlines()), \
         one.stderr[-600:]
-    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Image", "Alt"], [parts_key, "Two icons, described once"],
                                   ["parts/slide-256/shape-3", "The left icon"],
                                   ["parts/slide-257/shape-3", "The right icon"],
                                   [bare_key, "[decorative]"], [blue_key, "[decorative]"],
                                   [web_key, "A diagram of the marketing mix"]])
     done = convert(folder)
-    copy = pptxparse.read(os.path.join(folder, "remediated", "parts.pptx"))
-    left = sorted({r[1] for r in rows_of(os.path.join(folder, "output-check.csv"))})
+    copy = pptxparse.read(place(folder, "remediated", "parts.pptx"))
+    left = sorted({r[1] for r in rows_of(place(folder, "output-check.csv"))})
     yield "rows keyed on each copy's shape give each its own alt text, over the picture's row, " \
         "and the copy's check finds nothing left of it", done.returncode == 0 \
         and [s.descr for slide in copy.slides for s in slide.shapes if s.id == "3"] == [
@@ -3288,7 +3291,7 @@ UP, DOWN, CAMERA, CAMERA2 = png(1, 2, 3), png(4, 5, 6), png(7, 8, 9), png(11, 12
 
 
 def case_shared_alt(work):
-    path = deck(os.path.join(work, "alike.pptx"), [
+    path = deck(place(work, "alike.pptx"), [
         {"shapes": [title(2, "One"), pic(3, "rId2", SPOT, "A rising line"),
                     pic(4, "rId3", SPOT2, "A rising line.")],
          "images": {"rId2": UP, "rId3": DOWN}},
@@ -3316,11 +3319,11 @@ def case_shared_alt(work):
              "a camera's or tool's name for a file: IMG_2041"),
             ("slide 4, Picture 4", "pptx-alt-placeholder",
              "a camera's or tool's name for a file: IMG_2041")], found
-    folder = os.path.join(work, "alike")
-    os.makedirs(folder)
-    shutil.copy(path, folder)
+    folder = place(work, "alike")
+    project(folder)
+    shutil.copy(path, place(folder, "alike.pptx"))
     run = convert(folder, "--check-only")
-    alt = {r[0]: r for r in rows_of(os.path.join(folder, "image-alt-missing.csv"))}
+    alt = {r[0]: r for r in rows_of(place(folder, "image-alt-missing.csv"))}
     up, down, green, camera, camera2 = (rem.image_key(hashlib.sha256(data).hexdigest()) + ".png"
                                         for data in (UP, DOWN, GREEN, CAMERA, CAMERA2))
     yield "each picture has a row that says why, one for every copy of it", \
@@ -3329,18 +3332,18 @@ def case_shared_alt(work):
                              "shared with 1 other picture"] \
         and alt[down][3] == "shared with 1 other picture" \
         and alt[green][3] == "a credit or a source", (sorted(alt.values()), run.stderr[-400:])
-    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Image", "Alt"], [down, "A falling line"]])
     again = convert(folder, "--check-only")
-    left = sorted(r[0] for r in rows_of(os.path.join(folder, "image-alt-missing.csv")))
+    left = sorted(r[0] for r in rows_of(place(folder, "image-alt-missing.csv")))
     yield "a row describing one of them leaves the other's alt text its own, so it has no row", \
         again.returncode == 0 and left == sorted([green, camera, camera2]), \
         (left, again.stderr[-400:])
-    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Image", "Alt"], [down, "A falling line"],
                                   [camera, "A rising line"]])
     third = convert(folder, "--check-only")
-    rows = {r[0]: r for r in rows_of(os.path.join(folder, "image-alt-missing.csv"))}
+    rows = {r[0]: r for r in rows_of(place(folder, "image-alt-missing.csv"))}
     yield "and a row giving a picture whose own alt text said nothing another's alt text is " \
         "compared as given", third.returncode == 0 and sorted(rows) == sorted([up, green, camera2]) \
         and rows[up][3] == "shared with 1 other picture", (sorted(rows.values()), third.stderr[-400:])
@@ -3477,7 +3480,58 @@ def pandoc_ok():
     return True
 
 
+SETTINGS = ("project.yaml", "conversion.yaml", "packaging.yaml")
+REPORTS = ("-new.csv", "-missing.csv", "-report.csv", "-check.csv", "-repaired.csv")
+SOURCES = (".pptx", ".ppt", ".odp", ".key", ".md", ".docx", ".png", ".jpg", ".txt")
+
+
+def project(folder, part="slides"):
+    """The folder made a project laid out with src/, its decks to go in
+    the part's sources."""
+    laidout.project(folder, part)
+    return folder
+
+
+def upstream(folder, name, settings=""):
+    """A project's upstream/ made, and its settings naming a file there
+    as what its decks are unpacked from."""
+    os.makedirs(os.path.join(folder, "upstream"))
+    with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.unpacked\n  title: Unpacked\n"
+                 "  parts:\n    slides:\n      kind: slides\n      from: upstream/%s\n%s"
+                 % (name, settings))
+
+
+def place(folder, *names):
+    """Where a project keeps a file (project() makes one): its settings
+    at its top, a sidecar and a report with its part's, a deck among the
+    part's sources, and anything else a target's folder or a file in
+    one. In any other folder, the names joined to it."""
+    if not laidout.projectpaths.is_tree(folder):
+        return os.path.join(folder, *names)
+    paths = laidout.projectpaths.of(folder)
+    first = names[0]
+    if len(names) == 1:
+        if first in SETTINGS:
+            return paths.top(first)
+        if first.endswith(REPORTS):
+            # Asking makes the reports' folder, and a run takes only an
+            # output/ it made: before a first run, the empty folders go.
+            fresh = not os.path.isdir(os.path.join(folder, "output"))
+            path = paths.report(first)
+            if fresh:
+                os.removedirs(os.path.dirname(path))
+            return path
+        if first.endswith(".csv"):
+            return paths.sidecar(first)
+        if first.endswith(SOURCES):
+            return paths.source(first)
+        return paths.target_dir(first)
+    return paths.target_file(first, os.path.join(*names[1:]))
+
+
 def convert(where, *flags):
+    assert laidout.projectpaths.is_tree(where), where + " isn't laid out as a project"
     return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
                           cwd=where, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
@@ -3490,36 +3544,36 @@ def rows_of(path):
 
 
 def case_convert(work):
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
-    messy_deck(os.path.join(folder, "messy.pptx"))
-    clean_deck(os.path.join(folder, "clean.pptx"))
-    deck(os.path.join(folder, "numbers.pptx"), [
+    folder = place(work, "decks")
+    project(folder)
+    messy_deck(place(folder, "messy.pptx"))
+    clean_deck(place(folder, "clean.pptx"))
+    deck(place(folder, "numbers.pptx"), [
         {"shapes": [title(2, "Growth"), table(4, [["Year", "GDP"], ["2020", "1.0"], ["2021", "1.1"]],
                                               (457200, 1600200, 6000000, 1200000))]}])
-    with open(os.path.join(folder, "README.md"), "w") as fh:
+    with open(place(folder, "README.md"), "w") as fh:
         fh.write("# About these slides\n")
     first = convert(folder, "--check-only")
-    alt = rows_of(os.path.join(folder, "image-alt-missing.csv"))
+    alt = rows_of(place(folder, "image-alt-missing.csv"))
     yield "--check-only on a folder of decks: the reports, and no copies", \
-        first.returncode == 0 and alt and not os.path.exists(os.path.join(folder, "remediated")) \
-        and os.path.exists(os.path.join(folder, "slides-check.csv")), first.stderr[-600:]
+        first.returncode == 0 and alt and not os.path.exists(place(folder, "remediated")) \
+        and os.path.exists(place(folder, "slides-check.csv")), first.stderr[-600:]
     second = convert(folder)
     yield "a folder of decks alone is slides: the implied target writes a copy of each", \
-        second.returncode == 0 and sorted(os.listdir(os.path.join(folder, "remediated"))) == \
+        second.returncode == 0 and sorted(os.listdir(place(folder, "remediated"))) == \
         ["clean.pptx", "messy.pptx", "numbers.pptx"] and "Output check: 3 deck(s)" in second.stderr, \
         second.stderr[-800:]
     keys = [r[0] for r in alt]
     picture = next(k for k in keys if k.startswith("media/"))
     yield "a picture's row is keyed on its content, and its image is where the key says", \
         re.fullmatch(r"media/[0-9a-f]{16}\.png", picture) is not None \
-        and os.path.isfile(os.path.join(folder, picture)), keys
+        and os.path.isfile(laidout.projectpaths.of(folder).report_picture(picture)), keys
     yield "an object's row is keyed on its deck, slide, and shape", \
         "messy/slide-257/shape-5" in keys and "messy/slide-260/shape-6" in keys, keys
-    tables = rows_of(os.path.join(folder, "table-headers-new.csv"))
-    titles = rows_of(os.path.join(folder, "slide-titles-new.csv"))
+    tables = rows_of(place(folder, "table-headers-new.csv"))
+    titles = rows_of(place(folder, "slide-titles-new.csv"))
     by_source = {r[5]: r for r in tables}
-    merged = deckrun.census_guess(pptxparse.read(os.path.join(folder, "messy.pptx"))
+    merged = deckrun.census_guess(pptxparse.read(place(folder, "messy.pptx"))
                                   .slides[2].shapes[1].table)
     yield "a table with no header row gets a row with the census's guess, drafted by TI", \
         len(tables) == 2 and by_source["numbers.pptx slide 1"][1] in ("first-row", "both") \
@@ -3533,11 +3587,11 @@ def case_convert(work):
             ["messy/slide-256", "", ""], ["messy/slide-257", "", ""],
             ["messy/slide-259", "Costs (2)", "TI"], ["messy/slide-262", "Words (2)", "TI"]] \
         and titles[2][2] == "messy.pptx slide 4, titled as slide 3 is", titles
-    orders = rows_of(os.path.join(folder, "reading-order-new.csv"))
+    orders = rows_of(place(folder, "reading-order-new.csv"))
     yield "a slide read out of its layout's order gets a row with an order drafted", \
         [r[:2] for r in orders] == [["messy/slide-259", "2 4"]] and orders[0][5] == "TI", orders
     # Decide everything, adopting the reports' rows as a person would.
-    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(deckrun.ALT_COLUMNS)
         for i, row in enumerate(alt):
@@ -3546,21 +3600,21 @@ def case_convert(work):
                              "Described, number %d" % i] + row[2:])
     # The census's row adopted as it stands, a person's value where it has
     # none, as TI's draft and a person's own.
-    with open(os.path.join(folder, "table-headers.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "table-headers.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([deckrun.TABLE_COLUMNS] + [
             [r[0], r[1] or "first-row"] + r[2:] for r in tables])
-    with open(os.path.join(folder, "slide-titles.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "slide-titles.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([deckrun.TITLE_COLUMNS] + [[r[0], r[1] or "Slide %d" % i] + r[2:]
                                                             for i, r in enumerate(titles, 1)])
-    with open(os.path.join(folder, "reading-order.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "reading-order.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([deckrun.ORDER_COLUMNS] + orders)
-    with open(os.path.join(folder, "project.yaml"), "w") as fh:
+    with open(place(folder, "project.yaml"), "w") as fh:
         fh.write("project:\n  language: en-US\n")
     third = convert(folder)
-    found = rows_of(os.path.join(folder, "output-check.csv"))
+    found = rows_of(place(folder, "output-check.csv"))
     left = sorted({r[1] for r in found})
     yield "with every decision made, the reports are gone", \
-        third.returncode == 0 and not any(os.path.exists(os.path.join(folder, n)) for n in (
+        third.returncode == 0 and not any(os.path.exists(place(folder, n)) for n in (
             "image-alt-missing.csv", "table-headers-new.csv", "slide-titles-new.csv",
             "reading-order-new.csv")), third.stderr[-800:]
     decided = {"pptx-slide-no-title", "pptx-object-no-alt", "pptx-table-no-header",
@@ -3569,7 +3623,7 @@ def case_convert(work):
                "pptx-reading-order", "pptx-duplicate-title"}
     yield "and the copies' check finds nothing that was decided, but alt text kept as it was", \
         not decided & set(left) and "pptx-alt-too-long" in left, left
-    copy = pptxparse.read(os.path.join(folder, "remediated", "messy.pptx"))
+    copy = pptxparse.read(place(folder, "remediated", "messy.pptx"))
     yield "the copy has the titles, the language, the title in its properties, and the order", \
         [s.title for s in copy.slides][:2] == ["Slide 1", "Slide 2"] \
         and copy.default_language == "en-US" and copy.core_title == "Slide 1" \
@@ -3585,7 +3639,7 @@ def case_convert(work):
         "drafted by TextbookImprover or a model and not yet reviewed" in third.stderr \
         and copy.slides[2].shapes[1].table.first_row, third.stderr[-400:]
     # A row whose key no deck has is said to be stale.
-    with open(os.path.join(folder, "slide-titles.csv"), "a", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "slide-titles.csv"), "a", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerow(["messy/slide-999", "Gone"])
     fourth = convert(folder, "--check-only")
     yield "a sidecar row matching no slide is named", \
@@ -3595,42 +3649,43 @@ def case_convert(work):
 def case_folders(work):
     # A book's folder with a deck in it: the deck is left out, and said to be.
     # A book is read by Pandoc; the rest is slides, which need none.
-    book = os.path.join(work, "book")
-    os.makedirs(book)
-    with open(os.path.join(book, "one.md"), "w") as fh:
+    book = place(work, "book")
+    project(book, "book")
+    with open(place(book, "one.md"), "w") as fh:
         fh.write("---\ntitle: One\n---\n\n# One\n\nText.\n")
-    clean_deck(os.path.join(book, "talk.pptx"))
-    with open(os.path.join(book, "project.yaml"), "w") as fh:
+    clean_deck(place(book, "talk.pptx"))
+    with open(place(book, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.slides\n  title: A Book\n")
     if pandoc_ok():
         result = convert(book, "--check-only")
         yield "a deck beside a book's pages is left out, and the run says so", \
             result.returncode == 0 and "1 PowerPoint deck(s) here are left out (talk.pptx)" \
-            in result.stderr and not os.path.exists(os.path.join(book, "slides-check.csv")), \
+            in result.stderr and not os.path.exists(place(book, "slides-check.csv")), \
             result.stderr[-500:]
     # project.kind: slides makes it slides, where Markdown is a deck too: a
     # folder of both kinds stops, nothing written.
-    with open(os.path.join(book, "project.yaml"), "w") as fh:
+    with open(place(book, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.slides\n  title: A Book\n  kind: slides\n")
     result = convert(book, "--check-only")
     yield "project.kind: slides with a deck of each kind stops, and says to part them", \
         result.returncode != 0 and "1 PowerPoint deck(s) and 1 written in Markdown " \
         "(talk.pptx, one.md)" in result.stderr and "folder of its own" in result.stderr \
-        and not os.path.exists(os.path.join(book, "slides-check.csv")), result.stderr[-500:]
+        and not os.path.exists(place(book, "slides-check.csv")), result.stderr[-500:]
     # A Word file in a folder of PowerPoint decks is left out, and said to be.
-    os.remove(os.path.join(book, "one.md"))
-    shutil.copy(clean_deck(os.path.join(work, "word-stand-in.pptx")),
-                os.path.join(book, "notes.docx"))
+    os.remove(place(book, "one.md"))
+    shutil.copy(clean_deck(place(work, "word-stand-in.pptx")),
+                place(book, "notes.docx"))
     result = convert(book, "--check-only")
     yield "project.kind: slides makes it slides, with the pages left out", \
         result.returncode == 0 and "1 file(s) here are left out (notes.docx)" in result.stderr \
         and "decks, PowerPoint or Markdown" in result.stderr \
-        and os.path.exists(os.path.join(book, "slides-check.csv")), result.stderr[-500:]
+        and os.path.exists(place(book, "slides-check.csv")), result.stderr[-500:]
     # Decks in a zip, wrapped in a folder, with macOS's leftovers.
-    zipped = os.path.join(work, "zipped")
-    os.makedirs(zipped)
-    clean = clean_deck(os.path.join(work, "clean.pptx"))
-    with zipfile.ZipFile(os.path.join(zipped, "slides.zip"), "w") as z:
+    zipped = place(work, "zipped")
+    project(zipped)
+    clean = clean_deck(place(work, "clean.pptx"))
+    upstream(zipped, "slides.zip")
+    with zipfile.ZipFile(os.path.join(zipped, "upstream", "slides.zip"), "w") as z:
         z.write(clean, "Slides/clean.pptx")
         z.writestr("__MACOSX/Slides/._clean.pptx", b"junk")
         link = zipfile.ZipInfo("Slides/elsewhere")
@@ -3638,16 +3693,19 @@ def case_folders(work):
         z.writestr(link, "/etc/passwd")
     result = convert(zipped)
     yield "decks in a zip are unpacked and remediated, a link in it refused and reported", \
-        result.returncode == 0 and os.path.exists(os.path.join(zipped, "clean.pptx")) \
-        and os.path.exists(os.path.join(zipped, "remediated", "clean.pptx")) \
-        and not os.path.lexists(os.path.join(zipped, "elsewhere")) \
-        and rows_of(os.path.join(zipped, "unpack-report.csv")) == [
+        result.returncode == 0 and os.path.exists(place(zipped, "clean.pptx")) \
+        and os.path.exists(place(zipped, "remediated", "clean.pptx")) \
+        and not os.path.lexists(laidout.projectpaths.of(zipped).source("elsewhere")) \
+        and rows_of(place(zipped, "unpack-report.csv")) == [
             ["Slides/elsewhere", "not-a-file", "a link or a special file, not a file; not extracted"]] \
-        and "1 PowerPoint deck(s), which are the slides" in result.stderr, result.stderr[-500:]
+        and "upstream/slides.zip unpacked into" in result.stderr \
+        and "unpack-report.csv lists what it held that wasn't written" in result.stderr, \
+        result.stderr[:500]
     # Decks in a .tgz, its link refused; the copies packed, and left alone after.
-    tarred = os.path.join(work, "tarred")
-    os.makedirs(tarred)
-    with tarfile.open(os.path.join(tarred, "slides.tgz"), "w:gz") as t:
+    tarred = place(work, "tarred")
+    project(tarred)
+    upstream(tarred, "slides.tgz")
+    with tarfile.open(os.path.join(tarred, "upstream", "slides.tgz"), "w:gz") as t:
         t.add(clean, "Slides/clean.pptx")
         link = tarfile.TarInfo("Slides/elsewhere")
         link.type, link.linkname = tarfile.SYMTYPE, "/etc/passwd"
@@ -3655,57 +3713,57 @@ def case_folders(work):
         junk = tarfile.TarInfo("Slides/._clean.pptx")
         junk.size = 4
         t.addfile(junk, io.BytesIO(b"junk"))
-    with open(os.path.join(tarred, "conversion.yaml"), "w") as fh:
+    with open(place(tarred, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  fixed:\n    format: source\n    archive: zip\n")
     result = convert(tarred)
-    report = rows_of(os.path.join(tarred, "unpack-report.csv"))
+    report = rows_of(place(tarred, "unpack-report.csv"))
     yield "decks in a tgz are unpacked, a link in it refused and reported", \
-        result.returncode == 0 and os.path.exists(os.path.join(tarred, "clean.pptx")) \
-        and not os.path.lexists(os.path.join(tarred, "elsewhere")) \
-        and not os.path.exists(os.path.join(tarred, "._clean.pptx")) \
+        result.returncode == 0 and os.path.exists(place(tarred, "clean.pptx")) \
+        and not os.path.lexists(laidout.projectpaths.of(tarred).source("elsewhere")) \
+        and not os.path.exists(laidout.projectpaths.of(tarred).source("._clean.pptx")) \
         and report == [["Slides/elsewhere", "not-a-file",
                         "a link or a special file, not a file; not extracted"]], \
         (report, result.stderr[-400:])
-    with zipfile.ZipFile(os.path.join(tarred, "fixed.zip")) as z:
+    with zipfile.ZipFile(place(tarred, "fixed.zip")) as z:
         packed = z.namelist()
     again = convert(tarred)
     yield "archive: zip packs the target's folder beside it, and a later run lets it be", \
         packed == ["fixed/clean.pptx"] and again.returncode == 0 \
-        and "fixed.zip" not in again.stderr.replace("packed into fixed.zip", ""), \
+        and "fixed.zip" not in again.stderr.replace("packed into output/fixed.zip", ""), \
         (packed, again.stderr[-300:])
     # A deck that can't be read: the copies that could be written are, and
     # nothing is archived, so a whole-looking archive is never half the set.
-    os.remove(os.path.join(tarred, "fixed.zip"))
-    with open(os.path.join(tarred, "broken.pptx"), "wb") as fh:
+    os.remove(place(tarred, "fixed.zip"))
+    with open(place(tarred, "broken.pptx"), "wb") as fh:
         fh.write(b"not a deck")
     broken = convert(tarred)
     yield "with a deck that can't be read, nothing is archived, and the run says so", \
-        broken.returncode == 1 and not os.path.exists(os.path.join(tarred, "fixed.zip")) \
-        and os.path.exists(os.path.join(tarred, "fixed", "clean.pptx")) \
+        broken.returncode == 1 and not os.path.exists(place(tarred, "fixed.zip")) \
+        and os.path.exists(place(tarred, "fixed", "clean.pptx")) \
         and "nothing was archived" in broken.stderr \
         and "broken.pptx couldn't be read as a PowerPoint deck: it isn't a PowerPoint file" \
         in broken.stderr, broken.stderr[-400:]
     # The audit reads a deck, and remediate.py writes one.
-    audited = os.path.join(work, "audited")
+    audited = place(work, "audited")
     result = subprocess.run(["python3", os.path.join(BIN, "audit.py"), clean, "-o", audited,
                              "--no-cache", "--quick"], capture_output=True, text=True)
-    rows = rows_of(os.path.join(audited, "audit.csv"))
+    rows = rows_of(place(audited, "audit.csv"))
     yield "audit.py reads a deck, and finds a clean one clean", \
         result.returncode == 0 and rows == [] and "clean.pptx: 0 finding(s)" in result.stderr, \
         result.stderr[-300:]
-    messy = messy_deck(os.path.join(work, "messy.pptx"))
-    sidecar = os.path.join(work, "titles.csv")
+    messy = messy_deck(place(work, "messy.pptx"))
+    sidecar = place(work, "titles.csv")
     with open(sidecar, "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Slide", "Title"], ["messy/slide-256", "Opening"],
                                   ["messy/slide-260", "Video"]])
-    order = os.path.join(work, "order.csv")
+    order = place(work, "order.csv")
     with open(order, "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["messy/slide-259", "2 4"], ["messy/slide-260", "6 4 4"]])
     result = subprocess.run(["python3", os.path.join(ROOT, "util", "remediate.py"), messy,
                              "--slide-titles", sidecar, "--reading-order", order,
-                             "--out", os.path.join(work, "util-out")],
+                             "--out", place(work, "util-out")],
                             capture_output=True, text=True)
-    copy = pptxparse.read(os.path.join(work, "util-out", "messy.pptx"))
+    copy = pptxparse.read(place(work, "util-out", "messy.pptx"))
     yield "remediate.py writes a deck's decisions too, the reading order among them", \
         result.returncode == 0 and copy.slides[0].title == "Opening" \
         and copy.slides[4].title == "Media" and "slides: 1 slide-titles row(s) not used: each " \
@@ -3717,55 +3775,55 @@ def case_folders(work):
         "twice" in result.stderr, result.stderr[-500:]
     # A deck's bare links and equations, beside a page with the same link:
     # the slides line counts the decks' alone.
-    maths = deck(os.path.join(work, "maths.pptx"), [
+    maths = deck(place(work, "maths.pptx"), [
         {"shapes": [title(2, "Means"), equation(4, BAR_OMML)]}])
-    page = os.path.join(work, "page.html")
+    page = place(work, "page.html")
     with open(page, "w", encoding="utf-8") as fh:
         fh.write('<html lang="en"><head><title>Page</title></head><body><p>'
                  '<a href="https://example.org">https://example.org</a></p></body></html>')
-    links = os.path.join(work, "links.csv")
+    links = place(work, "links.csv")
     with open(links, "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["URL", "Replacement", "Title"],
                                   ["https://example.org", "Example", "An example"]])
     result = subprocess.run(["python3", os.path.join(ROOT, "util", "remediate.py"), messy, maths,
                              page, "--links", links, "--repair-equations",
-                             "--out", os.path.join(work, "util-links")],
+                             "--out", place(work, "util-links")],
                             capture_output=True, text=True)
-    copy = pptxparse.read(os.path.join(work, "util-links", "messy.pptx"))
+    copy = pptxparse.read(place(work, "util-links", "messy.pptx"))
     found = [(l.text, l.target, l.tooltip) for s in copy.slides for shape in s.all_shapes()
              for l in shape.links if l.external]
     yield "remediate.py writes a deck's bare links and equations, and counts the decks' alone", \
         result.returncode == 0 and found == [("Example", "https://example.org", "An example")] \
-        and read_part(os.path.join(work, "util-links", "maths.pptx"),
+        and read_part(place(work, "util-links", "maths.pptx"),
                       "ppt/slides/slide1.xml").count("<m:t>¯</m:t>") == 2 \
         and "1 bare link(s) given a replacement; 1 equation(s) repaired;" in result.stderr \
-        and "Example</a>" in open(os.path.join(work, "util-links", "page.html"),
+        and "Example</a>" in open(place(work, "util-links", "page.html"),
                                   encoding="utf-8").read(), (found, result.stderr[-600:])
 
 
 def case_no_pandoc(work):
     """convert.py with no Pandoc on the PATH: a slides run reads and writes
     its decks itself, and a book says what it needs."""
-    tools = os.path.join(work, "bin")
+    tools = place(work, "bin")
     os.makedirs(tools)
     put_python(tools)
 
     def bare_run(where):
-        return subprocess.run([os.path.join(tools, "python3"), os.path.join(BIN, "convert.py"),
+        return subprocess.run([place(tools, "python3"), os.path.join(BIN, "convert.py"),
                                "--quiet"], cwd=where, env=dict(os.environ, PATH=tools),
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    decks = os.path.join(work, "decks")
-    os.makedirs(decks)
-    messy_deck(os.path.join(decks, "messy.pptx"))
+    decks = place(work, "decks")
+    project(decks)
+    messy_deck(place(decks, "messy.pptx"))
     result = bare_run(decks)
     yield "a slides run needs no Pandoc: the reports and the copies", \
-        result.returncode == 0 and os.path.exists(os.path.join(decks, "remediated", "messy.pptx")) \
-        and os.path.exists(os.path.join(decks, "image-alt-missing.csv")), result.stderr[-500:]
-    book = os.path.join(work, "book")
-    os.makedirs(book)
-    with open(os.path.join(book, "one.md"), "w") as fh:
+        result.returncode == 0 and os.path.exists(place(decks, "remediated", "messy.pptx")) \
+        and os.path.exists(place(decks, "image-alt-missing.csv")), result.stderr[-500:]
+    book = place(work, "book")
+    project(book, "book")
+    with open(place(book, "one.md"), "w") as fh:
         fh.write("---\ntitle: One\n---\n\n# One\n\nText.\n")
-    with open(os.path.join(book, "project.yaml"), "w") as fh:
+    with open(place(book, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.book\n  title: A Book\n")
     result = bare_run(book)
     yield "and a book's run says it needs Pandoc 3.9 or later", \
@@ -4043,7 +4101,7 @@ def reader_sidecars(folder, path):
              "slide-titles.csv": "Slide,Title\nReader/slide-%d,A Heading\n" % (SLIDE_ID + 11),
              "reading-order.csv": "Slide,Order\nReader/slide-%d,2 3 4\n" % (SLIDE_ID + 12)}
     for name, text in files.items():
-        with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+        with open(place(folder, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     return blue
 
@@ -4395,11 +4453,11 @@ targets:
 
 def converted_folder(work, config=CONVERTING):
     """A folder holding reader_deck, its sidecars, and a configuration."""
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
-    reader_deck(os.path.join(folder, "Reader.pptx"))
-    reader_sidecars(folder, os.path.join(folder, "Reader.pptx"))
-    with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+    folder = place(work, "decks")
+    project(folder)
+    reader_deck(place(folder, "Reader.pptx"))
+    reader_sidecars(folder, place(folder, "Reader.pptx"))
+    with open(place(folder, "conversion.yaml"), "w") as fh:
         fh.write(config)
     return folder
 
@@ -4431,11 +4489,11 @@ def case_deck_languages(work):
     its own where it declares no default; its page in it."""
     if not pandoc_ok():
         return
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
+    folder = place(work, "decks")
+    project(folder)
 
     def one(name, words, lang, default):
-        return deck(os.path.join(folder, name + ".pptx"), [
+        return deck(place(folder, name + ".pptx"), [
             {"shapes": [title(2, words[0], lang=lang), content(3, [words[1]], lang=lang)]}],
             default_lang=default, core_title=words[0])
     with_custom(one("openstax-es", ("Funciones", "Una función"), "en-US", "en-US"),
@@ -4443,27 +4501,27 @@ def case_deck_languages(work):
     one("francais", ("Bonjour", "Une phrase"), "fr-FR", None)
     one("row", ("Zeile", "Ein Satz"), "en-US", "en-US")
     one("english", ("English", "A sentence"), "en-US", "en-US")
-    with open(os.path.join(folder, "languages.csv"), "w", encoding="utf-8") as fh:
+    with open(place(folder, "languages.csv"), "w", encoding="utf-8") as fh:
         fh.write("source,language\nrow,de\n")
-    with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  copy:\n    format: source\n  pages:\n    format: html\n")
     checked = convert(folder, "--check-only")
-    first_drafted = rows_of(os.path.join(folder, "languages-new.csv"))
+    first_drafted = rows_of(place(folder, "languages-new.csv"))
     result = convert(folder, "--quick")
     said = result.stderr
 
     def part(name, inner):
-        path = os.path.join(folder, "copy", name + ".pptx")
+        path = place(folder, "copy", name + ".pptx")
         return read_part(path, inner) if os.path.isfile(path) else ""
 
     def page(name):
-        path = os.path.join(folder, "pages", name + ".html")
+        path = place(folder, "pages", name + ".html")
         if not os.path.isfile(path):
             return None
         with open(path, encoding="utf-8") as fh:
             found = re.search(r'<html\b[^>]*\slang="([^"]*)"', fh.read())
         return found.group(1) if found else None
-    drafted = rows_of(os.path.join(folder, "languages-new.csv"))
+    drafted = rows_of(place(folder, "languages-new.csv"))
     yield "checked only, the decks' languages are reported, as a slides run writes its " \
         "reports before it converts", \
         checked.returncode == 0 and "3 pages are in a different language than the book" \
@@ -4514,17 +4572,17 @@ def case_converting(work):
     folder = converted_folder(work)
     result = convert(folder, "--quick")
     out = result.stderr
-    read = lambda *names: open(os.path.join(folder, *names), encoding="utf-8").read()  # noqa
+    read = lambda *names: open(place(folder, *names), encoding="utf-8").read()  # noqa
     yield "the decks are checked and copied, then converted, as the run says", \
         result.returncode == 0 and "Slides: 1 PowerPoint deck(s), each checked and remediated" \
         in out and "Slides: 1 PowerPoint deck(s), each converted on its own: pages (html), " \
-        "md (markdown)." in out and os.path.isfile(os.path.join(folder, "copy", "Reader.pptx")), \
+        "md (markdown)." in out and os.path.isfile(place(folder, "copy", "Reader.pptx")), \
         out[-800:]
     yield "a pptx target on a PowerPoint deck writes nothing without a template, and says what " \
         "the copy is and what a template would do", \
         "target again is format pptx, and nothing is written for it" in out \
         and "slides.reference_doc names" in out and not os.path.exists(
-            os.path.join(folder, "again")), out[:1200]
+            place(folder, "again")), out[:1200]
     page = read("pages", "Reader.html")
     flat = " ".join(page.split())
     yield "the page is titled by the title slide, its sections and slides below it", \
@@ -4554,13 +4612,13 @@ def case_converting(work):
         "beside it", \
         all(s in md for s in ("**bold**", "*italic*", "~2~", "^2^", "{.decorative}",
                               "$\\bar{x} = 1$")) \
-        and os.path.isdir(os.path.join(folder, "md", "media")), md[:600]
-    alt = rows_of(os.path.join(folder, "image-alt-missing.csv"))
+        and os.path.isdir(place(folder, "md", "media")), md[:600]
+    alt = rows_of(place(folder, "image-alt-missing.csv"))
     yield "the reports are the deck's, as its checks write them, not the filter's of the " \
         "intermediate", \
         alt and all(row[2].startswith("Reader.pptx slide") for row in alt) \
-        and not os.path.exists(os.path.join(folder, "table-captions-missing.csv")), alt
-    checks = {row[1] for row in rows_of(os.path.join(folder, "output-check.csv"))}
+        and not os.path.exists(place(folder, "table-captions-missing.csv")), alt
+    checks = {row[1] for row in rows_of(place(folder, "output-check.csv"))}
     yield "the output check holds the copy's findings and the page's", \
         any(c.startswith("pptx-") for c in checks) \
         and any(not c.startswith("pptx-") for c in checks), sorted(checks)
@@ -4578,35 +4636,36 @@ def case_converting(work):
     yield "a check-only run converts nothing", \
         checked.returncode == 0 and "each converted on its own" not in checked.stderr, \
         checked.stderr[-300:]
-    alone = converted_folder(os.path.join(work, "alone"), "targets:\n  pages:\n    format: html\n")
+    alone = converted_folder(place(work, "alone"), "targets:\n  pages:\n    format: html\n")
     paged = convert(alone, "--quick")
     yield "with no format: source target, the decks are checked and converted, and no copy " \
         "is made", \
         paged.returncode == 0 and "Slides: 1 PowerPoint deck(s), each checked on its own, since " \
         "they're all this folder holds." in paged.stderr \
-        and os.path.isfile(os.path.join(alone, "pages", "Reader.html")) \
-        and sorted(n for n in os.listdir(alone) if n.endswith(".pptx")) == ["Reader.pptx"] \
-        and not os.path.exists(os.path.join(alone, "remediated")), paged.stderr[:400]
-    zipped = converted_folder(os.path.join(work, "zipped"), "targets:\n  pages:\n    format: html\n"
+        and os.path.isfile(place(alone, "pages", "Reader.html")) \
+        and sorted(n for n in os.listdir(laidout.projectpaths.of(alone).sources())
+                   if n.endswith(".pptx")) == ["Reader.pptx"] \
+        and not os.path.exists(place(alone, "remediated")), paged.stderr[:400]
+    zipped = converted_folder(place(work, "zipped"), "targets:\n  pages:\n    format: html\n"
                               "    archive: zip\n  copy:\n    format: source\n    archive: zip\n")
     packed = convert(zipped, "--quick")
     names = []
     for name in ("pages.zip", "copy.zip"):
-        if os.path.isfile(os.path.join(zipped, name)):
-            with zipfile.ZipFile(os.path.join(zipped, name)) as z:
+        if os.path.isfile(place(zipped, name)):
+            with zipfile.ZipFile(place(zipped, name)) as z:
                 names += z.namelist()
     yield "archive: zip packs the copy's folder and the page's when the decks are converted", \
         packed.returncode == 0 and "copy/Reader.pptx" in names and "pages/Reader.html" in names, \
         (names, packed.stderr[-300:])
     for name in ("pages.zip", "copy.zip"):
-        os.remove(os.path.join(zipped, name))
-    with open(os.path.join(zipped, "broken.pptx"), "wb") as fh:
+        os.remove(place(zipped, name))
+    with open(place(zipped, "broken.pptx"), "wb") as fh:
         fh.write(b"not a deck")
     broken = convert(zipped, "--quick")
     yield "and with a deck that can't be read, the others are converted, nothing is archived, " \
         "and the run says so once", \
-        broken.returncode == 1 and os.path.isfile(os.path.join(zipped, "pages", "Reader.html")) \
-        and not any(os.path.exists(os.path.join(zipped, n)) for n in ("pages.zip", "copy.zip")) \
+        broken.returncode == 1 and os.path.isfile(place(zipped, "pages", "Reader.html")) \
+        and not any(os.path.exists(place(zipped, n)) for n in ("pages.zip", "copy.zip")) \
         and broken.stderr.count("nothing was archived") == 1, broken.stderr[-400:]
 
 
@@ -4619,34 +4678,34 @@ def case_converting_math(work):
     either warned about."""
     if not pandoc_ok():
         return
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
-    deck(os.path.join(folder, "Two Words.pptx"), [
+    folder = place(work, "decks")
+    project(folder)
+    deck(place(folder, "Two Words.pptx"), [
         {"shapes": [title(2, "Scores"), equation(4, Z_OMML)]},
         {"shapes": [title(2, "Means"),
                     textbox(5, "TextBox 5", ["The mean \u03bc = 34 here."],
                             (457200, 1600200, 4000000, 600000))]}])
-    with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+    with open(place(folder, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  pages:\n    format: html\n  copy:\n    format: source\n")
-    report = os.path.join(folder, "math-repaired.csv")
     first = convert(folder, "--quick")
+    report = place(folder, "math-repaired.csv")
     rows = rows_of(report)
     yield "the report has the copy's equation and the page's text made an equation, in TeX, " \
         "under the deck's name, the equation once, as the page repaired it, though both did", \
         first.returncode == 0 and sorted(rows) == sorted([
             ["equation", "Two Words", Z_TEX, "z = \\frac{x-\u03bc}{\\sigma}"],
             ["expression", "Two Words", "\u03bc = 34", "\u03bc=34"]]), (rows, first.stderr[-600:])
-    with open(os.path.join(folder, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
                                   ["equation", "Two Words", Z_TEX],
                                   ["equation", "Two Words", "z=(x\u2013\u00b5)/\u03c3"],
                                   ["expression", "Two Words", "\u03bc = 34"],
                                   ["symbol", "Two Words", "\u03b2"]])
     again = convert(folder, "--quick")
-    page = html.unescape(open(os.path.join(folder, "pages", "Two-Words.html"),
+    page = html.unescape(open(place(folder, "pages", "Two-Words.html"),
                               encoding="utf-8").read()) \
-        if os.path.exists(os.path.join(folder, "pages", "Two-Words.html")) else ""
-    copy = os.path.join(folder, "copy", "Two Words.pptx")
+        if os.path.exists(place(folder, "pages", "Two-Words.html")) else ""
+    copy = place(folder, "copy", "Two Words.pptx")
     yield "rows copied from it keep the equation in the copy and on the page, and the text " \
         "as text, by the deck's name; the report is gone", \
         again.returncode == 0 and not os.path.exists(report) \
@@ -4668,17 +4727,17 @@ def case_display_paragraph(work):
     page; Pandoc's Word reader reads such a paragraph as one formula."""
     if not pandoc_ok():
         return
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
-    deck(os.path.join(folder, "Lines.pptx"), [
+    folder = place(work, "decks")
+    project(folder)
+    deck(place(folder, "Lines.pptx"), [
         {"shapes": [title(2, "Two Lines"),
                     display_paragraph(4, "<m:r><m:t>x\u2013\u00b5=1</m:t></m:r>",
                                       "<m:r><m:t>y=\u00b5</m:t></m:r>")]}])
-    with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+    with open(place(folder, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  pages:\n    format: html\n  copy:\n    format: source\n")
-    report = os.path.join(folder, "math-repaired.csv")
     first = convert(folder, "--quick")
-    page_path = os.path.join(folder, "pages", "Lines.html")
+    report = place(folder, "math-repaired.csv")
+    page_path = place(folder, "pages", "Lines.html")
     page = html.unescape(open(page_path, encoding="utf-8").read()) \
         if os.path.exists(page_path) else ""
     annotations = re.findall(r'<annotation encoding="application/x-tex">([^<]*)</annotation>',
@@ -4688,7 +4747,7 @@ def case_display_paragraph(work):
         first.returncode == 0 and page.count('display="block"') == 2 \
         and annotations == ["x-\u03bc = 1", "y = \u03bc"], (annotations, first.stderr[-600:])
     rows = rows_of(report)
-    intermediate = os.path.join(folder, "Lines.json")
+    intermediate = os.path.join(laidout.projectpaths.of(folder).pages(), "Lines.json")
     blocks = json.load(open(intermediate, encoding="utf-8"))["blocks"] \
         if os.path.exists(intermediate) else []
     yield "each a paragraph of its own, as Pandoc's PowerPoint writer writes it, so the deck " \
@@ -4697,13 +4756,13 @@ def case_display_paragraph(work):
     yield "and each has a row of its own in the report, the copy's and the page's once", \
         sorted(rows) == sorted([["equation", "Lines", "x\u2013\u00b5 = 1", "x-\u03bc = 1"],
                                 ["equation", "Lines", "y = \u00b5", "y = \u03bc"]]), rows
-    with open(os.path.join(folder, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(folder, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
                                   ["equation", "Lines", "y = \u00b5"]])
     again = convert(folder, "--quick")
     page = html.unescape(open(page_path, encoding="utf-8").read()) \
         if os.path.exists(page_path) else ""
-    copy = os.path.join(folder, "copy", "Lines.pptx")
+    copy = place(folder, "copy", "Lines.pptx")
     slide = read_part(copy, "ppt/slides/slide1.xml") if os.path.exists(copy) else ""
     yield "a row copied from it keeps its equation in the copy and on the page, the other " \
         "repaired in both, and nothing is warned about", \
@@ -4720,25 +4779,25 @@ def case_math_pandoc_and_stop(work):
     conversion stops before its pages are made."""
     if not pandoc_ok():
         return
-    folder = os.path.join(work, "old")
+    folder = place(work, "old")
     os.makedirs(folder)
-    deck(os.path.join(folder, "maths.pptx"), [
+    deck(place(folder, "maths.pptx"), [
         {"shapes": [title(2, "Scores"), equation(4, Z_OMML)]}])
-    reports = {k: os.path.join(folder, v) for k, v in (
+    reports = {k: place(folder, v) for k, v in (
         ("image_alt_missing", "a.csv"), ("table_headers_new", "t.csv"),
         ("slide_titles_new", "s.csv"), ("slides_check", "check.csv"),
         ("output_check", "output-check.csv"), ("math_repaired", "math-repaired.csv"))}
-    paths = {k: os.path.join(folder, v) for k, v in (
+    paths = {k: place(folder, v) for k, v in (
         ("image_alt", "image-alt.csv"), ("table_headers", "table-headers.csv"),
         ("slide_titles", "slide-titles.csv"), ("math_keep", "math-keep.csv"))}
     target = type("Target", (), {"format": "source", "name": "fixed",
-                                 "output_dir": os.path.join(folder, "fixed"),
+                                 "output_dir": place(folder, "fixed"),
                                  "__getitem__": lambda self, key: key == "math.repair_equations"})()
-    tools = os.path.join(work, "old-pandoc")
+    tools = place(work, "old-pandoc")
     os.makedirs(tools)
-    with open(os.path.join(tools, "pandoc"), "w") as fh:
+    with open(place(tools, "pandoc"), "w") as fh:
         fh.write("#!/bin/sh\necho 'pandoc 2.19.2'\n")
-    os.chmod(os.path.join(tools, "pandoc"), 0o755)
+    os.chmod(place(tools, "pandoc"), 0o755)
     path, said = os.environ["PATH"], []
     os.environ["PATH"] = tools + os.pathsep + path
     del deckrun._tex_pandoc[:]
@@ -4759,13 +4818,13 @@ def case_math_pandoc_and_stop(work):
         and rows_of(reports["math_repaired"])[0][2] == Z_TEX \
         and not any("is older than" in s for s in said), \
         (rows_of(reports["math_repaired"]), said[-6:])
-    stops = os.path.join(work, "stops")
-    os.makedirs(stops)
+    stops = place(work, "stops")
+    project(stops)
     for name in ("Two Words.pptx", "Two-Words.pptx"):
-        deck(os.path.join(stops, name), [{"shapes": [title(2, "Scores"), equation(4, Z_OMML)]}])
-    with open(os.path.join(stops, "conversion.yaml"), "w") as fh:
+        deck(place(stops, name), [{"shapes": [title(2, "Scores"), equation(4, Z_OMML)]}])
+    with open(place(stops, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  pages:\n    format: html\n  copy:\n    format: source\n")
-    with open(os.path.join(stops, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(stops, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Kind", "Page", "Before", "After"],
                                   ["equation", "Two Words", Z_TEX],
                                   ["equation", "Two Words", "q"],
@@ -4836,7 +4895,7 @@ def case_converting_more(work):
     if not problem:
         sys.path.insert(0, HERE)
         import pdftext
-        pdf = os.path.join(folder, "pdf", "Reader.pdf")
+        pdf = place(folder, "pdf", "Reader.pdf")
         yield "a pdf target writes each deck's PDF through ltx-talk, a page for its title " \
             "slide, each section, and each slide shown", \
             "Wrote 1 PDF(s)" in out and "through ltx-talk: 13 page(s)" in out, out[-600:]
@@ -4850,7 +4909,7 @@ def case_converting_more(work):
                 "A Course of Talks" in text and "Ask who paid" not in text \
                 and "Not shown." not in text, text[-600:]
     if present:
-        page = os.path.join(folder, "present", "Reader.html")
+        page = place(folder, "present", "Reader.html")
         shown = open(page, encoding="utf-8").read() if os.path.isfile(page) else ""
         yield "a revealjs target writes each deck's presentation, its slides the deck's, its " \
             "notes in the speaker view", \
@@ -4878,10 +4937,10 @@ def case_rebuild(work):
     folder = converted_folder(work, "targets:\n  again:\n    format: pptx\n    slides:\n"
                                     "      reference_doc: template.pptx\n  plain:\n"
                                     "    format: pptx\n")
-    reference_deck(os.path.join(folder, "template.pptx"))
+    reference_deck(laidout.projectpaths.of(folder).top("template.pptx"))
     result = convert(folder, "--quick")
     out = result.stderr
-    rebuilt = os.path.join(folder, "again", "Reader.pptx")
+    rebuilt = place(folder, "again", "Reader.pptx")
     if rebuilds:
         yield "the deck is rebuilt on the template, and the run says what's lost and what " \
             "it's for", result.returncode == 0 and os.path.isfile(rebuilt) \
@@ -4893,16 +4952,16 @@ def case_rebuild(work):
             titles[:3] == ["A Course of Talks", "Part One", "Formatting"], titles
     yield "and the target without one writes nothing", \
         "target plain is format pptx, and nothing is written for it" in out \
-        and not os.path.exists(os.path.join(folder, "plain")), out[:600]
-    alone = os.path.join(work, "alone")
-    os.makedirs(alone)
-    clean_deck(os.path.join(alone, "clean.pptx"))
-    with open(os.path.join(alone, "conversion.yaml"), "w") as fh:
+        and not os.path.exists(place(folder, "plain")), out[:600]
+    alone = place(work, "alone")
+    project(alone)
+    clean_deck(place(alone, "clean.pptx"))
+    with open(place(alone, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  again:\n    format: pptx\n")
     result = convert(alone)
     yield "a run whose only target is a pptx target with no template stops, nothing written", \
         result.returncode != 0 and "Every target here is format pptx" in result.stderr \
-        and not os.path.exists(os.path.join(alone, "slides-check.csv")), result.stderr[-400:]
+        and not os.path.exists(place(alone, "slides-check.csv")), result.stderr[-400:]
 
 
 def pptx_pandoc_ok():
@@ -4965,7 +5024,7 @@ def case_round_trip(work):
     # each nested in an item and starting past one, one in the notes, which
     # the Markdown target writes from one with its start beside it; and a
     # link in the notes, which Pandoc's PowerPoint writer takes out.
-    deck(os.path.join(folder, "Cut.pptx"), [
+    deck(place(folder, "Cut.pptx"), [
         {"shapes": [title(2, "Cut Apart", "ctrTitle", box=TITLE_BOX)]},
         {"shapes": [pic(2, "rId2", SPOT, "A red square"),
                     shape(3, "TextBox 2", [p(r("Words after it."))], box=SPOT4)],
@@ -4994,25 +5053,26 @@ def case_round_trip(work):
          "notes_links": {"rId3": FIELD}}],
         master=bulleted_master())
     first = convert(folder, "--quick")
-    trip = os.path.join(work, "trip")
-    shutil.copytree(os.path.join(folder, "md"), trip)
-    with open(os.path.join(trip, "project.yaml"), "w") as fh:
+    trip = project(place(work, "trip"))
+    shutil.copytree(place(folder, "md"), laidout.projectpaths.of(trip).sources(),
+                    dirs_exist_ok=True)
+    with open(place(trip, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.trip\n  title: Trip\n  kind: slides\n")
-    with open(os.path.join(trip, "conversion.yaml"), "w") as fh:
+    with open(place(trip, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  decks:\n    format: pptx\n")
     second = convert(trip, "--quick")
-    original = os.path.join(folder, "Reader.pptx")
-    tripped = os.path.join(trip, "decks", "Reader.pptx")
+    original = place(folder, "Reader.pptx")
+    tripped = place(trip, "decks", "Reader.pptx")
     yield "the deck goes to Markdown and back to PowerPoint", \
         first.returncode == 0 and second.returncode == 0 and os.path.isfile(tripped), \
         (first.stderr + second.stderr)[-600:]
     if not os.path.isfile(tripped):
         return
     # The original as its conversion read it, with its sidecars' decisions.
-    a = deckcompare.read(original, work, alts=rem.alt_rows(os.path.join(folder, "image-alt.csv")),
-                         tables=rem.header_rows(os.path.join(folder, "table-headers.csv")),
-                         titles=rem.title_rows(os.path.join(folder, "slide-titles.csv")),
-                         orders=rem.order_rows(os.path.join(folder, "reading-order.csv")))
+    a = deckcompare.read(original, work, alts=rem.alt_rows(place(folder, "image-alt.csv")),
+                         tables=rem.header_rows(place(folder, "table-headers.csv")),
+                         titles=rem.title_rows(place(folder, "slide-titles.csv")),
+                         orders=rem.order_rows(place(folder, "reading-order.csv")))
     b = deckcompare.read(tripped, work)
     found = deckcompare.compare(a, b)
     what = sorted((d.where, d.what) for d in found)
@@ -5029,9 +5089,9 @@ def case_round_trip(work):
     yield "and the table's, its merged cell", \
         cells is not None and cells.first[0][-1] == "spans" and cells.second[0][-1] == "", \
         cells
-    cut_trip = os.path.join(trip, "decks", "Cut.pptx")
+    cut_trip = place(trip, "decks", "Cut.pptx")
     cut_b = deckcompare.read(cut_trip, work) if os.path.isfile(cut_trip) else {"blocks": []}
-    cut_found = deckcompare.compare(deckcompare.read(os.path.join(folder, "Cut.pptx"), work),
+    cut_found = deckcompare.compare(deckcompare.read(place(folder, "Cut.pptx"), work),
                                     cut_b)
     cut_titles = [s.title for s in deckcompare.slides_of(cut_b)[3]]
     yield "a deck the trip changes by design comes back the same: a slide with no title that " \
@@ -5042,8 +5102,8 @@ def case_round_trip(work):
         cut_titles == ["", "", "", "", "Results (Panel)", "Continued"] and not cut_found, \
         (cut_titles, cut_found)
     cut_md = ""
-    if os.path.isfile(os.path.join(folder, "md", "Cut.md")):
-        with open(os.path.join(folder, "md", "Cut.md"), encoding="utf-8") as fh:
+    if os.path.isfile(place(folder, "md", "Cut.md")):
+        with open(place(folder, "md", "Cut.md"), encoding="utf-8") as fh:
             cut_md = fh.read()
     yield "the Markdown writes such a list from one, its start an empty span at its first item, " \
         "and a list in no item from its own start", \
@@ -5054,8 +5114,9 @@ def case_round_trip(work):
     yield "and the link in the notes as a link, underlined as Google Slides writes one", \
         "Source: [[the data]{.underline}](%s)." % FIELD in cut_md, cut_md[-400:]
     read_back = {}
-    if os.path.isfile(os.path.join(trip, "Cut.filtered.json")):
-        with open(os.path.join(trip, "Cut.filtered.json"), encoding="utf-8") as fh:
+    cut_read = laidout.projectpaths.of(trip).page("Cut")
+    if os.path.isfile(cut_read):
+        with open(cut_read, encoding="utf-8") as fh:
             read_back = json.load(fh)
     starts = [(b["c"][0][0], b["c"][0][1]["t"]) for b in of_kind(read_back, "OrderedList")]
     left = [s for s in of_kind(read_back, "Span") if any(k == "start" for k, _v in s["c"][0][2])]
@@ -5086,7 +5147,7 @@ def case_round_trip(work):
     before = {(d.where, d.what, repr(d.second)) for d in found}
     seen = []
     for n, (label, old, replacement, *where) in enumerate(changes):
-        changed = os.path.join(work, "changed-%d.pptx" % n)
+        changed = place(work, "changed-%d.pptx" % n)
         made = 0
         with zipfile.ZipFile(tripped) as zin, zipfile.ZipFile(changed, "w") as zout:
             for info in zin.infolist():
@@ -5100,44 +5161,44 @@ def case_round_trip(work):
         seen.append((label, made > 0, sorted({(w, k) for w, k, _ in after - before})))
     # util/round-trip-decks.py makes the same trip of a folder's decks.
     tool = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), folder,
-                           "--keep", os.path.join(work, "kept")], capture_output=True, text=True)
+                           "--keep", place(work, "kept")], capture_output=True, text=True)
     yield "util/round-trip-decks.py makes the trip of a folder's decks and reports the same", \
         tool.returncode == 1 and "Reader.pptx: 1 difference(s)" in tool.stdout \
         and "Cut.pptx: the same" in tool.stdout and "slide 4 (Links)" not in tool.stdout \
         and "slide 5 (A Table), content:" in tool.stdout \
-        and os.path.isfile(os.path.join(work, "kept", "trip", "decks", "Reader.pptx")), \
+        and os.path.isfile(place(place(work, "kept", "trip"), "decks", "Reader.pptx")), \
         (tool.stdout + tool.stderr)[-600:]
     # A folder whose sidecar Excel's plain "CSV" saved, in Windows-1252.
-    ansi = os.path.join(work, "ansi-decks")
+    ansi = place(work, "ansi-decks")
     os.makedirs(ansi)
-    shutil.copy(os.path.join(folder, "Cut.pptx"), ansi)
-    with open(os.path.join(ansi, "slide-titles.csv"), "w", encoding="cp1252", newline="") as fh:
+    shutil.copy(place(folder, "Cut.pptx"), ansi)
+    with open(place(ansi, "slide-titles.csv"), "w", encoding="cp1252", newline="") as fh:
         fh.write("Slide,Title,Source,Drafted by,Reviewed\r\nCut/slide-256,Caf\u00e9,,,\r\n")
     rewrote = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), ansi],
                              capture_output=True, text=True)
-    with open(os.path.join(ansi, "slide-titles.csv"), "rb") as fh:
+    with open(place(ansi, "slide-titles.csv"), "rb") as fh:
         rewritten = fh.read()
     yield "and rewrites a sidecar Excel saved as plain CSV, in Windows-1252, as UTF-8 first, " \
         "the folder's own file, keeping it as it was beside it", \
-        rewrote.returncode in (0, 1) and os.path.join(ansi, "slide-titles.csv") \
+        rewrote.returncode in (0, 1) and place(ansi, "slide-titles.csv") \
         + " wasn't UTF-8" in rewrote.stderr and "Traceback" not in rewrote.stderr \
         and rewritten == ("\ufeffSlide,Title,Source,Drafted by,Reviewed\r\n"
                           "Cut/slide-256,Caf\u00e9,,,\r\n").encode("utf-8") \
-        and os.path.isfile(os.path.join(ansi, "slide-titles.csv.windows-1252")), \
+        and os.path.isfile(place(ansi, "slide-titles.csv.windows-1252")), \
         (rewrote.stdout + rewrote.stderr)[-400:]
     # And one that reads as neither, as "CSV (MS-DOS)" saves Müller: a
     # byte Windows-1252 has no character for, and a capital Mac OS Roman
     # reads inside a word.
     stopping = b"Slide,Title\r\nCut/slide-256,M\x81ller's title\r\n"
-    with open(os.path.join(ansi, "slide-titles.csv"), "wb") as fh:
+    with open(place(ansi, "slide-titles.csv"), "wb") as fh:
         fh.write(stopping)
     stopped = subprocess.run(["python3", os.path.join(ROOT, "util", "round-trip-decks.py"), ansi],
                              capture_output=True, text=True)
-    with open(os.path.join(ansi, "slide-titles.csv"), "rb") as fh:
+    with open(place(ansi, "slide-titles.csv"), "rb") as fh:
         left = fh.read()
     yield "and stops on one that reads as neither, saying how each reads it, the file left as " \
         "it was", \
-        stopped.returncode not in (0, None) and os.path.join(ansi, "slide-titles.csv") \
+        stopped.returncode not in (0, None) and place(ansi, "slide-titles.csv") \
         + " isn't UTF-8, and doesn't read as Windows-1252" in stopped.stderr \
         and "Traceback" not in stopped.stderr and left == stopping, \
         (stopped.stdout + stopped.stderr)[-400:]
@@ -5255,17 +5316,17 @@ def case_other_formats(work):
     deck of the suite's, so it runs without one."""
     import decksave
     import time
-    tools = os.path.join(work, "tools")
+    tools = place(work, "tools")
     os.makedirs(tools)
-    fake = os.path.join(tools, "soffice")
+    fake = place(tools, "soffice")
     with open(fake, "w") as fh:
         fh.write(FAKE_SOFFICE)
     os.chmod(fake, 0o755)
-    log = os.path.join(work, "soffice.log")
-    answer = os.path.join(work, "answer.pptx")
+    log = place(work, "soffice.log")
+    answer = place(work, "answer.pptx")
     saved_deck(answer)
     env = dict(os.environ, LIBREOFFICE=fake, FAKE_SOFFICE_LOG=log, FAKE_SOFFICE_DECK=answer)
-    missing = os.path.join(tools, "missing")
+    missing = place(tools, "missing")
 
     def run(where, *flags, **extra):
         return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
@@ -5279,10 +5340,10 @@ def case_other_formats(work):
             return [line.rstrip("\n").split("\t") for line in fh]
 
     def folder_of(name, *decks):
-        where = os.path.join(work, name)
-        os.makedirs(where)
+        where = place(work, name)
+        project(where)
         for deck_name in decks:
-            path = os.path.join(where, deck_name)
+            path = place(where, deck_name)
             if deck_name.endswith(".odp"):
                 odp_file(path)
             elif deck_name.endswith(".ppt"):
@@ -5293,15 +5354,15 @@ def case_other_formats(work):
         return where
 
     folder = folder_of("decks", "talk.odp")
-    odp = os.path.join(folder, "talk.odp")
+    odp = place(folder, "talk.odp")
     with open(odp, "rb") as fh:
         before = fh.read()
     result = run(folder)
     yield "a deck in ODP is saved as PowerPoint beside it, and the run reads that as the deck", \
-        result.returncode == 0 and os.path.exists(os.path.join(folder, "talk.pptx")) \
+        result.returncode == 0 and os.path.exists(place(folder, "talk.pptx")) \
         and "Saved 1 deck(s) as PowerPoint through LibreOffice, each beside its original " \
         "(talk.odp as talk.pptx): from now on each PowerPoint file is the deck" in result.stderr \
-        and os.path.exists(os.path.join(folder, "remediated", "talk.pptx")), result.stderr[-700:]
+        and os.path.exists(place(folder, "remediated", "talk.pptx")), result.stderr[-700:]
     with open(odp, "rb") as fh:
         yield "the original is left as it is", fh.read() == before, ""
     asked = calls()
@@ -5320,19 +5381,19 @@ def case_other_formats(work):
         "one's PowerPoint file beside it being the deck in its place, saved from it or its " \
         "other export (talk.pptx for talk.odp)" in result.stderr \
         and "newer" not in result.stderr, result.stderr[-700:]
-    later = os.path.getmtime(os.path.join(folder, "talk.pptx")) + 60
+    later = os.path.getmtime(place(folder, "talk.pptx")) + 60
     os.utime(odp, (later, later))
     result = run(folder)
     yield "an original newer than its PowerPoint file is warned of", \
         "WARNING: talk.odp is newer than talk.pptx, which is read in its place: if talk.odp " \
         "has changes talk.pptx hasn't, delete talk.pptx and run again" in result.stderr, \
         result.stderr[-500:]
-    old = os.path.join(folder, "older.ppt")
+    old = place(folder, "older.ppt")
     with open(old, "wb") as fh:
         fh.write(deckrun.OLE + b"\0" * 504)
     result = run(folder, "--check-only")
     yield "--check-only says what it would save, and saves nothing", \
-        result.returncode == 0 and not os.path.exists(os.path.join(folder, "older.pptx")) \
+        result.returncode == 0 and not os.path.exists(place(folder, "older.pptx")) \
         and len(calls()) == 1 and "1 deck(s) here would be saved as PowerPoint through " \
         "LibreOffice, each beside its original (older.ppt as older.pptx), and then checked; " \
         "a --check-only run saves nothing." in result.stderr, result.stderr[-500:]
@@ -5349,27 +5410,27 @@ def case_other_formats(work):
         "loaded; a deck saved with a password can't be, and LibreOffice needs its Impress " \
         "(libreoffice-impress) for any)." in result.stderr \
         and "Slides: 1 PowerPoint deck(s)" in result.stderr \
-        and not os.path.exists(os.path.join(folder, "older.pptx")), result.stderr[-600:]
+        and not os.path.exists(place(folder, "older.pptx")), result.stderr[-600:]
     result = run(folder, FAKE_SOFFICE_MODE="nothing")
     yield "and so is one LibreOffice writes nothing for, though it says nothing either", \
         result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
         "LibreOffice wrote no PowerPoint file." in result.stderr \
-        and not os.path.exists(os.path.join(folder, "older.pptx")), result.stderr[-500:]
+        and not os.path.exists(place(folder, "older.pptx")), result.stderr[-500:]
     result = run(folder, FAKE_SOFFICE_MODE="garbage")
     yield "and one whose PowerPoint file isn't one", \
         result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
         "LibreOffice wrote no PowerPoint file." in result.stderr \
-        and not os.path.exists(os.path.join(folder, "older.pptx")), result.stderr[-500:]
+        and not os.path.exists(place(folder, "older.pptx")), result.stderr[-500:]
     os.remove(old)
 
     bad = folder_of("bad", "clean.pptx")
-    with open(os.path.join(bad, "empty.odp"), "wb"):
+    with open(place(bad, "empty.odp"), "wb"):
         pass
-    with open(os.path.join(bad, "text.odp"), "w") as fh:
+    with open(place(bad, "text.odp"), "w") as fh:
         fh.write("not a deck")
-    odp_file(os.path.join(bad, "locked.odp"), encrypted=True)
-    clean_deck(os.path.join(bad, "renamed.ppt"))
-    clean_deck(os.path.join(bad, "misnamed.odp"))
+    odp_file(place(bad, "locked.odp"), encrypted=True)
+    clean_deck(place(bad, "renamed.ppt"))
+    clean_deck(place(bad, "misnamed.odp"))
     asked = len(calls())
     result = run(bad)
     yield "a file that isn't a deck of its kind is named before LibreOffice sees it, and the " \
@@ -5383,7 +5444,7 @@ def case_other_formats(work):
                 "97-2003 deck (it's a PowerPoint file: renamed .pptx, it can be read).",
                 "ERROR: misnamed.odp couldn't be saved as PowerPoint: it isn't an OpenDocument "
                 "presentation (it's a PowerPoint file: renamed .pptx, it can be read).")) \
-        and os.path.exists(os.path.join(bad, "remediated", "clean.pptx")) \
+        and os.path.exists(place(bad, "remediated", "clean.pptx")) \
         and not any(n.endswith(".pptx") and n != "clean.pptx" for n in os.listdir(bad)), \
         result.stderr[-900:]
 
@@ -5395,63 +5456,66 @@ def case_other_formats(work):
         "here" % missing in result.stderr \
         and "File > Save As, PowerPoint 2007-365" in result.stderr \
         and "Nothing was converted." in result.stderr and "left out" not in result.stderr \
-        and not os.path.exists(os.path.join(alone, "talk.pptx")), result.stderr[-500:]
-    clean_deck(os.path.join(alone, "clean.pptx"))
+        and not os.path.exists(place(alone, "talk.pptx")), result.stderr[-500:]
+    clean_deck(place(alone, "clean.pptx"))
     result = run(alone, LIBREOFFICE=missing)
     yield "beside a PowerPoint deck, it's left out with a warning, and the deck is read", \
         result.returncode == 0 and "They're left out." in result.stderr \
-        and os.path.exists(os.path.join(alone, "remediated", "clean.pptx")) \
-        and not os.path.exists(os.path.join(alone, "remediated", "talk.pptx")), \
+        and os.path.exists(place(alone, "remediated", "clean.pptx")) \
+        and not os.path.exists(place(alone, "remediated", "talk.pptx")), \
         result.stderr[-500:]
-    os.remove(os.path.join(alone, "clean.pptx"))
+    os.remove(place(alone, "clean.pptx"))
     result = run(alone, LIBREOFFICE="soffice", PATH=tools + os.pathsep + os.environ["PATH"])
     yield "LIBREOFFICE can name a command on the path", result.returncode == 0 \
-        and os.path.exists(os.path.join(alone, "talk.pptx")), result.stderr[-400:]
+        and os.path.exists(place(alone, "talk.pptx")), result.stderr[-400:]
 
     clash = folder_of("clash", "a.odp", "a.ppt", "clean.pptx")
     result = run(clash)
     yield "two decks that would each be saved under one name are neither saved", \
         result.returncode == 0 and "WARNING: a.odp and a.ppt would each be saved as a.pptx, " \
-        "so none is" in result.stderr and not os.path.exists(os.path.join(clash, "a.pptx")), \
+        "so none is" in result.stderr and not os.path.exists(place(clash, "a.pptx")), \
         result.stderr[-500:]
-    os.remove(os.path.join(clash, "clean.pptx"))
+    os.remove(place(clash, "clean.pptx"))
     result = run(clash)
     yield "and with nothing else to read, the run stops", \
         result.returncode != 0 and "No deck here can be read, as the lines above say." \
         in result.stderr, result.stderr[-300:]
 
     blocked = folder_of("blocked", "folder.odp", "linked.odp", "clean.pptx")
-    os.makedirs(os.path.join(blocked, "folder.pptx"))
-    os.symlink(os.path.join(work, "nowhere.pptx"), os.path.join(blocked, "linked.pptx"))
+    os.makedirs(place(blocked, "folder.pptx"))
+    os.symlink(place(work, "nowhere.pptx"), place(blocked, "linked.pptx"))
     result = run(blocked)
     yield "a folder or a link to nothing at a deck's PowerPoint name keeps it from being " \
         "saved, said so", result.returncode == 0 and all(
             "WARNING: %s.odp isn't saved as PowerPoint: %s.pptx is here already, and isn't a " \
             "file" % (n, n) in result.stderr for n in ("folder", "linked")) \
-        and os.path.isdir(os.path.join(blocked, "folder.pptx")), result.stderr[-600:]
+        and os.path.isdir(place(blocked, "folder.pptx")), result.stderr[-600:]
 
     looked = folder_of("looked", "template.odp", "clean.pptx")
-    clean_deck(os.path.join(looked, "template.pptx"))
-    with open(os.path.join(looked, "conversion.yaml"), "w") as fh:
+    clean_deck(laidout.projectpaths.of(looked).top("template.pptx"))
+    with open(place(looked, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  remediated:\n    format: source\n    slides:\n"
                  "      reference_doc: template.pptx\n")
     result = run(looked)
-    yield "an original whose PowerPoint name is the decks' reference document isn't read", \
-        "NOTE: template.odp isn't read: template.pptx, the name it would be saved as, is the " \
-        "decks' reference document" in result.stderr and "newer" not in result.stderr, \
-        result.stderr[-500:]
+    yield "the decks' reference document, at the project's top, doesn't keep a deck of its " \
+        "name from being saved among the sources", \
+        result.returncode == 0 and "template.odp as template.pptx" in result.stderr \
+        and "NOTE: template.odp isn't read" not in result.stderr \
+        and os.path.isfile(place(looked, "template.pptx")), \
+        result.stderr[:500]
 
-    archive = os.path.join(work, "archived")
-    os.makedirs(archive)
-    odp_file(os.path.join(work, "one.odp"))
-    with zipfile.ZipFile(os.path.join(archive, "decks.zip"), "w") as zf:
-        zf.write(os.path.join(work, "one.odp"), "one.odp")
+    archive = place(work, "archived")
+    project(archive)
+    odp_file(place(work, "one.odp"))
+    upstream(archive, "decks.zip")
+    with zipfile.ZipFile(os.path.join(archive, "upstream", "decks.zip"), "w") as zf:
+        zf.write(place(work, "one.odp"), "one.odp")
     result = run(archive)
     yield "an archive's decks in other formats are unpacked, then saved as PowerPoint", \
-        result.returncode == 0 and "Unpacked decks.zip: 1 deck(s) to save as PowerPoint, which " \
-        "are the slides from now on, as the PowerPoint files they're saved as next. Correct " \
-        "those, not the archive" in result.stderr \
-        and os.path.exists(os.path.join(archive, "one.pptx")), result.stderr[-600:]
+        result.returncode == 0 and "upstream/decks.zip unpacked into" in result.stderr \
+        and "Saved 1 deck(s) as PowerPoint through LibreOffice, each beside its original " \
+        "(one.odp as one.pptx)" in result.stderr \
+        and os.path.exists(place(archive, "one.pptx")), result.stderr[-600:]
 
     decksave_timeout, decksave.TIMEOUT = decksave.TIMEOUT, 1
     hung = folder_of("hung", "slow.odp")
@@ -5461,7 +5525,7 @@ def case_other_formats(work):
         os.environ.update(FAKE_SOFFICE_LOG=log, FAKE_SOFFICE_DECK=answer, FAKE_SOFFICE_MODE="hang")
         started = time.monotonic()
         try:
-            decksave.save([fake], os.path.join(hung, "slow.odp"), os.path.join(hung, "slow.pptx"))
+            decksave.save([fake], place(hung, "slow.odp"), place(hung, "slow.pptx"))
             why = None
         except decksave.SaveError as exc:
             why = str(exc)
@@ -5484,39 +5548,39 @@ def case_other_formats(work):
         time.sleep(0.05)
     yield "a save that takes too long stops LibreOffice and what it started, at once", \
         why == "LibreOffice took more than 1 seconds" and gone and took < 15 \
-        and not os.path.exists(os.path.join(hung, "slow.pptx")), (why, child, gone, took)
+        and not os.path.exists(place(hung, "slow.pptx")), (why, child, gone, took)
 
     if pandoc_ok():
-        book = os.path.join(work, "book")
-        os.makedirs(book)
-        with open(os.path.join(book, "one.md"), "w") as fh:
+        book = place(work, "book")
+        project(book, "book")
+        with open(place(book, "one.md"), "w") as fh:
             fh.write("---\ntitle: One\n---\n\n# One\n\nText.\n")
-        odp_file(os.path.join(book, "talk.odp"))
+        odp_file(place(book, "talk.odp"))
         asked = len(calls())
         result = run(book, "--check-only")
         yield "in a book's folder, a deck in another format is left out, and isn't saved", \
             "NOTE: 1 deck(s) in other formats here are left out (talk.odp): a deck isn't a " \
             "page of a book" in result.stderr and not os.path.exists(
-                os.path.join(book, "talk.pptx")) and len(calls()) == asked, result.stderr[-500:]
-        markdown = os.path.join(work, "markdown")
-        os.makedirs(markdown)
-        with open(os.path.join(markdown, "lecture.md"), "w") as fh:
+                place(book, "talk.pptx")) and len(calls()) == asked, result.stderr[-500:]
+        markdown = place(work, "markdown")
+        project(markdown, "book")
+        with open(place(markdown, "lecture.md"), "w") as fh:
             fh.write("---\ntitle: A Lecture\n---\n\n## One\n\nText.\n")
-        odp_file(os.path.join(markdown, "lecture.odp"))
-        with open(os.path.join(markdown, "project.yaml"), "w") as fh:
+        odp_file(place(markdown, "lecture.odp"))
+        with open(place(markdown, "project.yaml"), "w") as fh:
             fh.write("project:\n  kind: slides\n  title: Lectures\n  identifier: org.example.l\n")
         result = run(markdown, "--check-only")
         yield "beside decks written in Markdown, one in another format is left out, and they're " \
             "read", result.returncode == 0 and "NOTE: 1 deck(s) in other formats here are left " \
             "out (lecture.odp): this folder's slides are its decks written in Markdown" \
             in result.stderr and len(calls()) == asked \
-            and not os.path.exists(os.path.join(markdown, "lecture.pptx")), result.stderr[-600:]
+            and not os.path.exists(place(markdown, "lecture.pptx")), result.stderr[-600:]
 
     # What decksave.py finds for itself.
-    plain = os.path.join(work, "plan")
+    plain = place(work, "plan")
     os.makedirs(plain)
     for name in ("b.ODP", "C.odp", "c.PPTX", "d.ppt", ".~lock.d.ppt#", "~$e.ppt", "notes.txt"):
-        with open(os.path.join(plain, name), "wb") as fh:
+        with open(place(plain, name), "wb") as fh:
             fh.write(b"x")
     found = decksave.plan(plain)
     yield "the plan: the decks to save and their names, a PowerPoint file in any case taken " \
@@ -5524,7 +5588,7 @@ def case_other_formats(work):
         found.to_save == [("b.ODP", "b.pptx"), ("d.ppt", "d.pptx")] \
         and found.in_place == [("C.odp", "c.PPTX")] and found.clashes == {} \
         and found.blocked == [] and found.looks == [], vars(found)
-    ole = os.path.join(work, "ole.pptx")
+    ole = place(work, "ole.pptx")
     frame = ('<p:graphicFrame>%s<p:xfrm><a:off x="0" y="0"/><a:ext cx="9" cy="9"/></p:xfrm>'
              '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/presentationml/'
              '2006/ole">%%s</a:graphicData></a:graphic></p:graphicFrame>'
@@ -5554,8 +5618,7 @@ def case_other_formats_libreoffice(work):
         return
     if not pandoc_ok():
         return
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
+    folder = project(os.path.join(work, "decks"))
     made = os.path.join(work, "made")
     os.makedirs(made)
     source = os.path.join(made, "talk.md")
@@ -5566,14 +5629,15 @@ def case_other_formats_libreoffice(work):
     profile = tempfile.mkdtemp(prefix="profile-", dir=work)
     subprocess.run(decksave.libreoffice() + [
         "--headless", "--norestore", "-env:UserInstallation=file://" + profile,
-        "--convert-to", "odp", "--outdir", folder, os.path.join(made, "talk.pptx")],
+        "--convert-to", "odp", "--outdir", laidout.projectpaths.of(folder).sources(),
+        os.path.join(made, "talk.pptx")],
         capture_output=True, check=True)
     result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=folder,
                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    saved = os.path.join(folder, "talk.pptx")
+    saved = place(folder, "talk.pptx")
     yield "LibreOffice saves the ODP as PowerPoint beside it, and the run reads and copies it", \
         result.returncode == 0 and os.path.exists(saved) \
-        and os.path.exists(os.path.join(folder, "remediated", "talk.pptx")), result.stderr[-600:]
+        and os.path.exists(place(folder, "remediated", "talk.pptx")), result.stderr[-600:]
     doc, record = pptxsource.read(saved, work, work)
     meta = doc["meta"]
     yield "its title slide is the deck's title and subtitle", \
@@ -5929,20 +5993,20 @@ def case_minus_signs(work):
     given them too; and none with the setting off."""
     if not pandoc_ok():
         return
-    folder = os.path.join(work, "decks")
-    os.makedirs(folder)
-    minus_deck(os.path.join(folder, "Minus.pptx"))
+    folder = place(work, "decks")
+    project(folder)
+    minus_deck(place(folder, "Minus.pptx"))
     green = rem.image_key(hashlib.sha256(GREEN).hexdigest()) + ".png"
-    with open(os.path.join(folder, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(folder, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\n%s,Falls to \u20135 by 2030 from 1990\u20132000 levels\n" % green)
-    copy = os.path.join(folder, "copy", "Minus.pptx")
-    report = os.path.join(folder, "math-repaired.csv")
+    copy = place(folder, "copy", "Minus.pptx")
+    report = place(folder, "math-repaired.csv")
 
     def build(pages="", copy_setting="", keep=None):
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n" + ("  pages:\n    format: html\n" + pages if pages is not None
                                      else "") + "  copy:\n    format: source\n" + copy_setting)
-        keep_path = os.path.join(folder, "math-keep.csv")
+        keep_path = place(folder, "math-keep.csv")
         if keep:
             with open(keep_path, "w", encoding="utf-8", newline="") as fh:
                 csv.writer(fh).writerows([["Kind", "Page", "Before"]] + keep)
@@ -5956,7 +6020,7 @@ def case_minus_signs(work):
         if os.path.exists(copy):
             with zipfile.ZipFile(copy) as z:
                 parts = {n: z.read(n).decode("utf-8") for n in z.namelist() if n.endswith(".xml")}
-        page_path = os.path.join(folder, "pages", "Minus.html")
+        page_path = place(folder, "pages", "Minus.html")
         page = html.unescape(open(page_path, encoding="utf-8").read()) \
             if pages is not None and os.path.exists(page_path) else ""
         if os.path.exists(page_path):
@@ -6055,18 +6119,18 @@ def case_minus_signs(work):
         and "\u2212" not in re.sub(r"<math.*?</math>", "", off_page.split("<body")[-1],
                                    flags=re.S), off_said.stderr[-400:]
     # A deck whose only en dash is in the alt text the sidecar gives it.
-    given = os.path.join(work, "given")
-    os.makedirs(given)
-    deck(os.path.join(given, "Given.pptx"), [
+    given = place(work, "given")
+    project(given)
+    deck(place(given, "Given.pptx"), [
         {"shapes": [title(2, "Given"), pic(5, "rId2", (457200, 4200000, 900000, 900000),
                                             "A placeholder")], "images": {"rId2": BLUE}}])
     blue = rem.image_key(hashlib.sha256(BLUE).hexdigest()) + ".png"
-    with open(os.path.join(given, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(given, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\n%s,A dip to \u20132 percent\n" % blue)
-    with open(os.path.join(given, "conversion.yaml"), "w") as fh:
+    with open(place(given, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  copy:\n    format: source\n")
     gave = convert(given, "--quick")
-    given_slide = read_part(os.path.join(given, "copy", "Given.pptx"), "ppt/slides/slide1.xml") \
+    given_slide = read_part(place(given, "copy", "Given.pptx"), "ppt/slides/slide1.xml") \
         if gave.returncode == 0 else ""
     yield "a deck whose only en dash is in the alt text the sidecar gives it gets its sign", \
         descriptions(given_slide) == ["A dip to \u22122 percent"], gave.stderr[-400:]
@@ -6110,33 +6174,32 @@ def case_minus_signs(work):
         and changed == {"paragraphs": {}, "pictures": {}}, (found, changed)
     # A picture whose id another shape on its slide has, which no decision
     # is written for, and a run with no Pandoc, which can't make them.
-    clash = os.path.join(work, "clash")
-    os.makedirs(clash)
-    deck(os.path.join(clash, "Clash.pptx"), [
+    clash = place(work, "clash")
+    project(clash)
+    deck(place(clash, "Clash.pptx"), [
         {"shapes": [title(2, "Clash"), pic(5, "rId2", (457200, 4200000, 900000, 900000),
                                             "Down to \u20139 here"),
                     textbox(5, "TextBox 5", ["Up \u20131 and down."], WIDE)],
          "images": {"rId2": RED}}])
-    with open(os.path.join(clash, "conversion.yaml"), "w") as fh:
+    with open(place(clash, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  copy:\n    format: source\n")
     clashed = convert(clash, "--quick")
-    with zipfile.ZipFile(os.path.join(clash, "copy", "Clash.pptx")) as z:
+    with zipfile.ZipFile(place(clash, "copy", "Clash.pptx")) as z:
         slide = z.read("ppt/slides/slide1.xml").decode("utf-8")
     yield "a picture whose id another shape has keeps its en dash, and the run says how many " \
         "it couldn't write, the text beside it given its sign", \
         descriptions(slide) == ["Down to \u20139 here"] and "Up \u22121 and down." in texts(slide) \
         and "WARNING: copy: 1 minus sign(s) a deck's page makes of an en dash not written into " \
         "its copy" in clashed.stdout + clashed.stderr, (texts(slide), clashed.stderr[-600:])
-    tools = os.path.join(work, "bin")
+    tools = place(work, "bin")
     os.makedirs(tools)
     put_python(tools)
-    bare = os.path.join(work, "bare")
-    os.makedirs(bare)
-    minus_deck(os.path.join(bare, "Minus.pptx"))
-    run_bare = subprocess.run([os.path.join(tools, "python3"), os.path.join(BIN, "convert.py"),
+    bare = project(place(work, "bare"))
+    minus_deck(place(bare, "Minus.pptx"))
+    run_bare = subprocess.run([place(tools, "python3"), os.path.join(BIN, "convert.py"),
                                "--quiet"], cwd=bare, env=dict(os.environ, PATH=tools),
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    bare_copy = os.path.join(bare, "remediated", "Minus.pptx")
+    bare_copy = place(bare, "remediated", "Minus.pptx")
     bare_slide = read_part(bare_copy, "ppt/slides/slide1.xml") if os.path.exists(bare_copy) else ""
     yield "with no Pandoc, the copy keeps its en dashes, and the run says why", \
         run_bare.returncode == 0 and "\u20134 units." in bare_slide \

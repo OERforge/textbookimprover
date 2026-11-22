@@ -128,7 +128,7 @@ def plan(base, looks=()):
         if existing is None:
             wanted.setdefault(target.lower(), []).append((name, target))
             continue
-        path = projectpaths.of(base).media(existing)
+        path = projectpaths.of(base).source(existing)
         if os.path.normcase(os.path.abspath(path)) in looks:
             result.looks.append((name, existing))
         elif os.path.isfile(path):

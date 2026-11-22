@@ -715,7 +715,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     # The images the report names, written where their keys point, so a
     # person can open the one a row is about.
     for digest, (path, part, key) in images.items():
-        target = P(base).report(key)
+        target = P(base).report_picture(key)
         if not os.path.exists(target):
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with zipfile.ZipFile(path) as zf, open(target, "wb") as out:

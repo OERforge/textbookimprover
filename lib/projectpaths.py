@@ -140,6 +140,11 @@ class Project:
         """A draft or a report of a part's, by the name its setting gives."""
         return self.named(value)
 
+    def report_picture(self, key, part=None):
+        """A picture a report's row names, where the row's key points
+        from the report's folder (a deck's media/...)."""
+        return self.named(key)
+
     def pages(self, part=None, own=None):
         """The folder holding a part's intermediates; own, the folder a
         target was given for its own, where its filters differ."""
@@ -162,8 +167,9 @@ class Project:
     def media(self, *names, part=None):
         """What a run extracts or renders for a part beside its
         intermediates, by the path a page names it by: a Word file's
-        pictures, a LaTeX book's rendered drawings, a deck saved as
-        PowerPoint."""
+        pictures, a LaTeX book's rendered drawings. (A deck saved as
+        PowerPoint isn't one: it's the deck from then on, a source beside
+        its original.)"""
         return os.path.join(self.run_dir(part), *names)
 
     def work_file(self, name, part=None):
@@ -332,6 +338,15 @@ class Tree(Project):
         part = self.part(part)
         return os.path.join(self._made("output", "reports", part),
                             os.path.basename(str(value)))
+
+    def report_picture(self, key, part=None):
+        part = self.part(part)
+        names = str(key).split("/")
+        if any(n in ("", ".", "..") or os.sep in n or (os.altsep and os.altsep in n)
+               for n in names):
+            raise Refused(f"{key!r} can't be a picture's place among a part's reports: it "
+                          "leads out of their folder.")
+        return os.path.join(self._made("output", "reports", part), *names)
 
     def pages(self, part=None, own=None):
         part = self.part(part)

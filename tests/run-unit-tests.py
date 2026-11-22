@@ -1110,6 +1110,19 @@ def check_project_paths():
                paths.adopt(os.path.join("b", "x-sample.csv"), os.path.join("b", "x.csv"), True),
                paths.adopt(os.path.join("b", "output", "x-sample.csv"),
                            os.path.join("b", "sidecars", "book", "x.csv"), True)]
+    # A picture a report's row names is where the row's key points from
+    # the report, in each layout, and a key that leads out is refused.
+    keyed = scratch("project-paths-picture-")
+    os.makedirs(os.path.join(keyed, "laid", "src", "slides"))
+    os.makedirs(os.path.join(keyed, "flat"))
+    pic_laid, pic_flat = (paths.of(os.path.join(keyed, n)) for n in ("laid", "flat"))
+    pictured = [os.path.relpath(pic_laid.report_picture("media/ab12.png"), keyed),
+                os.path.relpath(pic_flat.report_picture("media/ab12.png"), keyed),
+                os.path.dirname(pic_laid.report_picture("media/ab12.png"))
+                == os.path.join(os.path.dirname(pic_laid.report("image-alt-missing.csv")), "media")]
+    picture_refused = [_stops(lambda key=key: pic_laid.report_picture(key), paths.Refused)
+                       for key in ("../ab12.png", "media/../../ab12.png", "/etc/ab12.png",
+                                   "media//ab12.png")]
     package_refused = [
         _stops(lambda text=text: oerconfig_.pages_target(conversion(text), [], "book", "book"),
                oerconfig_.ConfigError)
@@ -1308,6 +1321,13 @@ def check_project_paths():
          lambda: package_pages == [("handout", "", "slides"), ("html", "pages", "book"),
                                    ("handout", "", "slides"), None, ("html", "", "book")]
          and package_refused == [True, True]),
+        ("a picture a report's row names is written where the row's key points from the "
+         "report, media/ and all, in a project and in one folder, and a key that leads out "
+         "of the reports' folder is refused",
+         lambda: pictured == [os.path.join("laid", "output", "reports", "slides", "media",
+                                           "ab12.png"),
+                              os.path.join("flat", "media", "ab12.png"), True]
+         and picture_refused == [True] * 4),
         ("a sample beside the file it stands for is renamed to it, and one in another "
          "folder is moved to it, by the path given",
          lambda: adopted == ["rename it to project.yaml",

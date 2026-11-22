@@ -95,7 +95,7 @@ project:
       from: upstream/book.zip
 ```
 
-- **A `.zip`** or a tar archive is extracted. The folders that wrap everything are dropped, however many there are (an OpenStax DOCX download has two: `Book_-_DOCX_Customization/book/…`), so the sources land at the top of `src/book/`, where `convert.py` looks for them; macOS's `__MACOSX` and `.DS_Store` are left out; and an entry that would land outside the folder is refused. A zip is known by its name, since a Word file, a slide deck, and an EPUB are zips too.
+- **A `.zip`** or a tar archive is extracted. The folders that wrap everything are dropped, however many there are (an OpenStax DOCX download has two: `Book_-_DOCX_Customization/book/…`), so the sources land at the top of `src/book/`, where `convert.py` looks for them; macOS's `__MACOSX` and `.DS_Store` are left out; and an entry that would land outside the folder, or that is a link, is refused and listed in `output/reports/book/unpack-report.csv`. A zip is known by its name, since a Word file, a slide deck, and an EPUB are zips too.
 - **A Common Cartridge** is unpacked as [A course cartridge as the source](cartridge-input.md) describes.
 - **A WARC or WACZ**, a website as a crawler recorded it, is unpacked as [A book saved from the web](site-input.md) describes; [Making a WARC](making-warcs.md) says how to record one.
 
