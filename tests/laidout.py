@@ -27,6 +27,17 @@ def project(folder, part="book"):
     return projectpaths.of(folder)
 
 
+def run_made(folder):
+    """Mark a project's output/ as a run marks the one it makes, for a
+    case that writes there what a run would have left (a target's pages,
+    a page's intermediates) and then runs a builder by hand, which takes
+    no output/ a run didn't make."""
+    output = os.path.join(folder, "output")
+    os.makedirs(output, exist_ok=True)
+    with open(os.path.join(output, projectpaths.MARKER), "w", encoding="utf-8") as fh:
+        fh.write(projectpaths.MARKER_TEXT)
+
+
 # What a book written in one folder keeps at its top when it's laid out:
 # its settings, and the definitions' file a LaTeX book's run reads there.
 TOP = ("project.yaml", "conversion.yaml", "packaging.yaml", "pdf-layout.yaml",

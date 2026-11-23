@@ -605,11 +605,11 @@ MARKER_TEXT = ("TextbookImprover writes this folder: everything in it is made fr
 _LOCKS = []
 
 
-def claim_output(folder):
+def claim_output(folder, nothing="Nothing was converted."):
     """Make the project's output/ this run's: an output/ that holds
     something and wasn't made by a run stops it, and a new or empty one
     gets the marker. Nothing in a folder that isn't a project, which
-    has no output/."""
+    has no output/. nothing is the message's last sentence."""
     project = of(folder)
     if not isinstance(project, Tree):
         return None
@@ -623,7 +623,7 @@ def claim_output(folder):
             f"{output} holds files and wasn't made by a run (it has no {MARKER}). A run "
             "writes into output/ and replaces what's there, so it takes only a folder it "
             "made. Move or rename the folder; if an earlier version's run made it, delete "
-            "it. Nothing was converted.")
+            f"it. {nothing}")
     os.makedirs(output, exist_ok=True)
     if not os.path.isfile(marker):
         with open(marker, "w", encoding="utf-8") as fh:
@@ -631,7 +631,7 @@ def claim_output(folder):
     return marker
 
 
-def lock(folder):
+def lock(folder, nothing="Nothing was converted."):
     """Hold the project for this run: a second
     run in the same project stops while the first goes, since both would
     write the same files. The lock is the operating system's on
@@ -657,8 +657,7 @@ def lock(folder):
         raise Refused(
             f"Another run is going in this project ({os.path.abspath(project.root)})"
             + (f", process {holder}" if holder.isdigit() else "")
-            + ". Wait for it to end, or stop it, and run this again. Nothing was "
-            "converted.") from None
+            + f". Wait for it to end, or stop it, and run this again. {nothing}") from None
     handle.seek(0)
     handle.truncate()
     handle.write(f"{os.getpid()}\n")
@@ -774,6 +773,34 @@ _KNOWN = {}
 # The part this run builds, when the driver has said: a run builds one
 # part, and every path asked for without a part's name is that part's.
 _PART = [None, None]
+
+
+def by_hand(folder, nothing="Nothing was built."):
+    """For a tool that builds, run by hand in a project and not started
+    by a run: what a run does before it writes anything, done here. The
+    folder is one a project may be (refused_root), none of its own
+    folders is a link (refused_link), output/ is one a run made
+    (claim_output), no other run is going (lock), what a stopped run left
+    of its builds is put right (settle), and this process's temporary
+    files are kept in the project (use_tmp). Stops with the reason,
+    nothing its last sentence; returns the notes to print, one for each
+    folder put back."""
+    root = os.path.abspath(folder)
+    why = refused_root(root)
+    if why:
+        raise Refused(f"{root} can't be a project's folder: {why}. {nothing}")
+    try:
+        parts = sorted(entry.name for entry in os.scandir(os.path.join(root, "src")))
+    except OSError:
+        parts = []
+    why = refused_link(root, parts)
+    if why:
+        raise Refused(f"{why}. {nothing}")
+    claim_output(root, nothing)
+    lock(root, nothing)
+    use_tmp(root)
+    return [f"NOTE: output/{name}/ is put back as it was: an earlier run stopped while "
+            "replacing it." for name in settle(root)]
 
 
 def set_part(part, folder=None):

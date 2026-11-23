@@ -67,7 +67,7 @@ Everything a run writes is under `output/`, and nothing there is yours to edit: 
 
 **A target is built beside its folder and swapped in whole.** A run builds each target under `output/work/`, and puts the finished folder in the earlier one's place when that target's build is done. So a build that fails, or a run you stop, leaves each target's folder either as it was or new, never half-written. A target built before the one that failed has its new folder. The next run clears what a stopped one left, and says so if it had to put a folder back.
 
-**One run at a time.** A run holds a lock while it goes, and a second run started in the same project stops. (There's none on Windows itself, and none for `build-epub.py`, `build-pdf.py`, or `build-cartridge.py` run by hand.)
+**One run at a time.** A run holds a lock while it goes, and a second run started in the same project stops. `build-epub.py`, `build-pdf.py`, and `build-cartridge.py` run by hand hold the same lock, so none of them writes while a run goes, and each makes the run's checks of the folder first. (There's no lock on Windows itself.)
 
 **An `output/` a run didn't make is left alone.** A run marks the `output/` it makes (`output/.textbookimprover`), and stops at one that holds files and has no mark, since it would otherwise delete folders there.
 

@@ -137,7 +137,7 @@ A deck isn't a page of a book: a folder of `.pptx` files is slides, each deck ch
 
 **How it can arrive**
 
-- Files in a folder of their own, or in a book's folder with `project.kind: slides`, which leaves the book's files out (a deck in a book's folder is otherwise left out of the book, and the run says so).
+- Files in a part of their own, or in a book's part with `project.kind: slides`, which leaves the book's files out (a deck among a book's sources is otherwise left out of the book, and the run says so).
 - A plain `.zip` or tar (`.tar.gz`, `.tgz`) of them, which `convert.py` unpacks when the slides part's `from` names it, as it unpacks a book's: tested on OpenStax's zip of the decks for *Introductory Business Statistics 2e*, its 13 decks in a folder with macOS's `__MACOSX` beside it.
 
 **What it becomes**

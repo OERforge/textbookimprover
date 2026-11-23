@@ -26,7 +26,7 @@ A slides run of PowerPoint decks needs Python and PyYAML from the [requirements]
 On OpenStax's 13 decks for _Introductory Business Statistics 2e_, the run begins:
 
 ```
-Slides: 13 PowerPoint deck(s), each checked and remediated on its own, since they're all this folder holds.
+Slides: 13 PowerPoint deck(s), each checked and remediated on its own, since they're all src/slides/ holds.
 Checked 13 deck(s): 165 finding(s): 21 errors, 144 warnings.
   - `pptx-alt-too-long` ×144: alt text longer than images.alt_max_chars
   - `pptx-alt-placeholder` ×21: alt text that says nothing about the image: punctuation, a word such as "image", a default name, a clip-art id, or a pattern from images.alt_placeholders

@@ -998,15 +998,26 @@ def case_two_parts(work):
                              stdin=subprocess.DEVNULL, env=dict(os.environ, TMPDIR=spy))
     tmp_cleared = sorted(os.listdir(kept_tmp))
     shared_got = sorted(os.listdir(spy))
-    held = None
+    # A builder run by hand holds the project as a run does, and makes the
+    # run's checks first; started by a run, it's inside the run's lock.
+    builders = ("build-epub.py", "build-pdf.py", "build-cartridge.py")
+
+    def by_hand(tool, folder=None):
+        return subprocess.run(["python3", os.path.join(BIN, tool), "-d", folder or work],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    held, hands_held = None, None
     try:
         import fcntl
         with open(os.path.join(work, "output", "work", "lock"), "a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             held = build()
+            hands_held = [by_hand(tool) for tool in builders]
     except ImportError:
         pass
     after_lock = build("--part", "slides")
+    os.symlink(os.path.join(beside, "notes"), os.path.join(work, "originals"))
+    hands_linked = [by_hand(tool) for tool in builders]
+    os.remove(os.path.join(work, "originals"))
     theirs = os.path.join(work, "sidecars", "theirs")
     os.makedirs(os.path.join(theirs, "src", "book"))
     os.makedirs(os.path.join(theirs, "output"))
@@ -1016,6 +1027,7 @@ def case_two_parts(work):
     shutil.move(theirs, os.path.join(os.path.dirname(work), "theirs-" + os.path.basename(work)))
     theirs = os.path.join(os.path.dirname(work), "theirs-" + os.path.basename(work))
     unmarked = build(folder=theirs)
+    hands_unmarked = [by_hand(tool, theirs) for tool in builders]
     kept = sorted(os.listdir(os.path.join(theirs, "output")))
     shutil.rmtree(theirs)
     return [
@@ -1094,6 +1106,18 @@ def case_two_parts(work):
          and kept == ["thesis.txt"]
          or fail(str([(r.returncode, r.stderr[-200:]) for r in (held, after_lock, unmarked)
                       if r is not None]) + str(kept))),
+        ("build-epub.py, build-pdf.py, and build-cartridge.py run by hand each stop while "
+         "a run holds the project, at a folder of the project's that is a link, and at an "
+         "output/ a run didn't make, which is left as it was",
+         lambda: (hands_held is None or all(
+             r.returncode != 0 and "Another run is going" in r.stderr
+             and "Nothing was built" in r.stderr for r in hands_held))
+         and all(r.returncode != 0 and "originals is a link" in r.stderr
+                 for r in hands_linked)
+         and all(r.returncode != 0 and "wasn't made by a run" in r.stderr
+                 for r in hands_unmarked) and kept == ["thesis.txt"]
+         or fail(str([(r.returncode, r.stderr[-160:])
+                      for r in (hands_held or []) + hands_linked + hands_unmarked]))),
         ("a setting of one part's target that names a file among another part's sources "
          "stops that part's run, naming the setting",
          lambda: reached.returncode != 0 and "html.css names src/book/own.css" in reached.stderr
@@ -4401,12 +4425,49 @@ def case_zip(work):
     saved_pages = [n for n in os.listdir(saved_sources) if n.endswith(".html")] \
         if os.path.isdir(saved_sources) else []
     saved_again = run(saved)
+    # An archive nothing names: among the sources, where none is read,
+    # and in upstream/. A tar by its short ending is told as one.
+    among = os.path.join(work, "among")
+    os.makedirs(os.path.join(among, "src", "book"))
+    with zipfile.ZipFile(os.path.join(among, "src", "book", "chapters.zip"), "w") as z:
+        z.writestr("ch1.md", "# One\n")
+    among_run = run(among)
+    among_after = sorted(os.listdir(os.path.join(among, "src", "book")))
+    os.makedirs(os.path.join(among, "upstream"))
+    os.rename(os.path.join(among, "src", "book", "chapters.zip"),
+              os.path.join(among, "upstream", "chapters.zip"))
+    unnamed_run = run(among)
+    import tarfile
+    short = os.path.join(work, "short")
+    os.makedirs(os.path.join(short, "upstream"))
+    with open(os.path.join(short, "ch1.md"), "w") as fh:
+        fh.write("# One\n")
+    with tarfile.open(os.path.join(short, "upstream", "chapters.tbz2"), "w:bz2") as t:
+        t.add(os.path.join(short, "ch1.md"), "chapters/ch1.md")
+    os.remove(os.path.join(short, "ch1.md"))
+    with open(os.path.join(short, "project.yaml"), "w") as fh:
+        fh.write("project:\n  parts:\n    book:\n      kind: book\n"
+                 "      from: upstream/chapters.tbz2\n")
+    short_run = run(short)
     report_path = os.path.join(book, "output", "reports", "book", "unpack-report.csv")
     report = open(report_path, encoding="utf-8-sig").read() \
         if os.path.exists(report_path) else ""
     report_marked = os.path.exists(report_path) and open(
         report_path, "rb").read(3) == b"\xef\xbb\xbf"
     return [
+        ("an archive among a part's sources isn't unpacked, and the run that finds nothing "
+         "to convert says to move it to upstream/ and name it; one in upstream/ that no "
+         "part names, to name it; each with the lines for project.yaml",
+         lambda: among_run.returncode != 0 and among_after == ["chapters.zip"]
+         and "src/book/ holds 1 file(s) a run unpacks (chapters.zip)" in among_run.stderr
+         and "      from: upstream/chapters.zip\n" in among_run.stderr
+         and unnamed_run.returncode != 0
+         and "upstream/ holds 1 file(s) a run unpacks (chapters.zip)" in unnamed_run.stderr
+         and "      from: upstream/chapters.zip\n" in unnamed_run.stderr
+         or fail(among_run.stderr[-400:] + unnamed_run.stderr[-400:])),
+        ("a tar named .tbz2 is told as an archive from its name, and unpacked",
+         lambda: os.path.isfile(os.path.join(short, "output", "html", "ch1.html"))
+         or fail(short_run.stderr[-400:])),
         ("a zip named as a part's from is extracted into the part's folder, the folder "
          "around it dropped, and converted",
          lambda: "upstream/My Book.zip unpacked into" in first.stderr
@@ -11324,8 +11385,10 @@ def case_include_all_html(work):
     name, which works, with a warning, until it goes after 1.0."""
     # A project whose pages target holds two pages, as a run leaves them.
     pages = os.path.join(work, "output", "html")
-    os.makedirs(pages)
     os.makedirs(os.path.join(work, "src", "book"))
+    os.makedirs(pages)
+    # The packager run by hand takes no output/ a run didn't make.
+    laidout.run_made(work)
     for name in ("one", "two"):
         with open(os.path.join(pages, name + ".html"), "w", encoding="utf-8") as fh:
             fh.write('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">'

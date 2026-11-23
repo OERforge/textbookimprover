@@ -2388,6 +2388,11 @@ def main():
     if why:
         sys.exit(f"{why} Nothing was built.")
     projectpaths.name_from_project(args.dir)
+    if not args.beside:
+        # Run by hand: the checks a run makes before it starts this, the
+        # lock it holds, and its temporary folder.
+        for note in projectpaths.by_hand(args.dir):
+            print(note, file=sys.stderr)
     projectpaths.set_part(args.part, args.dir)
     projectpaths.build_beside(args.dir, args.beside)
 

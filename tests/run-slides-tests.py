@@ -3669,7 +3669,7 @@ def case_folders(work):
     result = convert(book, "--check-only")
     yield "project.kind: slides with a deck of each kind stops, and says to part them", \
         result.returncode != 0 and "1 PowerPoint deck(s) and 1 written in Markdown " \
-        "(talk.pptx, one.md)" in result.stderr and "folder of its own" in result.stderr \
+        "(talk.pptx, one.md)" in result.stderr and "part of its own" in result.stderr \
         and not os.path.exists(place(book, "slides-check.csv")), result.stderr[-500:]
     # A Word file in a folder of PowerPoint decks is left out, and said to be.
     os.remove(place(book, "one.md"))
@@ -4641,7 +4641,7 @@ def case_converting(work):
     yield "with no format: source target, the decks are checked and converted, and no copy " \
         "is made", \
         paged.returncode == 0 and "Slides: 1 PowerPoint deck(s), each checked on its own, since " \
-        "they're all this folder holds." in paged.stderr \
+        "they're all src/slides/ holds." in paged.stderr \
         and os.path.isfile(place(alone, "pages", "Reader.html")) \
         and sorted(n for n in os.listdir(laidout.projectpaths.of(alone).sources())
                    if n.endswith(".pptx")) == ["Reader.pptx"] \
@@ -5572,7 +5572,7 @@ def case_other_formats(work):
         result = run(markdown, "--check-only")
         yield "beside decks written in Markdown, one in another format is left out, and they're " \
             "read", result.returncode == 0 and "NOTE: 1 deck(s) in other formats here are left " \
-            "out (lecture.odp): this folder's slides are its decks written in Markdown" \
+            "out (lecture.odp): the part book's slides are its decks written in Markdown" \
             in result.stderr and len(calls()) == asked \
             and not os.path.exists(place(markdown, "lecture.pptx")), result.stderr[-600:]
 

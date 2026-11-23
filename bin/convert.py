@@ -173,9 +173,6 @@ SOURCE_EXTENSIONS = (".docx", ".md", ".html", ".adoc", ".asciidoc")
 DECK_EXTENSIONS = (".pptx",)
 # Decks a slides run saves as PowerPoint before it reads them (decksave.py).
 OTHER_DECK_EXTENSIONS = decksave.EXTENSIONS
-# A tar, compressed or not, which a plain archive of a book's files can be
-# as well as a zip.
-TAR_EXTENSIONS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
 PAGE_CSS = os.path.join(HERE, "page.css")
 HEADERS_TOOL = os.path.join(HERE, "table-headers.py")
 SPLIT_TOOL = os.path.join(HERE, "split-pages.py")
@@ -625,12 +622,12 @@ def slides_run(base, decks, targets, project, paths, reports, args, first, archi
     if others:
         say(f"NOTE: {len(others)} file(s) here are left out ("
             + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
-            + "): this folder is slides (project.kind), and a slides run reads "
+            + f"): the part {PART} is slides (project.kind), and a slides run reads "
             "decks, PowerPoint or Markdown.")
     say(f"Slides: {len(decks)} PowerPoint deck(s), each checked"
         + (" and remediated" if any(t.format == "source" for t in targets) else "")
         + " on its own" + (" (project.kind)." if KIND_DECLARED == "slides" else
-                           ", since they're all this folder holds."))
+                           f", since they're all src/{PART}/ holds."))
     import pptxremediate
     import zipfile
     # Each deck's language, decided as a book's pages' are, its sidecar
@@ -777,7 +774,9 @@ def part_setting(base, part, key):
 UNPACKER_SCRIPTS = {"cartridge": "unpack-cartridge.py", "cnx": "unpack-cnx.py",
                     "epub": "unpack-epub.py", "jekyll": "unpack-jekyll.py",
                     "site": "unpack-site.py"}
-TAR_ENDINGS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz")
+# A tar, compressed or not, which a plain archive of a book's files can be
+# as well as a zip.
+TAR_ENDINGS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
 # A part's upstream file isn't among what a run makes or what a part is
 # made of.
 NOT_UPSTREAM = ("src", "output", "sidecars", "originals")
@@ -962,6 +961,53 @@ def unpack_upstream(base, part, check_only=False, status=False):
         say(f"{where} no longer matches what {name} unpacks to: {len(added)} file(s) "
             f"added, {len(changed)} changed, {len(removed)} removed (--src-status lists "
             "them). The run reads the folder as it is.")
+
+
+def unpacked_elsewhere(base):
+    """What to say of a part with nothing to convert whose folder, or the
+    project's upstream/, holds a file a run unpacks: such a file is read
+    from upstream/ when project.yaml names it as the part's from, and
+    never from among the sources."""
+    import cartridgesource
+
+    def unpackable(path):
+        low = path.lower()
+        try:
+            return os.path.isfile(path) and (
+                low.endswith((".zip", ".epub", ".warc", ".warc.gz", ".wacz", ".mhtml", ".mht")
+                             + TAR_ENDINGS) or cartridgesource.is_cartridge(path))
+        except OSError:
+            return False
+
+    def held(folder):
+        try:
+            return sorted(n for n in os.listdir(folder)
+                          if not n.startswith(".") and unpackable(os.path.join(folder, n)))
+        except OSError:
+            return []
+
+    def block(name):
+        return (f"\n\nproject:\n  parts:\n    {PART}:\n      kind: book\n      from: "
+                f"upstream/{name}\n\n")
+
+    def listed(names):
+        return ", ".join(names[:4]) + (", ..." if len(names) > 4 else "")
+
+    if part_setting(base, PART, "from"):
+        return ""
+    where = os.path.join("src", PART) + os.sep
+    among = held(P(base).sources())
+    if among:
+        return (f" {where} holds {len(among)} file(s) a run unpacks ({listed(among)}), but "
+                "not from among the sources: move the file to the project's upstream/ and "
+                f"name it in {PROJECT_NAME}:" + block(among[0])
+                + f"The next run unpacks it into {where}, which is empty by then.")
+    kept = held(P(base).top("upstream"))
+    if kept:
+        return (f" upstream/ holds {len(kept)} file(s) a run unpacks ({listed(kept)}), and "
+                f"the part {PART} names none. Name it in {PROJECT_NAME}:" + block(kept[0])
+                + f"The next run unpacks it into {where}.")
+    return ""
 
 
 def part_folders(base):
@@ -7192,28 +7238,31 @@ def main():
     if decks and not slides:
         say(f"NOTE: {len(decks)} PowerPoint deck(s) here are left out ("
             + ", ".join(decks[:4]) + (", ..." if len(decks) > 4 else "")
-            + "): a deck isn't a page of a book. In a folder of their own, decks "
-            "are slides, each checked and remediated (project.kind: slides).")
+            + "): a deck isn't a page of a book. In a part of their own, decks are "
+            "slides, each checked and remediated: a folder beside this one in src/, "
+            f"named in {PROJECT_NAME} under project.parts with kind: slides.")
     if others and not slides:
         say(f"NOTE: {len(others)} deck(s) in other formats here are left out ("
             + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
-            + "): a deck isn't a page of a book. In a folder of their own, decks "
-            "are slides, each saved as PowerPoint, checked, and remediated "
-            "(project.kind: slides).")
+            + "): a deck isn't a page of a book. In a part of their own, decks are "
+            "slides, each saved as PowerPoint, checked, and remediated: a folder beside "
+            f"this one in src/, named in {PROJECT_NAME} under project.parts with kind: "
+            "slides.")
     if slides and others and markdown_here and not decks:
         say(f"NOTE: {len(others)} deck(s) in other formats here are left out ("
             + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
-            + "): this folder's slides are its decks written in Markdown, and a slides run "
-            "reads one kind of deck for now.")
+            + f"): the part {PART}'s slides are its decks written in Markdown, and a slides "
+            "run reads one kind of deck for now.")
         others = []
     if slides and decks and markdown_here:
         # The two kinds' runs write the same reports, PowerPoint decks'
         # from the decks themselves (deckrun.py) and Markdown decks' from
-        # the filter, so a folder holds one kind.
-        die(f"This folder is slides, with {len(decks)} PowerPoint deck(s) and "
+        # the filter, so a part holds one kind.
+        die(f"The part {PART} is slides, with {len(decks)} PowerPoint deck(s) and "
             f"{len(markdown_here)} written in Markdown ({decks[0]}, {markdown_here[0]}). "
-            "Put each kind in a folder of its own: a slides run reads one kind of deck "
-            "for now. Nothing was converted.")
+            "Put each kind in a part of its own, a folder in src/ named in "
+            f"{PROJECT_NAME} under project.parts with kind: slides: a slides run reads "
+            "one kind of deck for now. Nothing was converted.")
     if slides and others:
         if save_other_decks(base, alone=not decks, looks=looks,
                             check_only=args.check_only) and not decks:
@@ -7306,7 +7355,7 @@ def main():
         if latex_book_here(base):
             others.append("its LaTeX")
         if others:
-            say(f"NOTE: what else this folder holds is left out ("
+            say(f"NOTE: what else src/{PART}/ holds is left out ("
                 + ", ".join(others[:4]) + (", ..." if len(others) > 4 else "")
                 + "): it's slides (project.kind), and its decks are the files "
                 "written in Markdown.")
@@ -7485,7 +7534,7 @@ def main():
                            {os.path.abspath(o) for o in output_dirs}
                            for m in latexsource.masters(P(base).source(d)))
             die("No .docx, .md, .adoc, .html, or LaTeX files here, so there is "
-                "nothing to convert."
+                "nothing to convert." + unpacked_elsewhere(base)
                 + (f" {len(below)} whole LaTeX document(s) are in a folder below: "
                    + ", ".join(below[:4]) + (", ..." if len(below) > 4 else "")
                    + ". latex.main can name them, by path or pattern "

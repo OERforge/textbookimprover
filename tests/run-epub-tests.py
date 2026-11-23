@@ -157,6 +157,9 @@ class Built:
     """An EPUB and the parts of it the checks look at."""
 
     def __init__(self, work, arguments=()):
+        # The case wrote what a run leaves; build-epub.py run by hand
+        # takes no output/ a run didn't make.
+        laidout.run_made(work)
         result = subprocess.run(
             ["python3", os.path.join(BIN, "build-epub.py"), "-d", work]
             + list(arguments), capture_output=True, text=True)
@@ -366,11 +369,11 @@ def case_contents_edges(work):
     convert(work, ["metadata", "tables", "math"])
     write_config(work, "    - metadata\n    - ghost\n    - tables\n")
     out = Built(work)
-    single = os.path.join(work, "single")
+    single = laidout.beside(work, "single")
     convert(single, ["metadata"])
     write_config(single, "    - metadata\n")
     one = Built(single)
-    guessed = os.path.join(work, "guessed")
+    guessed = laidout.beside(work, "guessed")
     convert(guessed, ["tables", "math"])
     write_config(guessed, "")
     with open(P(guessed).project_file(), "w",
@@ -599,12 +602,12 @@ def case_divisions(work):
 
     # The same pages with no contents page, and Pandoc's own types in a
     # book of one page.
-    bare = os.path.join(work, "bare")
+    bare = laidout.beside(work, "bare")
     convert(bare, ["metadata"])
     markdown_page(bare, "terms", "# Terms {.glossary}\n\nWords.\n")
     write_config(bare, "    - metadata\n    - terms\n")
     plain = Built(bare)
-    one = os.path.join(work, "one")
+    one = laidout.beside(work, "one")
     os.makedirs(one)
     markdown_page(one, "book", "# Preface {epub:type=preface}\n\nWhy.\n\n# Chapter one\n\nText.\n\n"
                                "# Index {epub:type=index}\n\nTerms.\n")
@@ -696,7 +699,7 @@ def case_declared_types(work):
     numbered = out.nav_entries()
     # A declared split source, and a group's opening page, each with a
     # type: the group that stands for them is what they are.
-    cut = os.path.join(work, "cut")
+    cut = laidout.beside(work, "cut")
     convert(cut, ["metadata"])
     markdown_page(cut, "key-terms", "# Key Terms\n\nIntro.\n\n## A\n\nAbacus.\n\n## B\n\nBeam.\n")
     run(["python3", os.path.join(BIN, "split-pages.py"), "--level", "2",
@@ -707,7 +710,7 @@ def case_declared_types(work):
     write_config(cut, "    - metadata\n    - page: key-terms\n      type: glossary\n",
                  extra_project="  numbering: true\n")
     split_book = Built(cut)
-    opened = os.path.join(work, "opened")
+    opened = laidout.beside(work, "opened")
     convert(opened, ["metadata"])
     markdown_page(opened, "gloss", "# Glossary\n\nTerms, A to M.\n")
     markdown_page(opened, "more", "# More Terms\n\nN to Z.\n")
