@@ -7,7 +7,7 @@ A Common Cartridge (`.imscc`) is how a course leaves an LMS: Brightspace, Canvas
 Unpack the cartridge as the book of a new project, and run `convert.py` there:
 
 ```bash
-python3 $T/bin/unpack-cartridge.py introduction-to-sociology-3e-export.imscc -o ~/books/soc --part book
+python3 $T/bin/unpack-cartridge.py introduction-to-sociology-3e-export.imscc -o ~/books/soc
 cd ~/books/soc
 python3 $T/bin/convert.py
 ```
@@ -39,11 +39,18 @@ A Word document the outline names is a source, and becomes a page like any other
 A document a page links to stays a file unless you ask otherwise, since it may be a handout meant to be downloaded as it is. With `--linked-documents`, each linked file the pipeline can convert (Word, Markdown, AsciiDoc, HTML) becomes a page of the book instead: beneath the first page that links to it, titled by that link's text, with the link now leading to the page. As a page it's in every target, the EPUB included. PDFs and slides stay files either way.
 
 ```bash
-python3 $T/bin/convert.py --linked-documents          # the run that unpacks the cartridge
-python3 $T/bin/unpack-cartridge.py course.imscc -o book/ --linked-documents
+python3 $T/bin/unpack-cartridge.py course.imscc -o ~/books/course --linked-documents
 ```
 
-The switch acts when a cartridge is unpacked; given on a later run, `convert.py` says it has nothing to do. Without it, the report lists each convertible document it kept as a file (`linked-document-kept`). OpenStax's sociology cartridge has four, its setup checklists and an accessibility guide; with the switch, they're pages, and the EPUB's only dropped link is a PDF. A converted document brings its own defects with it, which the output check reports as for any source: two of those four link to bookmarks they don't contain.
+The switch is the unpacker's, and it writes it into the part's `from` in `project.yaml`. For a run to unpack the cartridge so, give it there yourself:
+
+```yaml
+      from:
+        file: upstream/course.imscc
+        options: [--linked-documents]
+```
+
+Given to `convert.py`, the switch stops the run, which names these lines. Without it, the report lists each convertible document it kept as a file (`linked-document-kept`). OpenStax's sociology cartridge has four, its setup checklists and an accessibility guide; with the switch, they're pages, and the EPUB's only dropped link is a PDF. A converted document brings its own defects with it, which the output check reports as for any source: two of those four link to bookmarks they don't contain.
 
 ## What unpack-report.csv lists
 

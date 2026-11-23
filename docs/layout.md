@@ -1,6 +1,6 @@
 # A project's folders
 
-A project is one folder: the settings at its top, what you write in `src/` and `sidecars/`, and everything a run writes in `output/`. This page says what goes where, what a run does to each folder, and how to bring a book kept the earlier way into it.
+A project is one folder: the settings at its top, what you write in `src/` and `sidecars/`, and everything a run writes in `output/`. This page says what goes where, what a run does to each folder, and how to bring a book kept the way earlier versions kept it into it.
 
 ```
 my-book/
@@ -29,7 +29,7 @@ my-book/
 
 **A file a setting names** (a cover, a stylesheet, a template, a reference document, `latex-conversion-macros.tex`, a `pdf.metadata` file) is at the top too, or in a folder of your own there, and the setting gives its path from the top. A run stops at a setting whose path is a full path, leads out of the project, begins with a dot, or leads into `output/`, `sidecars/`, `upstream/`, `originals/`, or another part's sources. A path into the sources of the part being built is allowed (`pdf.metadata: src/book/_preamble.md`). A header's or footer's text that isn't such a file is text.
 
-**A part's sources** are in `src/<part>/`, with the pictures and other files they name, at the paths the sources give. Nothing else belongs in `src/`: a file at its top, beside the parts' folders, makes the folder a book kept the earlier way. A page finished by hand goes in the part's `_pt/` ([HTML sources](html.md)).
+**A part's sources** are in `src/<part>/`, with the pictures and other files they name, at the paths the sources give. Nothing else belongs in `src/`: a file at its top, beside the parts' folders, stops a run, since a folder with one isn't a project. A page finished by hand goes in the part's `_pt/` ([HTML sources](html.md)).
 
 **A part's sidecars** are in `sidecars/<part>/`, each under its standard name (`image-alt.csv`, `table-headers.csv`, and the rest: [Sidecars and reports](sidecars.md)). The `sidecars:` and `reports:` settings name nothing here, and a run stops at either.
 
@@ -83,10 +83,10 @@ Started inside `src/` or `output/`, a run stops and names the project. A run als
 
 ## Unpacking a part from upstream
 
-The unpackers (`unpack-cartridge.py`, `unpack-cnx.py`, `unpack-epub.py`, `unpack-jekyll.py`, `unpack-site.py`) write a part of a project when given `--part`:
+The unpackers (`unpack-cartridge.py`, `unpack-cnx.py`, `unpack-epub.py`, `unpack-jekyll.py`, `unpack-site.py`) write a part of a project, `book` unless `--part` names another:
 
 ```bash
-python3 $T/bin/unpack-epub.py ~/Downloads/book.epub -o ~/books/my-book --part book
+python3 $T/bin/unpack-epub.py ~/Downloads/book.epub -o ~/books/my-book
 ```
 
 The sources go to `src/book/`, a drafted sidecar to `sidecars/book/`, and the report to `output/reports/book/`. A file or folder from outside the project is copied into `upstream/` (a folder without its `.git/`, links, or anything that is neither file nor folder), and named in `project.yaml` as the part's `from`. The part's folder has to be missing or empty, and a `project.yaml` already there is never edited: the lines to add are printed.
@@ -103,11 +103,11 @@ project:
 
 Each later run compares `src/<part>/` with what was unpacked and says how many files were added, changed, and removed; `convert.py --src-status` lists them and ends. `from` with an address to fetch isn't built yet, and stops the run.
 
-`adopt-pages.py --part NAME` writes a target's pages as a part the same way ([Adopting the pages as sources](splitting.md#adopting-the-pages-as-sources)).
+`adopt-pages.py` writes a target's pages as a part the same way ([Adopting the pages as sources](splitting.md#adopting-the-pages-as-sources)).
 
 ## Moving a book kept in one folder
 
-Until the next release, a folder with its sources beside its settings, and each target's folder beside them, still builds as it did. `util/move-to-src.py` moves such a book into the folders above:
+Versions through 0.10 kept a book in one folder: its sources beside its settings, and each target's folder beside them. A run in such a folder stops, saying it isn't a project, and so does each builder and unpacker. `util/move-to-src.py` moves the book into the folders above:
 
 ```bash
 cd /path/to/book

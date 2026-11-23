@@ -40,7 +40,7 @@ The project is a box of tools that happen to work together. Conversion turns sou
 | `unpack-site.py` | Turns pages saved from the web into a directory `convert.py` converts, or with `--whole-pages` into an offline copy of the site. See [A book saved from the web](site-input.md). |
 | `lib/sitesource.py` | A saved site as URLs with bytes: the loaders (browser saves, MHTML), the generator profiles, reading the order from menus, and pointing every reference at what is held. |
 | `lib/htmlparse.py` | Parsing and serializing HTML with html5lib, or lxml when that's all there is, behind one interface. |
-| `lib/unpacking.py` | What the unpackers share: where each writes (one folder, or with `--part` a part of a project laid out with `src/`), `project.yaml`, and `unpack-report.csv`. |
+| `lib/unpacking.py` | What the unpackers share: where each writes (a part of a project: its sources to `src/<part>/`, `book` unless `--part` names another), `project.yaml`, and `unpack-report.csv`. |
 | `lib/epubsource.py` | The package document, the spine, the navigation, and the rewriting of a page's references, for the unpacker. Parses no content document. |
 | `lib/latexsource.py` | A LaTeX book read through its master: the files it reaches, a copy put right where Pandoc's reader can't take it, its drawings rendered by LaTeX, and the whole book cut into a page per `\include`. |
 | `lib/texremediate.py` | A `source` target on a LaTeX book: the sidecars' decisions written into a copy of the author's files where each element is, and, with `tagging: "on"`, the copy made to build with LaTeX's own tagging. |
@@ -133,7 +133,7 @@ The project is a box of tools that happen to work together. Conversion turns sou
 | File | What it does |
 |---|---|
 | `migrate-config.py` | One-time: splits a v0.1 `imsmanifest.yaml` into the three v0.2 files. |
-| `move-to-src.py` | One-time, for the next release: moves a book into the layout it reads, each part's sources in `src/<part>/` and its sidecars in `sidecars/<part>/`. |
+| `move-to-src.py` | One-time: moves a book kept in one folder, as versions through 0.10 read it, into a project, each part's sources in `src/<part>/` and its sidecars in `sidecars/<part>/`. |
 | `manifest-to-yaml.py` | One-time: turns an existing `imsmanifest.xml` into `project.yaml` and `packaging.yaml`. |
 | `untrack-deletions.py` | One-time source repair: turns Word tracked deletions into ordinary strikethrough. |
 | `compare-output.py` | Compares two runs semantically, so a pipeline change can be checked rather than trusted. |

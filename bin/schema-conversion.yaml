@@ -60,11 +60,8 @@ keys:
       Where this target writes. Defaults to the target's own name, so two
       targets in the same format can't overwrite each other. One folder's
       name, as a target's is: a lowercase letter, then lowercase letters,
-      digits, - and _. In a book kept in one folder, a target written
-      with output_dir: . goes into the book's own folder, which the next
-      release's layout doesn't allow, and the run warns of it; in a
-      project laid out with src/, where every target has a folder of its
-      own under output/, it stops the run.
+      digits, - and _. output_dir: . stops the run: it would name output/
+      itself, and every target has a folder of its own there.
 
   part:
     type: string
@@ -859,9 +856,7 @@ keys:
         default: ""
         description: >
           An image for the cover page, JPEG or PNG, as a path from the
-          project's top (for a book kept in one folder, an absolute path
-          or one relative to that folder). Left empty the book
-          has no cover page. A path that doesn't exist stops the build.
+          project's top. Left empty the book has no cover page. A path that doesn't exist stops the build.
 
       css:
         type: path
@@ -1209,9 +1204,9 @@ keys:
       describe the book rather than one rendering, so a target should
       rarely override them.
 
-      Only for a book kept in one folder. In a project laid out with src/,
-      a part's sidecars are in sidecars/<part>/, each under the default
-      name given here, and this setting stops the run.
+      Not read: a part's sidecars are in sidecars/<part>/, each under the
+      default name given here, and this setting stops the run. It names
+      what util/move-to-src.py moves there for a book kept in one folder.
 
       These files are read, and written only to make each one UTF-8 with
       the byte-order mark (one Excel saved in a code page rewritten as
@@ -1344,9 +1339,9 @@ keys:
       report when nothing is outstanding is deliberate: the file existing
       at all is the signal that there's work to do.
 
-      Only for a book kept in one folder. In a project laid out with src/,
-      a part's reports are written to output/reports/<part>/, each under
-      the default name given here, and this setting stops the run.
+      Not read: a part's reports are written to output/reports/<part>/,
+      each under the default name given here, and this setting stops the
+      run.
     keys:
 
       table_captions_missing:

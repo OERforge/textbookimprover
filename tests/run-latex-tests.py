@@ -983,8 +983,9 @@ def case_book(work):
 
 def case_tree_layout(work):
     """The book with its files in src/book/ and its macros file at the
-    project's top builds the pages and the EPUB it builds with everything
-    in one folder, and nothing is written among its sources."""
+    project's top builds, and nothing is written among its sources; with
+    everything in one folder it stops the run, and moved from there by
+    util/move-to-src.py it builds the same pages and EPUB."""
     def files(folder):
         found = {}
         for top, _, names in os.walk(folder):
@@ -1009,18 +1010,29 @@ def case_tree_layout(work):
             fh.write("project:\n  identifier: org.example.latex\n  title: A Test Book\n")
     before = files(sources)
     env = dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC")
+    flat_before = files(flat)
+    stopped = convert(flat, env, any_layout=True)
+    flat_after = files(flat)
+    mover = subprocess.run(["python3", os.path.join(ROOT, "util", "move-to-src.py"), "-d", flat],
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
     ran = [convert(flat, env, any_layout=True), convert(tree, env, any_layout=True)]
-    pages = [{k: v for k, v in files(os.path.join(folder, "html")).items()
+    pages = [{k: v for k, v in files(os.path.join(folder, "output", "html")).items()
               if not k.startswith("intermediates" + os.sep)}
-             for folder in (flat, os.path.join(tree, "output"))]
-    books = [files(os.path.join(folder, "epub")) for folder in (flat, os.path.join(tree, "output"))]
+             for folder in (flat, tree)]
+    books = [files(os.path.join(folder, "output", "epub")) for folder in (flat, tree)]
     one = open(os.path.join(tree, "output", "html", "one.html"), encoding="utf-8").read() \
         if os.path.exists(os.path.join(tree, "output", "html", "one.html")) else ""
     return [
-        ("each layout's run succeeds",
-         lambda: [r.returncode for r in ran] == [0, 0]
-         or fail(str([r.returncode for r in ran]) + ran[1].stderr[-900:])),
-        ("the pages and the EPUB are the same files from either layout",
+        ("the book with everything in one folder stops the run, which names "
+         "util/move-to-src.py and writes nothing",
+         lambda: stopped.returncode != 0 and "isn't a project" in stopped.stderr
+         and "util/move-to-src.py" in stopped.stderr and flat_after == flat_before
+         or fail(stopped.stderr[-600:])),
+        ("moved by the utility it builds, as the project laid out by hand does",
+         lambda: (mover.returncode == 0 or fail(mover.stdout[-600:] + mover.stderr[-600:]))
+         and ([r.returncode for r in ran] == [0, 0]
+              or fail(str([r.returncode for r in ran]) + ran[0].stderr[-900:]))),
+        ("the pages and the EPUB are the same files from both",
          lambda: pages[0] and pages[0] == pages[1] and books[0] and books[0] == books[1]
          or fail(str(sorted(set(pages[0].items()) ^ set(pages[1].items()))[:6]))),
         ("the macros file at the project's top is read",
@@ -8135,18 +8147,24 @@ def case_documents(work):
         fh.write("defaults:\n  latex:\n    main: src/*.tex\n"
                  "targets:\n  docx:\n    format: docx\n    merge: groups\n")
     merged = convert(work)
-    # The book's own cartridge, built beside it, with no master at the top
-    # (the binder gone): latex.main says it's a book, and the cartridge
-    # isn't taken for one to unpack.
+    # A cartridge among the sources, with no master at the top (the binder
+    # gone): latex.main says it's a book, and the cartridge is a file
+    # there like another, not one to unpack.
     import zipfile
     os.remove(place(work, "Combined.tex"))
     with zipfile.ZipFile(place(work, "org.example.course.imscc"), "w") as z:
         z.writestr("imsmanifest.xml", '<?xml version="1.0"?><manifest identifier="m" '
                    'xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1"/>')
+    def raised(text):
+        raise AssertionError(text[-900:])
+    held_before_rerun = sorted(os.listdir(os.path.dirname(
+        place(work, "org.example.course.imscc"))))
     rerun = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
                             "--check-only"], cwd=work, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL)
     rerun_said = rerun.stdout + rerun.stderr
+    held_after_rerun = sorted(os.listdir(os.path.dirname(
+        place(work, "org.example.course.imscc"))))
     # A page of the book's, as HTML, beside its masters (as that cartridge
     # unpacked halfway left FINC 308's): an earlier run's, not a source, so
     # the page is still the document's.
@@ -8292,10 +8310,11 @@ def case_documents(work):
         ("and a \\ref to an item of a list with enumitem's ref is as ref gives it, where "
          "LaTeX's emulation of enumitem has ref, and as the label gives it, where it "
          "hasn't", lettered),
-        ("the book's own cartridge beside its documents isn't taken for a book to unpack, "
-         "with latex.main naming them and no master at the top",
-         lambda: rerun.returncode == 0
-         and "org.example.course.imscc: not read, since this directory has sources" in rerun_said),
+        ("a cartridge among the part's sources isn't unpacked, with latex.main naming the "
+         "documents and no master at the top: a run unpacks only what the part's from names",
+         lambda: (rerun.returncode == 0 and "npack" not in rerun_said or raised(rerun_said))
+         and (held_after_rerun == held_before_rerun
+              or raised(str(sorted(set(held_after_rerun) ^ set(held_before_rerun)))))),
         ("an .html file named as one of the book's pages is an earlier run's, not read, "
          "so the page is still the document's",
          lambda: beside.returncode == 0 and "Topic A: The First Topic" in beside_page

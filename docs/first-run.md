@@ -99,7 +99,7 @@ project:
 - **A Common Cartridge** is unpacked as [A course cartridge as the source](cartridge-input.md) describes.
 - **A WARC or WACZ**, a website as a crawler recorded it, is unpacked as [A book saved from the web](site-input.md) describes; [Making a WARC](making-warcs.md) says how to record one.
 
-From then on the unpacked files are the book: correct them, not the archive. Each later run says how many of them differ from what was unpacked, and `convert.py --src-status` lists them. The settings the archive itself carried are written among the reports (`project-unpacked.yaml`, `conversion-unpacked.yaml`), yours being kept. An unpacker run by hand with `--part book` does the same and writes the `from` lines for you ([Unpacking a part from upstream](layout.md#unpacking-a-part-from-upstream)).
+From then on the unpacked files are the book: correct them, not the archive. Each later run says how many of them differ from what was unpacked, and `convert.py --src-status` lists them. The settings the archive itself carried are written among the reports (`project-unpacked.yaml`, `conversion-unpacked.yaml`), yours being kept. An unpacker run by hand does the same and writes the `from` lines for you ([Unpacking a part from upstream](layout.md#unpacking-a-part-from-upstream)).
 
 ## A first conversion, start to finish
 

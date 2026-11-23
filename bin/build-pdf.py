@@ -2384,6 +2384,9 @@ def main():
     # and swaps it in: write it there.
     parser.add_argument("--beside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    why = projectpaths.not_a_project(args.dir)
+    if why:
+        sys.exit(f"{why} Nothing was built.")
     projectpaths.set_part(args.part, args.dir)
     projectpaths.build_beside(args.dir, args.beside)
 

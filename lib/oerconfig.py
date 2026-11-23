@@ -819,25 +819,24 @@ def resolve(schema, project_schema, documents, target=None,
                 continue
             value = str(settings.get(name))
             if value in (".", "./") and _laid_out(target_source or where):
-                # A project laid out with src/ has no such place: the
-                # folder it would name is output/ itself, which holds every
-                # target and the run's own files.
+                # A project has no such place: the folder it would name
+                # is output/ itself, which holds every target and the
+                # run's own files.
                 problems.append(
-                    f"{what} has {name}: {value!r}. In a project laid out with "
-                    "src/, each target is written to a folder of its own under "
-                    f"output/: take the setting out, or give it a name ({target}, "
-                    "say).")
+                    f"{what} has {name}: {value!r}. Each target is written to a folder "
+                    f"of its own under output/: take the setting out, or give it a name "
+                    f"({target}, say).")
                 continue
             if value in (".", "./"):
-                # Today's books write a target beside their sources this
-                # way, and the next release's layout can't: said now, and
-                # taken out by util/move-to-src.py.
+                # A book kept in one folder, as versions through 0.10 read
+                # it, wrote a target beside its sources this way. No run
+                # reads such a folder; util/move-to-src.py, which does,
+                # takes the setting out.
                 warnings.append(
-                    f"{what} has {name}: {value}, which writes it into the "
-                    "book's own folder. The next release writes each target "
-                    f"in a folder of its own, and util/move-to-src.py takes "
-                    f"this setting out; give it a name ({target}, say) to "
-                    "choose the folder now.")
+                    f"{what} has {name}: {value}, which wrote it into the book's own "
+                    "folder. Each target is written to a folder of its own now, and "
+                    f"util/move-to-src.py takes this setting out; give it a name "
+                    f"({target}, say) to choose the folder.")
                 continue
             problem = name_problem(value, f"{what}'s {name}")
             if problem:
@@ -957,8 +956,8 @@ def suggest_name(text):
 
 
 def _laid_out(where):
-    """Whether the settings file named is a project's laid out with src/:
-    its folder holds a src/ of folders and no file."""
+    """Whether the settings file named is a project's: its folder holds
+    a src/ of folders and no file."""
     import projectpaths
     path = str(where).split(":", 1)[0] if os.path.exists(str(where).split(":", 1)[0]) \
         else str(where)
@@ -1065,8 +1064,9 @@ def parts_problems(project, where):
                             "project.contents is.")
         kind = block.get("kind")
         if kind not in PART_KINDS:
-            problems.append(f"{what} has kind {kind!r}; a part's kind is one of "
-                            f"{', '.join(PART_KINDS)}.")
+            problems.append((f"{what} has no kind" if kind is None
+                             else f"{what} has kind {kind!r}")
+                            + f"; a part's kind is one of {', '.join(PART_KINDS)}.")
         elif kind == "testbank":
             warnings.append(f"{what} has kind testbank, which is kept for the "
                             "test banks to come; nothing is built from it.")

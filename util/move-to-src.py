@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-move-to-src.py -- move a book from the layout earlier versions read into
-the one the next release reads: each part's sources in src/<part>/, its
+move-to-src.py -- move a book kept in one folder, as versions through
+0.10 read it, into a project: each part's sources in src/<part>/, its
 sidecars in sidecars/<part>/, and the settings files at the top.
 
     python3 util/move-to-src.py --dry-run          # say what it would do
@@ -10,8 +10,8 @@ sidecars in sidecars/<part>/, and the settings files at the top.
 
 Run it from the book's folder, or give -d. That folder becomes the
 project's: the settings files stay at its top, and so does every file a
-setting names (a template, a stylesheet, a cover). This version's
-convert.py reads either layout and the next release only the new one;
+setting names (a template, a stylesheet, a cover). convert.py reads only
+a project, and stops in a folder that isn't one, naming this utility;
 --dry-run shows what the move would do.
 
 WHERE THE SOURCES GO
@@ -42,8 +42,8 @@ setting's file and stays at the top.
 SIDECARS
 
 Each sidecar goes to sidecars/<part>/ under its standard name, and the
-sidecars: and reports: settings come out of conversion.yaml, since the
-next release keeps them at fixed names. One outside the book's folder is
+sidecars: and reports: settings come out of conversion.yaml, since a
+project keeps them at fixed names. One outside the book's folder is
 copied in and the original named. Split, a sidecar's rows are divided by
 what they're keyed on: a row keyed by a file goes to the part with the
 file, or to both where both have it; one keyed by a page the split cut
@@ -1150,7 +1150,7 @@ class Move:
             removed = [".".join(c[1]) for c in changes if c[0] == "remove"]
             if removed:
                 self.said.append(f"{name}: took out " + ", ".join(removed)
-                                 + ", which the next release doesn't read.")
+                                 + ", which a project doesn't read.")
 
     def plan_parts(self):
         """A folder split into more than one part says so in project.yaml
@@ -1232,7 +1232,7 @@ class Move:
             for name in self.unnamed:
                 say("  " + name)
         if self.outside:
-            say("\nThe sources name these outside the book's folder, which the next release "
+            say("\nThe sources name these outside the book's folder, which a run "
                 "won't read; copy each in and name it there:")
             for name in sorted(set(self.outside)):
                 say("  " + name)
@@ -1311,7 +1311,7 @@ def _is_master(path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Move a book into the layout the next release reads: each part's "
+        description="Move a book kept in one folder into a project: each part's "
                     "sources in src/<part>/, its sidecars in sidecars/<part>/.")
     parser.add_argument("-d", "--dir", default=".",
                         help="the book's folder, which becomes the project's "
@@ -1339,8 +1339,7 @@ def main(argv=None):
         say("\nNothing was moved (--dry-run).")
         return 0
     move.execute()
-    say("\nMoved. This version's convert.py reads either layout; the next release reads "
-        "only this one.")
+    say("\nMoved. The folder is a project now, which convert.py builds.")
     return 0
 
 

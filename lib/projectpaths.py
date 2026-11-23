@@ -16,14 +16,18 @@ A function that is handed the book's folder asks through of(), which
 takes a folder or the object itself, so the same function serves when
 its caller has the object to give.
 
-The answers are today's layout: the sources, the sidecars, the reports,
-and the intermediates all in the project's folder, and each target's
-folder beside them. The suites ask the same object where to look for
-what a run wrote.
+of() gives a Tree for a project: a folder whose src/ holds a folder for
+each part and no file, with each part's sidecars in sidecars/<part>/ and
+everything a run writes under output/. The tools that build stop on any
+other folder (not_a_project). A function handed a plain folder, as a
+library call is or a tool given a folder of decks, gets a Project, which
+answers every question with that one folder: its sources, sidecars,
+reports, and intermediates all in it, and each target's folder beside
+them. The suites ask the same object where to look for what a run wrote.
 
 A part is a book, a set of decks, or another collection with sources of
-its own. Every question that depends on one takes it, though today each
-part's files are in the one folder and the answer is the same for all.
+its own. Every question that depends on one takes it; a plain folder's
+answer is the same for all.
 
 Copyright (C) 2026 Robert Szarka
 
@@ -72,7 +76,9 @@ class Refused(SystemExit):
 
 
 class Project:
-    """A project's folder, and where everything in it is.
+    """A plain folder holding everything, and where each thing in it is:
+    what a function handed a folder that isn't a project asks. Tree,
+    below, is a project.
 
     root is kept as it was given, so a path made from "." reads as it
     always has in a message ("./epub/book.epub")."""
@@ -270,7 +276,7 @@ class Project:
 
 
 class Tree(Project):
-    """A project in the layout with a folder for each part's sources:
+    """A project, with a folder for each part's sources:
 
         src/<part>/               a part's sources
         sidecars/<part>/          its sidecars, under their standard names
@@ -488,12 +494,11 @@ FONT_PATHS = ("OPENTYPEFONTS", "TTFONTS")
 
 
 def is_tree(folder):
-    """Whether a folder is a project in the layout with src/<part>/: it
-    has a src/ that holds at least one folder and no file, since a part
-    is a folder there and nothing else belongs beside the parts. A book
-    kept in one folder with a src/ of its own (a course's documents in
-    src/, their shared files in folders below) has files there, and is
-    read as today's layout while both are read. A dot file isn't
+    """Whether a folder is a project: it has a src/ that holds at least
+    one folder and no file, since a part is a folder there and nothing
+    else belongs beside the parts. A book kept in one folder with a src/
+    of its own (a course's documents in src/, their shared files in
+    folders below) has files there, and isn't one. A dot file isn't
     counted: a .gitkeep or a .DS_Store says nothing of the layout."""
     src = os.path.join(folder, "src")
     try:
@@ -501,6 +506,35 @@ def is_tree(folder):
     except OSError:
         return False
     return any(e.is_dir() for e in entries) and all(e.is_dir() for e in entries)
+
+
+def not_a_project(folder):
+    """Why a folder isn't a project and what to do about it, as a
+    tool's message less its last sentence, or None for one that is. A
+    tool that builds stops on such a folder: it's never read as a book
+    kept in one folder, whose every file would be the book's."""
+    if is_tree(folder):
+        return None
+    src = os.path.join(folder, "src")
+    try:
+        loose = sorted(e.name for e in os.scandir(src)
+                       if not e.name.startswith(".") and not e.is_dir())
+    except OSError:
+        loose = None
+    if loose:
+        why = ("its src/ holds files of its own (" + ", ".join(loose[:3])
+               + (", ..." if len(loose) > 3 else "") + "), and no file belongs beside the "
+               "parts' folders there")
+    elif loose is None:
+        why = "it has no src/"
+    else:
+        why = "its src/ holds no part's folder"
+    return (f"{folder} isn't a project: {why}. A project keeps each part's sources in a "
+            "folder of its own under src/ (src/book/ for a book, src/slides/ for decks), "
+            "its sidecars in sidecars/<part>/, and its settings files at the top. For a "
+            "book kept in one folder, as earlier versions read it, util/move-to-src.py -d "
+            f"{folder} moves it into that layout, and with --dry-run says what it would do "
+            "first. For a new book, make src/book/ and put its sources there.")
 
 
 # The file in output/ that says a run made the folder, and what it holds:
@@ -513,10 +547,10 @@ _LOCKS = []
 
 
 def claim_output(folder):
-    """Make the project's output/ this run's, in the layout with src/:
-    an output/ that holds something and wasn't made by a run stops it,
-    and a new or empty one gets the marker. Nothing in today's layout,
-    which has no output/."""
+    """Make the project's output/ this run's: an output/ that holds
+    something and wasn't made by a run stops it, and a new or empty one
+    gets the marker. Nothing in a folder that isn't a project, which
+    has no output/."""
     project = of(folder)
     if not isinstance(project, Tree):
         return None
@@ -539,7 +573,7 @@ def claim_output(folder):
 
 
 def lock(folder):
-    """Hold the project for this run, in the layout with src/: a second
+    """Hold the project for this run: a second
     run in the same project stops while the first goes, since both would
     write the same files. The lock is the operating system's on
     output/work/lock, let go when the run ends however it ends; where
@@ -589,8 +623,7 @@ def refused_link(folder, parts=()):
     """The first of a project's own folders that is a link, as a message,
     or None: src/, sidecars/, output/, originals/, and upstream/, a part's
     folder in each of the first two, output/work/, and under it tmp/,
-    staging/ and replaced/ and their folders for targets and packages. A project in today's
-    layout has none of them."""
+    staging/ and replaced/ and their folders for targets and packages."""
     names = list(OWN_FOLDERS) + [os.path.join("output", "work")] + [
         os.path.join("output", "work", *below)
         for below in (("tmp",), ("staging",), ("staging", "targets"), ("staging", "packages"),
@@ -750,10 +783,11 @@ _BESIDE = [False]
 
 def build_beside(folder, on=True):
     """Have this process build each target of the project beside its
-    folder, in the layout with src/: target_dir answers the folder under
+    folder: target_dir answers the folder under
     output/work/staging/ until put_in_place swaps it in. Said by the run
     and by each builder the run starts; a builder run by hand writes the
-    target's folder itself, as it did. Nothing in today's layout."""
+    target's folder itself, as it did. Nothing in a folder that isn't a
+    project."""
     _BESIDE[0] = bool(on) and isinstance(of(folder), Tree)
     return _BESIDE[0]
 
@@ -868,15 +902,16 @@ def settle(folder):
 # one place.
 
 def use_tmp(folder, empty=True):
-    """Keep this run's temporary files in the project, in the layout with
-    src/: output/work/tmp/, emptied when a run starts (not for a run of
+    """Keep this run's temporary files in the project, in
+    output/work/tmp/: emptied when a run starts (not for a run of
     one part that a project's run started, which shares its folder), and
     named to this process and every program it starts as the temporary
     folder (TMPDIR). What an interrupted run leaves is then inside the
     project, where the next run clears it, and nothing of a book's is
     written to a folder other users of the machine share. The marker and
     the lock come first: the folder is emptied only in an output/ a run
-    made, by the one run that holds it. Nothing in today's layout."""
+    made, by the one run that holds it. Nothing in a folder that isn't a
+    project."""
     project = of(folder)
     if not isinstance(project, Tree):
         return None

@@ -14,7 +14,7 @@ python3 $T/bin/build-cartridge.py --init          # write packaging-sample.yaml 
 python3 $T/bin/build-cartridge.py --toc book.pdf  # order from the PDF's outline, or book.epub
 ```
 
-The manifest, the list of files, and the archive go to `output/packages/cartridge/`, and a sample to `output/reports/book/` ([A project's folders](layout.md)). A book still kept in one folder names its pages' folder with `--pages html`, and has all four beside its settings.
+The manifest, the list of files, and the archive go to `output/packages/cartridge/`, and a sample to `output/reports/book/` ([A project's folders](layout.md)).
 
 ### Ordering from the book's own table of contents
 
@@ -33,11 +33,9 @@ Note that it follows the book faithfully. If the PDF puts per-chapter answer pag
 | Option | Default | Effect |
 |---|---|---|
 | `-d`, `--dir` | `.` | The project's folder |
-| `--pages` | `--dir` | Only for a book kept in one folder: the directory holding the pages and media, `html` for a book `convert.py` converted. Refused in a project laid out with `src/` |
 | `-c`, `--config` | `<dir>/packaging.yaml` | Packaging configuration |
 | `--package` | the only one | Which package to build, when several are defined. `--target` is its old name, which warns and goes after 1.0 |
 | `--allow-unknown-keys` | off | Report unrecognized settings instead of refusing them |
-| `-o`, `--output` | `<dir>/imsmanifest.xml` | Manifest to write |
 | `--toc PDF-OR-EPUB` | — | Order from a PDF's bookmark outline or an EPUB's table of contents |
 | `--include-all-html` | off | Place pages the config doesn't list |
 | `--zip` | off | Also build the `.imscc` |

@@ -4870,6 +4870,63 @@ def check_suites_lay_out_only_books():
     ]
 
 
+def check_not_a_project():
+    """projectpaths.not_a_project, by which convert.py and the three
+    builders stop on a folder that isn't a project: None for a src/ of
+    folders alone, and for anything else why, with the utility that
+    moves a book kept in one folder and the folder to give it."""
+    sys.path.insert(0, os.path.join(ROOT, "lib"))
+    import projectpaths
+    work = tempfile.mkdtemp(prefix="not-a-project-")
+
+    def folder(name, *made):
+        path = os.path.join(work, name)
+        os.makedirs(path)
+        for one in made:
+            if one.endswith("/"):
+                os.makedirs(os.path.join(path, one))
+            else:
+                os.makedirs(os.path.dirname(os.path.join(path, one)), exist_ok=True)
+                open(os.path.join(path, one), "w").close()
+        return path
+    said = {name: projectpaths.not_a_project(folder(name, *made)) for name, made in (
+        ("project", ("src/book/", "src/.gitkeep", "project.yaml")),
+        ("flat", ("ch1.md", "project.yaml")),
+        ("bare", ()),
+        ("loose", ("src/figures/", "src/main.tex")),
+        ("unparted", ("src/",)),
+        ("linked", ()))}
+    os.symlink(os.path.join(work, "project", "src"), os.path.join(work, "linked", "src"))
+    by_link = (projectpaths.not_a_project(os.path.join(work, "linked")),
+               projectpaths.refused_link(os.path.join(work, "linked")))
+    tools = {}
+    for name in ("convert.py", "build-pdf.py", "build-epub.py", "build-cartridge.py"):
+        with open(os.path.join(ROOT, "bin", name), encoding="utf-8") as fh:
+            tools[name] = "projectpaths.not_a_project(" in fh.read()
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("a folder whose src/ holds a part's folder and no file but a dot file is a project",
+         lambda: said["project"] is None),
+        ("sources beside the settings, and an empty folder, have no src/",
+         lambda: all("isn't a project: it has no src/." in said[n] for n in ("flat", "bare"))),
+        ("a src/ with a file beside its folders names the file, and one with no folder "
+         "says so",
+         lambda: "its src/ holds files of its own (main.tex)" in said["loose"]
+         and "its src/ holds no part's folder" in said["unparted"]),
+        ("each says where a part's sources go, names util/move-to-src.py with the folder "
+         "and --dry-run, and says how a new book starts",
+         lambda: all(f"util/move-to-src.py -d {os.path.join(work, n)} " in said[n]
+                     and "--dry-run" in said[n] and "src/book/" in said[n]
+                     and "make src/book/" in said[n]
+                     for n in ("flat", "bare", "loose", "unparted"))),
+        ("a src/ that is a link to a project's is read as the folder it leads to, which "
+         "the run's own check of links then refuses",
+         lambda: by_link[0] is None and by_link[1] and "src" in by_link[1]),
+        ("convert.py and the three builders each ask it",
+         lambda: all(tools.values())),
+    ]
+
+
 def check_pages_written():
     """The pages of the PDF LaTeX wrote, as its last lines say, which a
     book's build counts in its last line beside the book's pages, and a
@@ -11448,6 +11505,7 @@ GROUPS = [
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a file of TeX's own, looked for where TeX is installed", check_installed_tex_file),
     ("the suites' own laying out, held to a book's folder", check_suites_lay_out_only_books),
+    ("a folder that isn't a project, and what a tool says of it", check_not_a_project),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("the pages of the PDF LaTeX wrote, as it says", check_pages_written),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),

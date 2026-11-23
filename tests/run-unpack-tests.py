@@ -406,6 +406,10 @@ SMALL_CARTRIDGE = """<?xml version="1.0" encoding="UTF-8"?>
 </resources></manifest>"""
 
 
+def fail(message):
+    raise AssertionError(message)
+
+
 def tool(name, *arguments):
     return subprocess.run(["python3", os.path.join(BIN, name), *arguments],
                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
@@ -461,6 +465,9 @@ def case_part(work):
     with open(os.path.join(flat, "chapter.md"), "w") as fh:
         fh.write("# A chapter\n")
     in_flat = tool("unpack-epub.py", epub, "-o", flat, "--part", "book")
+    # With no --part, the part is the book.
+    plain = os.path.join(work, "plain")
+    by_default = tool("unpack-epub.py", epub, "-o", plain)
     unmarked = os.path.join(work, "unmarked")
     os.makedirs(os.path.join(unmarked, "output"))
     with open(os.path.join(unmarked, "output", "mine.txt"), "w") as fh:
@@ -552,6 +559,15 @@ def case_part(work):
         ("a folder that holds a book's sources at its top is refused",
          lambda: in_flat.returncode != 0 and "util/move-to-src.py" in in_flat.stderr
          and sorted(os.listdir(flat)) == ["chapter.md"]),
+        ("with no --part the part is book: the pages in src/book/, the report in "
+         "output/reports/book/, and nothing but the settings at the project's top",
+         lambda: by_default.returncode == 0
+         and os.path.isdir(os.path.join(plain, "src", "book"))
+         and os.path.isfile(os.path.join(plain, "output", "reports", "book",
+                                         "unpack-report.csv"))
+         and sorted(os.listdir(plain)) == ["output", "project.yaml", "src", "upstream"]
+         or fail(by_default.stderr[-300:] + str(sorted(os.listdir(plain))
+                                               if os.path.isdir(plain) else None))),
         ("an output/ that a run didn't make is refused, and the part's folder isn't left",
          lambda: in_unmarked.returncode != 0 and "wasn't made by a run" in in_unmarked.stderr
          and not os.path.exists(os.path.join(unmarked, "src", "book"))

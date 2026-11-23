@@ -1707,6 +1707,7 @@ def case_implied(work):
     result = convert(work, "--quick")
     plain = os.path.join(os.path.dirname(work), "plain")
     os.makedirs(plain)
+    laidout.project(plain)
     write(place(plain, "one.md"), "---\ntitle:\n- One Page\nlinkcolor: blue\n---\n\n"
           "# Body\n\nA [link](https://example.org/).\n")
     write(place(plain, "project.yaml"),

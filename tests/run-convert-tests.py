@@ -130,6 +130,10 @@ def walk_json(node):
             yield from walk_json(value)
 
 
+def fail(message):
+    raise AssertionError(message)
+
+
 def exists(*parts):
     return os.path.exists(place(*parts) if len(parts) > 1 else parts[0])
 
@@ -199,7 +203,7 @@ def case_names(work):
          and not exists(work, "outer", "inner", "shared", "pages") or fail(shared.stderr)),
         ("output_dir: . stops a project's run, which says each target has a folder of its own",
          lambda: beside.returncode != 0
-         and "has output_dir: '.'. In a project laid out with src/" in beside.stderr
+         and "has output_dir: '.'. Each target is written to a folder of its own under output/" in beside.stderr
          and not exists(work, "outer", "inner", "beside", "output", "html")
          or fail(beside.stderr)),
     ]
@@ -546,8 +550,9 @@ def case_asciidoc(work):
 
 def case_tree_layout(work):
     """A book laid out with its sources in src/book/ and its sidecars in
-    sidecars/book/ builds what the same book builds with everything in
-    one folder, and writes only under output/."""
+    sidecars/book/ builds and writes only under output/; the same book
+    with everything in one folder stops the run, which names the utility
+    that moves it, and once moved builds the same files."""
     def lay(folder, sources, sidecars):
         os.makedirs(os.path.join(sources, "assets"), exist_ok=True)
         if sources != folder:
@@ -596,7 +601,19 @@ def case_tree_layout(work):
     lay(flat, flat, flat)
     lay(tree, os.path.join(tree, "src", "book"), os.path.join(tree, "sidecars", "book"))
     before = files(os.path.join(tree, "src"))
+    flat_before = files(flat)
     ran_flat, ran_tree = build(flat), build(tree)
+    flat_after = files(flat)
+    # Each builder run by hand stops on it too, as it does on a folder
+    # whose src/ holds a file beside the parts' folders.
+    by_hand = {tool: subprocess.run(["python3", os.path.join(BIN, tool), "-d", flat],
+                                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
+               for tool in ("build-pdf.py", "build-epub.py", "build-cartridge.py")}
+    loose = os.path.join(work, "loose")
+    os.makedirs(os.path.join(loose, "src", "figures"))
+    with open(os.path.join(loose, "src", "main.tex"), "w", encoding="utf-8") as fh:
+        fh.write("\\documentclass{book}\\begin{document}One.\\end{document}\n")
+    ran_loose = build(loose)
     # The same book in one folder, moved by the utility a person would
     # use, and built: what it moves is checked for where it lands in the
     # unit suite, and here for what it builds.
@@ -609,13 +626,9 @@ def case_tree_layout(work):
     built_moved = {name: {k: v for k, v in files(os.path.join(moved, "output", name)).items()
                           if not k.startswith("intermediates" + os.sep)}
                    for name in ("html", "epub", "word")}
-    targets = {name: (files(os.path.join(flat, name)),
-                      files(os.path.join(tree, "output", name)))
+    targets = {name: {k: v for k, v in files(os.path.join(tree, "output", name)).items()
+                      if not k.startswith("intermediates" + os.sep)}
                for name in ("html", "epub", "word")}
-    for name in ("html", "word"):         # a target's own intermediates, kept elsewhere
-        targets[name] = tuple({k: v for k, v in side.items()
-                               if not k.startswith("intermediates" + os.sep)}
-                              for side in targets[name])
     page = read(tree, "output", "html", "tables.html") \
         if exists(tree, "output", "html", "tables.html") else ""
     # A setting's file that isn't at the top stops the run, though the
@@ -629,19 +642,35 @@ def case_tree_layout(work):
             fh.write("PLANTED { color: red }\n")
         stops[label] = build(tree)
     return [
-        ("each layout's run succeeds",
-         lambda: ran_flat.returncode == 0 and ran_tree.returncode == 0
+        ("the project's run succeeds",
+         lambda: ran_tree.returncode == 0 and all(targets.values())
          or fail(ran_tree.stderr[-600:])),
-        ("the pages, the EPUB, and the Word files are the same files from either layout",
-         lambda: all(a and a == b for a, b in targets.values())
-         or fail(str({n: sorted(set(a.items()) ^ set(b.items()))[:4]
-                      for n, (a, b) in targets.items() if a != b}))),
-        ("the book in one folder, moved by util/move-to-src.py, builds the same files too",
+        ("a book with everything in one folder stops the run, which says the folder "
+         "isn't a project, names util/move-to-src.py with the folder, and writes nothing",
+         lambda: ran_flat.returncode != 0
+         and "isn't a project: it has no src/" in ran_flat.stderr
+         and f"util/move-to-src.py -d {flat}" in ran_flat.stderr
+         and "Nothing was converted." in ran_flat.stderr
+         and flat_after == flat_before
+         or fail(ran_flat.stderr[-600:] + str(sorted(set(flat_after) - set(flat_before))))),
+        ("each builder run by hand stops on it likewise",
+         lambda: all(run.returncode != 0 and "isn't a project" in run.stderr
+                     and "util/move-to-src.py" in run.stderr
+                     and "Nothing was built." in run.stderr for run in by_hand.values())
+         and files(flat) == flat_before
+         or fail(str({k: (v.returncode, v.stderr[-200:]) for k, v in by_hand.items()}))),
+        ("a folder whose src/ holds a file beside its folders stops the run too, naming "
+         "the file",
+         lambda: ran_loose.returncode != 0
+         and "its src/ holds files of its own (main.tex)" in ran_loose.stderr
+         and not os.path.exists(os.path.join(loose, "output"))
+         or fail(ran_loose.stderr[-600:])),
+        ("the book in one folder, moved by util/move-to-src.py, builds the same files",
          lambda: (mover.returncode == 0 or fail(mover.stderr[-600:]))
          and (ran_moved.returncode == 0 or fail(ran_moved.stderr[-600:]))
-         and all(built_moved[n] and built_moved[n] == targets[n][1] for n in targets)
-         or fail(str({n: sorted(set(built_moved[n].items()) ^ set(targets[n][1].items()))[:4]
-                      for n in targets if built_moved[n] != targets[n][1]}))),
+         and all(built_moved[n] and built_moved[n] == targets[n] for n in targets)
+         or fail(str({n: sorted(set(built_moved[n].items()) ^ set(targets[n].items()))[:4]
+                      for n in targets if built_moved[n] != targets[n]}))),
         ("a footer whose text is the name of a file among the sources is still that text",
          lambda: "Free to read" in page and "PLANTED" not in page),
         ("a stylesheet the settings name that is among the sources and not at the top "
@@ -1014,9 +1043,9 @@ def case_two_parts(work):
          and parts_built == ["slides"]
          or fail(str((one.returncode, alone, parts_built)) + one.stderr[-300:])),
         ("a part the project hasn't stops the run, naming the ones it has, and --part in a "
-         "folder that holds its sources itself stops it too",
+         "folder that holds its sources itself stops it as any run there does",
          lambda: unknown.returncode != 0 and "book, slides" in unknown.stderr
-         and in_flat.returncode != 0 and "--part" in in_flat.stderr),
+         and in_flat.returncode != 0 and "isn't a project" in in_flat.stderr),
         ("-d builds a project from another folder, each part's run started in the project",
          lambda: elsewhere.returncode == 0 and {"html", "handout"} <= set(from_elsewhere)
          or fail(str(elsewhere.returncode) + elsewhere.stderr[-300:])),
@@ -2029,10 +2058,6 @@ def case_samples_moved(work):
     macros = convert(tex)
     macros_sample = os.path.join("output", "reports", "book",
                                  "latex-conversion-macros-sample.tex")
-    flat = os.path.join(outer, "flat")
-    write("flat/ch1.md", "# Chapter One\n\nText.\n")
-    flat_run = convert(flat)
-    flat_init = tool("read-conversion-config.py", "--init", folder=flat)
     return [
         ("a run that needs the book's name says to move project-sample.yaml from "
          "the reports to the project's top, and the sample moved there names the book",
@@ -2062,13 +2087,6 @@ def case_samples_moved(work):
          and "save it as latex-conversion-macros.tex in the project's folder." in said(macros)
          and "latex-conversion-macros.tex in the project's folder" in read(tex, macros_sample)
          or fail_text(macros, None)),
-        ("with its sources at its top, a project's samples lie beside the files they "
-         "stand for and are renamed",
-         lambda: "rename it to project.yaml, and run again" in said(flat_run)
-         and "lost by renaming it" in said(flat_run)
-         and "Rename it to conversion.yaml" in said(flat_init)
-         and "move it" not in (said(flat_run) + said(flat_init)).lower()
-         or fail_text(flat_run, said(flat_init))),
     ]
 
 
@@ -4039,9 +4057,10 @@ def case_compare_blocks(work):
 
 
 def case_warc_direct(work):
-    """convert.py in a directory holding a web archive and nothing else
-    unpacks it and converts the pages; later runs leave the pages, the
-    book from then on, alone."""
+    """A project whose part names a web archive in upstream/ as its from
+    has it unpacked into the part's folder by its first run, which
+    converts the pages; later runs leave the pages, the book from then
+    on, alone. The archive alone in a folder isn't a project."""
     import importlib.util
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: unpacking needs html5lib or lxml", lambda: True)]
@@ -4059,70 +4078,73 @@ def case_warc_direct(work):
         for name in ("one", "two"))
     config = "targets:\n  html:\n    format: html\n"
 
-    def fresh(where, extra=None):
-        os.makedirs(where)
-        with open(os.path.join(where, "crawl.warc.gz"), "wb") as fh:
+    def fresh(where):
+        os.makedirs(os.path.join(where, "upstream"))
+        with open(os.path.join(where, "upstream", "crawl.warc.gz"), "wb") as fh:
             fh.write(archive)
         with open(os.path.join(where, "conversion.yaml"), "w") as fh:
             fh.write(config)
-        for name, text in (extra or {}).items():
-            with open(os.path.join(where, name), "w") as fh:
-                fh.write(text)
+        with open(os.path.join(where, "project.yaml"), "w") as fh:
+            fh.write("project:\n  title: Mine\n  parts:\n    book:\n      kind: book\n"
+                     "      from: upstream/crawl.warc.gz\n")
 
     def run(where, *flags):
         return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
                                "--quiet", *flags], cwd=where,
                               capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
+
+    def held(where, *names):
+        folder = os.path.join(where, *names)
+        return sorted(n for n in os.listdir(folder) if n.endswith(".html")) \
+            if os.path.isdir(folder) else []
     fresh(work)
     first = run(work)
-    pages = sorted(n for n in os.listdir(work) if n.endswith(".html"))
-    converted = sorted(n for n in os.listdir(os.path.join(work, "html"))
-                       if n.endswith(".html")) if os.path.isdir(
-        os.path.join(work, "html")) else []
-    corrected = ""
+    pages = held(work, "src", "book")
+    converted = held(work, "output", "html")
+    corrected, second = "", None
     if pages:
-        path = os.path.join(work, pages[0])
+        path = os.path.join(work, "src", "book", pages[0])
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.replace("page.", "page, corrected."))
         second = run(work)
-        with open(os.path.join(work, "html", pages[0]), encoding="utf-8") as fh:
+        with open(os.path.join(work, "output", "html", pages[0]), encoding="utf-8") as fh:
             corrected = fh.read()
-    kept = work + "-kept"
-    fresh(kept, {"project.yaml": "project:\n  title: Mine\n"})
-    run(kept)
     checked = work + "-checked"
     fresh(checked)
     check = run(checked, "--check-only")
-    # Both names an unpacked project.yaml could take are here: the run
-    # stops, and stops before moving anything, the pages included.
-    clash = work + "-clash"
-    fresh(clash, {"project.yaml": "project:\n  title: Mine\n",
-                  "project-unpacked.yaml": "project:\n  title: Older\n"})
-    clashed = run(clash)
+    # The archive and the settings alone in a folder, as a run once read.
+    alone = work + "-alone"
+    os.makedirs(alone)
+    with open(os.path.join(alone, "crawl.warc.gz"), "wb") as fh:
+        fh.write(archive)
+    with open(os.path.join(alone, "conversion.yaml"), "w") as fh:
+        fh.write(config)
+    lone = run(alone)
     return [
-        ("a directory holding only a WARC is unpacked into it, project.yaml "
-         "and all", lambda: len(pages) == 2 and os.path.isfile(
-             os.path.join(work, "project.yaml"))),
+        ("a part's WARC in upstream/ is unpacked into the part's folder by the project's "
+         "first run", lambda: len(pages) == 2
+         and "upstream/crawl.warc.gz unpacked into" in first.stderr
+         or fail(first.stderr[-600:])),
         ("and its pages are converted in the same run",
          lambda: len(converted) >= 2),
-        ("a later run converts the corrected page and doesn't unpack again",
-         lambda: "corrected" in corrected),
-        ("a project.yaml already there is kept, the unpacker's beside it",
-         lambda: "Mine" in open(os.path.join(kept, "project.yaml")).read()
-         and os.path.isfile(os.path.join(kept, "project-unpacked.yaml"))),
-        ("--check-only unpacks nothing",
-         lambda: not [n for n in os.listdir(checked) if n.endswith(".html")]),
-        ("a name the archive's files would take, here already, stops the "
-         "run before anything is moved",
-         lambda: clashed.returncode != 0
-         and "project-unpacked.yaml is already here" in clashed.stderr
-         + clashed.stdout
-         and not [n for n in os.listdir(clash) if n.endswith(".html")]
-         and "Older" in open(place(clash,
-                                          "project-unpacked.yaml")).read()),
+        ("a later run converts the corrected page, doesn't unpack again, and says the "
+         "folder no longer matches the archive",
+         lambda: "corrected" in corrected and "unpacked into" not in second.stderr
+         and "no longer matches" in second.stderr),
+        ("the project's project.yaml is kept, the unpacker's beside the report",
+         lambda: "Mine" in open(os.path.join(work, "project.yaml")).read()
+         and os.path.isfile(os.path.join(work, "output", "reports", "book",
+                                         "project-unpacked.yaml"))),
+        ("--check-only says the archive would be unpacked, and unpacks nothing",
+         lambda: "would be unpacked" in check.stderr + check.stdout
+         and not held(checked, "src", "book")),
+        ("the archive alone in a folder isn't a project: the run stops and unpacks "
+         "nothing",
+         lambda: lone.returncode != 0 and "isn't a project" in lone.stderr
+         and sorted(os.listdir(alone)) == ["conversion.yaml", "crawl.warc.gz"]),
     ]
 
 
@@ -4195,24 +4217,27 @@ def case_cartridge(work):
         z.write(os.path.join(FIXTURES, "metadata.docx"), "web_resources/reading.docx")
         z.write(os.path.join(FIXTURES, "tables.docx"), "web_resources/Setup Checklist.docx")
         z.writestr("non_cc_assessments/q.qti", "<questestinterop/>")
+    def unpacked(folder, cartridge, *options, targets="  epub:\n    format: epub3\n"):
+        """The cartridge unpacked as a project's book, and the project
+        converted."""
+        subprocess.run(["python3", os.path.join(BIN, "unpack-cartridge.py"), cartridge,
+                        "-o", folder, *options], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write("targets:\n  html:\n    format: html\n" + targets)
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+                               "--quiet"], cwd=folder, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
     book = os.path.join(work, "book")
-    os.makedirs(book)
-    shutil.copy(course, book)
-    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n"
-                 "  epub:\n    format: epub3\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
-                         cwd=book, capture_output=True, text=True,
-                         stdin=subprocess.DEVNULL)
+    run = unpacked(book, course)
     project = open(os.path.join(book, "project.yaml")).read() if exists(
         book, "project.yaml") else ""
-    report = open(os.path.join(book, "unpack-report.csv")).read() if exists(
-        book, "unpack-report.csv") else ""
+    report = read(book, "unpack-report.csv") if exists(book, "unpack-report.csv") else ""
     page_b_out = read(book, "Read-this-week.html") if exists(
         book, "Read-this-week.html") else ""
     a_out = read(book, "html", "a.html") if exists(book, "html", "a.html") else ""
-    checked = open(os.path.join(book, "output-check.csv")).read() if exists(
-        book, "output-check.csv") else ""
+    checked = read(book, "output-check.csv") if exists(book, "output-check.csv") else ""
     epub_text = ""
     for root_dir, _, files in os.walk(book):
         for name in files:
@@ -4222,43 +4247,36 @@ def case_cartridge(work):
                                         for n in z.namelist()
                                         if n.endswith(".xhtml"))
 
-    # The same cartridge with --linked-documents.
+    # The same cartridge with --linked-documents, which is the
+    # unpacker's option: a run takes it from a part's from.
     linked = os.path.join(work, "linked")
-    os.makedirs(linked)
-    shutil.copy(course, linked)
-    with open(os.path.join(linked, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n"
-                 "  epub:\n    format: epub3\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
-                    "--linked-documents"], cwd=linked, capture_output=True,
-                   text=True, stdin=subprocess.DEVNULL)
+    unpacked(linked, course, "--linked-documents")
     linked_project = open(os.path.join(linked, "project.yaml")).read() if exists(
         linked, "project.yaml") else ""
     linked_a = read(linked, "html", "a.html") if exists(linked, "html", "a.html") else ""
-    linked_checked = open(os.path.join(linked, "output-check.csv")).read() if exists(
+    linked_checked = read(linked, "output-check.csv") if exists(
         linked, "output-check.csv") else ""
+    asked = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
+                            "--check-only", "--linked-documents"], cwd=linked,
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     # Our own cartridge, read back.
     ours = os.path.join(work, "ours")
     convert(ours, "targets:\n  html:\n    format: html\n", arguments=["--zip"])
     back = os.path.join(work, "back")
-    os.makedirs(back)
-    # Ours is a project; the cartridge it packs is unpacked alone in a
-    # folder, as the others here are.
     built = place(ours, "org.example.fixtures.imscc")
     if os.path.exists(built):
-        shutil.copy(built, back)
-    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
-                   cwd=back, capture_output=True, text=True,
-                   stdin=subprocess.DEVNULL)
+        unpacked(back, built, targets="")
     agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
-                            place(ours, "html"), os.path.join(back, "html")],
+                            place(ours, "html"), place(back, "html")],
                            capture_output=True, text=True).stdout
     return [
-        ("a cartridge alone in a directory is unpacked and converted",
-         lambda: run.returncode == 0 and exists(book, "html", "a.html")),
+        ("a cartridge unpacked as a project's book converts, the cartridge copied to the "
+         "project's upstream/ and named as the part's from",
+         lambda: run.returncode == 0 and exists(book, "html", "a.html")
+         and os.path.isfile(os.path.join(book, "upstream", "course.imscc"))
+         and 'file: "upstream/course.imscc"' in project
+         or fail(run.stderr[-600:])),
         ("modules are groups, and a Canvas text header groups the entries "
          "after it", lambda: re.search(r'title: "Week 1"\s+items:\s+- title: '
                                        r'"Readings"\s+items:\s+- page: a', project)),
@@ -4283,6 +4301,8 @@ def case_cartridge(work):
          "the switch would make it a page",
          lambda: 'href="web_resources/Setup-Checklist.docx"' in a_out
          and "linked-document-kept" in report),
+        ("--linked-documents given to a run stops it, naming the part's from as its place",
+         lambda: asked.returncode != 0 and "options: [--linked-documents]" in asked.stderr),
         ("with --linked-documents it's a page beneath the page linking to it, "
          "titled by the link, in the HTML and the EPUB",
          lambda: re.search(r'- title: "Page A"\s+items:\s+- page: a\s+'
@@ -4307,16 +4327,32 @@ def case_cartridge(work):
 
 
 def case_zip(work):
-    """A plain zip of a book's files, alone in a directory: extracted with
-    the folder around it dropped, nothing let outside the book, the
-    directory's own settings kept, and nothing done with a zip holding no
-    sources or with a slide deck, which is a zip too."""
+    """A plain zip of a book's files, named as a part's from: extracted
+    into the part's folder with the folder around it dropped, nothing let
+    outside it, the project's own settings the ones read, a browser's
+    save in a zip unpacked as one, and a slide deck, which is a zip too,
+    read as a deck."""
     import importlib.util
     import zipfile
     os.makedirs(work)
-    book = os.path.join(work, "book")
-    os.makedirs(book)
-    with zipfile.ZipFile(os.path.join(book, "My Book.zip"), "w") as z:
+
+    def project(name, archive, targets="html:\n    format: html"):
+        folder = os.path.join(work, name)
+        os.makedirs(os.path.join(folder, "upstream"))
+        with open(os.path.join(folder, "project.yaml"), "w") as fh:
+            fh.write("project:\n  title: A Book\n  parts:\n    book:\n      kind: book\n"
+                     "      from:\n"
+                     f"        file: upstream/{archive}\n        unpacker: archive\n")
+        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            fh.write(f"targets:\n  {targets}\n")
+        return folder, zipfile.ZipFile(os.path.join(folder, "upstream", archive), "w")
+
+    def run(where):
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+                               "--quiet"], cwd=where, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL)
+    book, z = project("book", "My Book.zip")
+    with z:
         z.writestr("My Book/ch1.md", "# One\n\n![A dot](images/dot.png)\n")
         z.writestr("My Book/ch2.md", "# Two\n\nThe first draft.\n")
         z.writestr("My Book/images/dot.png", ONE_PIXEL)
@@ -4324,100 +4360,104 @@ def case_zip(work):
         z.writestr("My Book/.DS_Store", "junk")
         z.writestr("__MACOSX/My Book/._ch1.md", "junk")
         z.writestr("../evil.txt", "outside")
-    with open(os.path.join(book, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n")
-
-    def run(where):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
-                               "--quiet"], cwd=where, capture_output=True,
-                              text=True, stdin=subprocess.DEVNULL)
+    sources = os.path.join(book, "src", "book")
     first = run(book)
-    if exists(book, "ch2.md"):
-        with open(os.path.join(book, "ch2.md"), "w") as fh:
+    if os.path.exists(os.path.join(sources, "ch2.md")):
+        with open(os.path.join(sources, "ch2.md"), "w") as fh:
             fh.write("# Two\n\nThe corrected draft.\n")
     second = run(book)
-    with zipfile.ZipFile(os.path.join(book, "another.zip"), "w") as z:
-        z.writestr("other.md", "# Other\n")
-    second_run = run(book)
-    empty = os.path.join(work, "empty")
-    os.makedirs(empty)
-    with zipfile.ZipFile(os.path.join(empty, "handouts.zip"), "w") as z:
+    empty, z = project("empty", "handouts.zip")
+    with z:
         z.writestr("handouts/slides.pdf", b"%PDF-1.4")
     none = run(empty)
     deck = os.path.join(work, "deck")
-    os.makedirs(deck)
-    with zipfile.ZipFile(os.path.join(deck, "talk.pptx"), "w") as z:
+    os.makedirs(os.path.join(deck, "src", "slides"))
+    with zipfile.ZipFile(os.path.join(deck, "src", "slides", "talk.pptx"), "w") as z:
         z.writestr("[Content_Types].xml", "<Types/>")
     deck_run = run(deck)
     # An OpenStax DOCX download: two folders around the Word files.
-    openstax = os.path.join(work, "openstax")
-    os.makedirs(openstax)
-    with zipfile.ZipFile(os.path.join(openstax, "Book_-_DOCX_Customization.zip"), "w") as z:
+    openstax, z = project("openstax", "Book_-_DOCX_Customization.zip")
+    with z:
         for name in ("tables.docx", "metadata.docx"):
             z.write(os.path.join(FIXTURES, name),
                     "Book_-_DOCX_Customization/book/" + name)
-    with open(os.path.join(openstax, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n")
     run(openstax)
-    saved = os.path.join(work, "saved")
-    os.makedirs(saved)
-    with zipfile.ZipFile(os.path.join(saved, "site.zip"), "w") as z:
+    saved, z = project("saved", "site.zip")
+    with z:
         z.writestr("Intro _ Site.html", '<!DOCTYPE html>\n<!-- saved from url=(0036)'
                    'https://example.org/book/intro.html -->\n<html lang="en"><head>'
                    '<title>Intro | Site</title></head><body><main><h1>Intro</h1>'
                    '<p>Hello.</p></main></body></html>')
         z.writestr("Intro _ Site_files/style.css", "body { }")
-    with open(os.path.join(saved, "conversion.yaml"), "w") as fh:
-        fh.write("targets:\n  html:\n    format: html\n")
     saved_run = run(saved)
-    saved_pages = [n for n in os.listdir(saved) if n.endswith(".html")]
-    report = open(os.path.join(book, "unpack-report.csv")).read() if exists(
-        book, "unpack-report.csv") else ""
-    report_marked = exists(book, "unpack-report.csv") and open(
-        os.path.join(book, "unpack-report.csv"), "rb").read(3) == b"\xef\xbb\xbf"
+    saved_sources = os.path.join(saved, "src", "book")
+    saved_pages = [n for n in os.listdir(saved_sources) if n.endswith(".html")] \
+        if os.path.isdir(saved_sources) else []
+    saved_again = run(saved)
+    report_path = os.path.join(book, "output", "reports", "book", "unpack-report.csv")
+    report = open(report_path, encoding="utf-8-sig").read() \
+        if os.path.exists(report_path) else ""
+    report_marked = os.path.exists(report_path) and open(
+        report_path, "rb").read(3) == b"\xef\xbb\xbf"
     return [
-        ("a zip alone in a directory is extracted, the folder around it "
-         "dropped, and converted", lambda: "Unpacked My Book.zip" in first.stderr
-         and exists(book, "ch1.md") and exists(book, "images", "dot.png")
-         and not exists(book, "My Book") and exists(book, "html", "ch1.html")),
-        ("macOS's litter stays out", lambda: not exists(book, "__MACOSX")
-         and not exists(book, ".DS_Store")),
-        ("an entry that would land outside the book is refused and reported",
-         lambda: not os.path.exists(os.path.join(work, "evil.txt"))
+        ("a zip named as a part's from is extracted into the part's folder, the folder "
+         "around it dropped, and converted",
+         lambda: "upstream/My Book.zip unpacked into" in first.stderr
+         and os.path.exists(os.path.join(sources, "ch1.md"))
+         and os.path.exists(os.path.join(sources, "images", "dot.png"))
+         and not os.path.exists(os.path.join(sources, "My Book"))
+         and os.path.exists(os.path.join(book, "output", "html", "ch1.html"))
+         or fail(first.stderr[-600:])),
+        ("macOS's litter stays out",
+         lambda: not os.path.exists(os.path.join(sources, "__MACOSX"))
+         and not os.path.exists(os.path.join(sources, ".DS_Store"))),
+        ("an entry that would land outside the part's folder is refused and reported",
+         lambda: not any(name == "evil.txt" for _root, _dirs, names in os.walk(work)
+                         for name in names)
          and "unsafe-path" in report),
         ("in unpack-report.csv, which starts with a byte-order mark, for Excel",
          lambda: report_marked),
-        ("the directory's own conversion.yaml is kept, the zip's beside it",
-         lambda: "html" in open(os.path.join(book, "conversion.yaml")).read()
-         and exists(book, "conversion-unpacked.yaml")),
+        ("the project's own conversion.yaml is the one read, the zip's left among the "
+         "sources",
+         lambda: os.path.exists(os.path.join(sources, "conversion.yaml"))
+         and "html" in open(os.path.join(book, "conversion.yaml")).read()
+         and not os.path.exists(os.path.join(book, "output", "md"))),
         ("a later run converts a correction and doesn't extract again",
-         lambda: "corrected" in read(book, "html", "ch2.html")
-         and "not read" in second.stdout + second.stderr),
-        ("a zip with no sources stops the run, saying what it holds",
-         lambda: none.returncode != 0 and "slides.pdf" in none.stdout + none.stderr
-         and not exists(empty, "slides.pdf")),
+         lambda: "corrected" in open(os.path.join(book, "output", "html", "ch2.html")).read()
+         and "unpacked into" not in second.stdout + second.stderr),
+        ("a zip with no sources stops the run",
+         lambda: none.returncode != 0
+         and not os.path.exists(os.path.join(empty, "output", "html"))
+         or fail(str(none.returncode) + none.stderr[-600:])),
         ("a zip of a browser's save goes through unpack-site.py: pages named "
-         "from their addresses, not the browser's file names",
-         lambda: "saved from a browser" in saved_run.stderr
-         and len(saved_pages) == 1 and "_" not in saved_pages[0]
-         and exists(saved, "project.yaml"))
+         "from their addresses, not the browser's file names, the unpacker's project.yaml "
+         "beside the report naming no folder of the run's own, and a later run not taking "
+         "the part's folder for changed",
+         lambda: ("saved from a browser" in saved_run.stderr
+                  and len(saved_pages) == 1 and "_" not in saved_pages[0]
+                  and os.path.exists(os.path.join(saved, "output", "html", saved_pages[0]))
+                  and "output/work" not in open(os.path.join(
+                      saved, "output", "reports", "book", "project-unpacked.yaml")).read()
+                  and "no longer matches" not in saved_again.stderr
+                  and "saved from a browser" not in saved_again.stderr)
+         or fail(saved_run.stderr[-600:] + saved_again.stderr[-300:]))
         if importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")
         else ("skip: a browser's save in a zip needs html5lib or lxml", lambda: True),
         ("Word files two folders deep, as OpenStax zips them, are sources "
-         "and convert", lambda: exists(openstax, "tables.docx")
-         and exists(openstax, "html", "tables.html")
-         and exists(openstax, "html", "metadata.html")
-         and not exists(openstax, "Book_-_DOCX_Customization")),
-        ("with sources here, a second archive beside the first (a cartridge "
-         "--zip built, say) isn't read, and the run goes on",
-         lambda: second_run.returncode == second.returncode
-         and "More than one thing" not in second_run.stderr),
+         "and convert",
+         lambda: os.path.exists(os.path.join(openstax, "src", "book", "tables.docx"))
+         and all(os.path.exists(os.path.join(openstax, "output", "html", name))
+                 for name in ("tables.html", "metadata.html"))
+         and not os.path.exists(os.path.join(openstax, "src", "book",
+                                             "Book_-_DOCX_Customization"))),
         ("a slide deck is a zip but not an archive to unpack: a folder of decks is "
          "slides, and one that isn't a deck says so",
-         lambda: "Unpacked" not in deck_run.stderr
-         and not exists(deck, "[Content_Types].xml")
+         lambda: "unpacked" not in deck_run.stderr.lower()
+         and not any(name == "[Content_Types].xml" for _root, _dirs, names in os.walk(deck)
+                     for name in names)
          and "Slides: 1 PowerPoint deck(s)" in deck_run.stderr
-         and "talk.pptx couldn't be read as a PowerPoint deck" in deck_run.stderr),
+         and "talk.pptx couldn't be read as a PowerPoint deck" in deck_run.stderr
+         or fail(deck_run.stderr[-600:])),
     ]
 
 

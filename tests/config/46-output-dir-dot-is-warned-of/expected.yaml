@@ -3,4 +3,4 @@
 target: epub
 expect:
   output_dir: .
-warns: "output_dir: ., which writes it into the book's own folder"
+warns: "output_dir: ., which wrote it into the book's own folder"

@@ -1,6 +1,6 @@
 """
-unpacking -- what the unpackers share: where each writes (one folder, or
-a part of a project laid out with src/), a project.yaml holding a book's
+unpacking -- what the unpackers share: where each writes (a part of a
+project, book unless --part names another), a project.yaml holding a book's
 metadata and its outline as contents, and unpack-report.csv. Standard
 library only.
 
@@ -33,7 +33,7 @@ import projectpaths
 P = projectpaths.of
 
 # What a book kept in one folder has at its top, by which a folder is
-# known not to be a project laid out with src/.
+# known not to be a project.
 FLAT_SOURCES = (".docx", ".md", ".html", ".adoc", ".asciidoc", ".tex", ".pptx", ".odp",
                 ".ppt", ".key")
 
@@ -116,11 +116,11 @@ def add_part_option(parser):
     # the lock of, or in a folder of its own for making the record again.
     parser.add_argument("--from-run", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
-        "--part", metavar="NAME",
-        help="write a project laid out with src/: -o is then the project's folder, the "
-             "sources go to src/NAME/ (book, for a book), a drafted sidecar to "
-             "sidecars/NAME/, the report to output/reports/NAME/, and project.yaml to "
-             "the top, with the file this was unpacked from as the part's from")
+        "--part", metavar="NAME", default="book",
+        help="the part of the project to write (default: book). -o names the project's "
+             "folder: the sources go to src/NAME/, a drafted sidecar to sidecars/NAME/, "
+             "the report to output/reports/NAME/, and project.yaml to the top, with the "
+             "file this was unpacked from as the part's from")
 
 
 # A version-control folder isn't the book's: Git's can hold a token
@@ -160,9 +160,8 @@ def copy_folder(source, dest):
 
 
 class Placed:
-    """Where an unpacker writes. Without a part, one folder, as before:
-    it must be missing or empty. With a part, a project laid out with
-    src/: the sources go to a missing or empty src/<part>/ and nothing
+    """Where an unpacker writes: a part of a project, whose folder out
+    is. The sources go to a missing or empty src/<part>/ and nothing
     else of the project's is replaced. A settings file goes to the top
     when there is none of its name, and beside the report as a sample
     when there is; a sidecar is written only where there is none.
@@ -173,17 +172,12 @@ class Placed:
     once the unpacking is done, so the project holds what it was made
     from, and every path it was read by is inside it."""
 
-    def __init__(self, out, part=None, upstream=None, unpacker=None, options=(),
+    def __init__(self, out, part, upstream=None, unpacker=None, options=(),
                  from_run=False):
         self.out, self.part, self.from_run = out, part, from_run
         self.unpacker, self.options = unpacker, list(options)
         self.kept, self.copy, self.source, self.unrecorded = [], None, None, None
-        if not part:
-            if os.path.exists(out) and os.listdir(out):
-                sys.exit(f"{out} exists and is not empty; unpacking would mix two "
-                         "books. Name another directory with -o.")
-            return
-        if not projectpaths.PART_NAME.match(part):
+        if not part or not projectpaths.PART_NAME.match(part):
             sys.exit(f"--part {part}: a part's name is a lowercase letter, then lowercase "
                      "letters, digits, - and _ (book, for a book).")
         why = None if from_run else projectpaths.refused_root(out)
@@ -241,7 +235,15 @@ class Placed:
         root = os.path.realpath(self.out)
         real = os.path.realpath(upstream)
         if real != root and os.path.commonpath([root, real]) == root:
-            self.source = os.path.relpath(real, root).replace(os.sep, "/")
+            inside = os.path.relpath(real, root).replace(os.sep, "/")
+            if inside.split("/")[0].lower() == "output":
+                # What a run wrote, or holds for the moment (an archive's
+                # pages extracted to be unpacked), is no part's upstream.
+                self.unrecorded = (f"{upstream} is in the project's output/, which a "
+                                   "part's from can't name, so the part's from isn't "
+                                   "written.")
+                return
+            self.source = inside
             return
         name = os.path.basename(real)
         if not os.path.isfile(real) and not os.path.isdir(real):

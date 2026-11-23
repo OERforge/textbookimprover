@@ -954,17 +954,14 @@ def build_day(environ=None):
 def main():
     parser = argparse.ArgumentParser(
         description="Build an IMS Common Cartridge manifest from HTML pages.")
-    parser.add_argument("--pages", default=None,
-                        help="read the pages from this directory rather "
-                             "than from --dir, which keeps the configuration, "
-                             "the sample, the manifest, and the archive; "
-                             "convert.py passes an html target's output_dir")
+    # Taken to say they're gone: a package's pages and its manifest's
+    # place aren't the command line's to give.
+    parser.add_argument("--pages", default=None, help=argparse.SUPPRESS)
     parser.add_argument("-d", "--dir", default=".",
-                        help="directory holding the pages (default: .)")
+                        help="the project's folder (default: .)")
     parser.add_argument("-c", "--config", default=None,
                         help=f"config file (default: <dir>/{CONFIG_NAME})")
-    parser.add_argument("-o", "--output", default=None,
-                        help="manifest to write (default: <dir>/imsmanifest.xml)")
+    parser.add_argument("-o", "--output", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--zip", action="store_true",
                         help="also build the .imscc archive")
     parser.add_argument("--include-all-html", action="store_true",
@@ -1016,6 +1013,9 @@ def main():
     # folder and swaps it in: write it there.
     parser.add_argument("--beside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    why = projectpaths.not_a_project(args.dir)
+    if why:
+        sys.exit(f"{why} Nothing was built.")
     projectpaths.set_part(args.part, args.dir)
     projectpaths.build_beside(args.dir, args.beside)
     if args.include_all_html_old:
@@ -1030,14 +1030,14 @@ def main():
 
     base = args.dir
     config_path = args.config or P(base).packaging_file()
-    # In a project laid out with src/, a package's pages are a target's,
-    # found by its name in output/, and its files go to its own folder
-    # under output/packages/: neither is a path the command line gives.
+    # A package's pages are a target's, found by its name in output/, and
+    # its files go to its own folder under output/packages/: neither is a
+    # path the command line gives.
     laid_out = projectpaths.is_tree(base)
     package = None
     if laid_out:
         if args.pages or args.output:
-            sys.exit("--pages and -o aren't taken in a project laid out with src/: a "
+            sys.exit("--pages and -o are no longer taken: a "
                      "package's pages are those of the html target its includes names, "
                      "or the project's first, read from output/<target>/, and its "
                      "manifest is written to output/packages/<package>/.")

@@ -8,15 +8,19 @@ and books, one output per target, and hand off to the packager.
     python3 convert.py --toc book.pdf   # passed through to the packager
     python3 convert.py --quiet          # without the command trace
 
-Run in the directory holding the .docx files. That directory keeps the
-sources, the intermediates, the sidecars, and the reports; every target
-writes into a directory of its own, html/ for the one implied when no
-configuration says otherwise. A page the author wrote by hand -- an
-.html here with no .docx behind it -- is copied into every HTML
-target's directory as it stands, with the local files it refers to, and
+Run in the project's folder, or give it with -d: the settings at its
+top, each part's sources in src/<part>/ (src/book/ for a book), its
+sidecars in sidecars/<part>/, and everything a run writes under output/,
+every target in a folder of its own there, output/html/ for the one
+implied when no configuration says otherwise. A folder that isn't a
+project stops the run (util/move-to-src.py moves a book kept in one
+folder, as versions through 0.10 read it). A page the author wrote by
+hand -- an .html with no .docx behind it -- is copied into every HTML
+target's folder as it stands, with the local files it refers to, and
 read into an intermediate so the EPUB has it too. Such a page lives in
-the pass-through directory (_pt/ unless project.yaml says otherwise); an
-.html beside the sources is a source, read like any other.
+the part's pass-through folder (_pt/ unless project.yaml says
+otherwise); an .html beside the sources is a source, read like any
+other.
 
 THE RUN
 
@@ -302,16 +306,6 @@ def extract_tar(path, work):
     return notes
 
 
-def archive_stem(path):
-    """An archive's path without its extension: remediated.tar.gz ->
-    remediated."""
-    lower = path.lower()
-    for ext in sorted(TAR_EXTENSIONS + (".zip", ".imscc"), key=len, reverse=True):
-        if lower.endswith(ext):
-            return path[:-len(ext)]
-    return path
-
-
 def archive_targets(targets, base):
     """Each target whose archive setting asks for it packed into one file
     beside its folder and named after it (html.zip, remediated.tar.gz),
@@ -408,183 +402,6 @@ def latex_book_here(base):
         with open(path, encoding="utf-8", errors="replace") as fh:
             return bool(LATEX_MAIN_SET.search(fh.read()))
     return False
-
-
-def unpack_archives(base, check_only=False, linked_documents=False):
-    """A web archive -- a WARC, compressed or not, or a WACZ, recognized
-    by its first bytes -- or a Common Cartridge, recognized by its
-    manifest, or a plain .zip or tar (.tar.gz, .tgz, ...) of a book's
-    files or a set of slides, in a directory with no sources is unpacked
-    there first, as unpack-site.py or unpack-cartridge.py would or by
-    extracting the archive, and its sources are then converted. From then
-    on they're the book: they're where corrections are made, so a later
-    run, finding sources, never reads the archive again. A project.yaml or
-    conversion.yaml already here is kept, and the archive's is written
-    beside it (project-unpacked.yaml). For an unpacker's own options (a
-    profile, whole pages), run it yourself. A plain archive is known by
-    its name, since Word files, slide decks, EPUBs, and cartridges are
-    zips too, and a compressed WARC is a gzip as a .tar.gz is."""
-    import sitesource
-    import cartridgesource
-    import tarfile
-    skip = SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS + (
-        ".yaml", ".yml", ".csv", ".json", ".css", ".lua", ".txt", ".pdf", ".epub")
-    candidates = sorted(p for p in glob.glob(P(base).source("*"))
-                        if os.path.isfile(p) and not p.lower().endswith(skip))
-    cartridges = [p for p in candidates if cartridgesource.is_cartridge(p)]
-    archives = [p for p in candidates
-                if p not in cartridges and sitesource.is_warc(p)]
-    import zipfile
-    zips = [p for p in candidates
-            if p not in cartridges and p not in archives
-            and p.lower().endswith(".zip") and zipfile.is_zipfile(p)]
-    tars = [p for p in candidates
-            if p not in cartridges and p not in archives
-            and p.lower().endswith(TAR_EXTENSIONS) and tarfile.is_tarfile(p)]
-    zips += tars        # a plain archive either way, extracted alike
-    unused = ("--linked-documents applies when a run unpacks a cartridge, "
-              "and this one doesn't: ")
-    if not archives and not cartridges and not zips:
-        if linked_documents:
-            say(unused + "there's no cartridge here.")
-        return
-    # A directory with sources is a book already: nothing in it is read,
-    # however many archives sit there (a cartridge --zip built, say, beside
-    # the download it came from). A LaTeX book's are its masters, here or
-    # where latex.main names them (FINC 308's src/), whose own cartridge,
-    # built beside them, was taken for a book to unpack.
-    if any(p.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS + OTHER_DECK_EXTENSIONS)
-           for p in glob.glob(P(base).source("*"))) or latex_book_here(base):
-        # Beside a folder of its own name, an archive is that folder
-        # packed, as a target's archive setting packs one: the run's own
-        # output, which needs no word on every run.
-        found = [p for p in cartridges + zips + archives
-                 if not (archive_stem(p) != p and os.path.isdir(archive_stem(p)))]
-        if not found:
-            return
-        slides_here = not any(p.lower().endswith(SOURCE_EXTENSIONS)
-                              for p in glob.glob(P(base).source("*"))) \
-            and not latex_book_here(base)
-        say(", ".join(os.path.basename(p) for p in found)
-            + ": not read, since this directory has sources, which are the "
-            + ("slides" if slides_here else "book") + " once an archive is unpacked. To unpack "
-            + ("it afresh, " if len(found) == 1 else "one afresh, ")
-            + ("extract it into a new directory." if len(found) == 1 and zips
-               else "use unpack-cartridge.py or unpack-site.py, or extract "
-               "it, into a new directory." if len(found) > 1 else
-               f"use {'unpack-cartridge.py' if cartridges else 'unpack-site.py'}"
-               " into a new directory."))
-        if linked_documents:
-            say(unused + "the pages here are the book already, and "
-                "unpacking again into a new directory is how to change that.")
-        return
-    if (cartridges or zips) and (archives or len(cartridges + zips) > 1):
-        die("More than one thing to unpack here ("
-            + ", ".join(os.path.basename(p) for p in cartridges + zips + archives)
-            + "); a book comes from one cartridge, zip, or tar, or from web "
-            "archives. Unpack them into directories of their own.")
-    tool = ("unpack-cartridge.py" if cartridges else
-            "tar" if tars else "zip" if zips else "unpack-site.py")
-    archives = cartridges or zips or archives
-    if linked_documents and tool != "unpack-cartridge.py":
-        say(unused + ("an archive's files are the book as they are." if zips
-                      else "a web archive's pages keep their links to files."))
-    names = ", ".join(os.path.basename(p) for p in archives)
-    if check_only:
-        say(f"{names} would be unpacked here and its pages converted.")
-        return
-    work = P(base).unpack_dir()
-    try:
-        if tool in ("zip", "tar"):
-            notes = (extract_tar if tool == "tar" else extract_zip)(archives[0], work)
-            # A zip of pages a browser saved is a capture of a site, like a
-            # WARC: unpack-site.py strips the site's chrome and names pages
-            # from their addresses, where converting the saved files would
-            # keep "| Site" in every title and the browser's file names.
-            if browser_save(work):
-                site = P(base).unpack_dir()
-                run = subprocess.run([sys.executable,
-                                      os.path.join(HERE, "unpack-site.py"),
-                                      work, "-o", site],
-                                     capture_output=True, text=True)
-                if run.returncode != 0:
-                    shutil.rmtree(site, ignore_errors=True)
-                    die(f"Unpacking the pages saved in {names} failed:\n"
-                        + (run.stderr.strip() or run.stdout.strip()))
-                pass_on(run)
-                shutil.rmtree(work, ignore_errors=True)
-                work = site
-                say(f"{names} holds pages saved from a browser; they're "
-                    "unpacked as unpack-site.py unpacks a browser's save.")
-            held = sorted(os.listdir(work))
-            if not any(n.lower().endswith(SOURCE_EXTENSIONS + DECK_EXTENSIONS
-                                          + OTHER_DECK_EXTENSIONS)
-                       for n in held):
-                inside = [n for n in held if n.lower().endswith(
-                    (".imscc", ".warc", ".gz", ".wacz", ".epub", ".zip")
-                    + TAR_EXTENSIONS)]
-                die(f"{names} holds no source convert.py reads at its top "
-                    "(" + (", ".join(held[:8]) + (", ..." if len(held) > 8
-                                                   else "") or "nothing")
-                    + ")." + (" To convert " + ", ".join(inside) + ", put it "
-                              "in a directory of its own." if inside else ""))
-            if notes:
-                with open(os.path.join(work, "unpack-report.csv"), "w",
-                          newline="", encoding=sidecars.CSV_ENCODING) as fh:
-                    writer = sidecars.csv_writer(fh)
-                    writer.writerow(["Where", "Check", "Detail"])
-                    writer.writerows(notes)
-        else:
-            run = subprocess.run([sys.executable, os.path.join(HERE, tool),
-                                  *archives, "-o", work]
-                                 + (["--linked-documents"] if linked_documents
-                                    and tool == "unpack-cartridge.py" else []),
-                                 capture_output=True, text=True)
-            if run.returncode != 0:
-                die(f"Unpacking {names} failed:\n"
-                    + (run.stderr.strip() or run.stdout.strip()))
-            pass_on(run)
-        kept = {"project.yaml": "project-unpacked.yaml",
-                "conversion.yaml": "conversion-unpacked.yaml"}
-        # Every name is checked before anything moves, so a clash leaves
-        # the directory as it was, not half unpacked.
-        moves = []
-        for name in sorted(os.listdir(work)):
-            target = P(base).source(name)
-            if name in kept and os.path.exists(target):
-                target = P(base).source(kept[name])
-            if os.path.exists(target):
-                die(f"{os.path.basename(target)} is already here; unpacking "
-                    f"{names} would overwrite it. Unpack it into a new "
-                    "directory instead.")
-            moves.append((name, target))
-        for name, target in moves:
-            if name in kept and os.path.basename(target) == kept[name]:
-                say(f"{name} was already here and is kept; the archive's is "
-                    f"{kept[name]}.")
-            shutil.move(os.path.join(work, name), target)
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-    sources = sum(1 for p in glob.glob(P(base).source("*"))
-                  if p.lower().endswith(SOURCE_EXTENSIONS))
-    decks = sum(1 for p in glob.glob(P(base).source("*"))
-                if p.lower().endswith(DECK_EXTENSIONS))
-    # Decks in other formats are slides once they're saved as PowerPoint
-    # (save_other_decks), which says what to correct then; in a book's
-    # folder they're left out, and that says so.
-    others = 0 if sources else len(decksave.other_decks(base))
-    kinds = " and ".join(part for part in (f"{decks} PowerPoint deck(s)" if decks else "",
-                                           f"{others} deck(s) to save as PowerPoint"
-                                           if others else "") if part)
-    held = (f"{kinds}, which are the slides" if kinds and not sources
-            else f"{sources} source(s)" + (f" and {kinds}" if kinds else "")
-            + ", which are the book")
-    say(f"Unpacked {names}: {held} from now on"
-        + (", as the PowerPoint files they're saved as next. Correct those"
-           if others else ". Correct them")
-        + ", not the archive: later runs don't read it again."
-        + (" unpack-report.csv says what the unpacking found."
-           if os.path.exists(P(base).report("unpack-report.csv")) else ""))
 
 
 # How many decks a run couldn't save as PowerPoint (save_other_decks),
@@ -872,8 +689,7 @@ def declared_kind(documents):
 
 def project_parts(base):
     """A project's parts and the kind of each, in the order built, and the
-    part a target with no part: is made from; (None, None) for a folder
-    in the layout with everything in one folder.
+    part a target with no part: is made from.
 
     The parts are the ones project.yaml names (project.parts). A project
     that names none has one, the folder src/ holds, which is a book or
@@ -881,8 +697,6 @@ def project_parts(base):
     stops the run, since nothing says what each is and a folder isn't a
     part for being there. A part of kind files travels with the project
     and is never built."""
-    if not projectpaths.is_tree(base):
-        return None, None
     import yaml
     try:
         with open(P(base).project_file(), encoding="utf-8") as fh:
@@ -1036,6 +850,34 @@ def run_unpacker(base, part, upstream, into=None):
         sources = os.path.join(project, "src", part) if into else P(base).sources(part)
         os.makedirs(sources, exist_ok=True)
         notes = (extract_tar if real.lower().endswith(TAR_ENDINGS) else extract_zip)(real, sources)
+        if browser_save(sources):
+            # An archive of pages a browser saved is a capture of a site,
+            # like a WARC: unpack-site.py strips the site's chrome and
+            # names pages from their addresses, where converting the saved
+            # files would keep "| Site" in every title and the browser's
+            # file names.
+            held = projectpaths.mkdtemp(prefix="saved-pages-")
+            try:
+                saved = os.path.join(held, "pages")
+                shutil.move(sources, saved)
+                done = subprocess.run(
+                    [sys.executable, os.path.join(HERE, UNPACKER_SCRIPTS["site"]), saved,
+                     "-o", project, "--part", part, "--from-run"] + options,
+                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            finally:
+                shutil.rmtree(held, ignore_errors=True)
+            if done.returncode != 0:
+                die(f"Unpacking the pages saved in {name} for the part {part} failed:\n"
+                    + (done.stderr.strip() or done.stdout.strip()) + "\nNothing was converted.")
+            pass_on(done)
+            if not into:
+                unpacking.write_record(base, part, unpacker, options, name)
+                say(f"{name} holds pages saved from a browser; they're unpacked as "
+                    "unpack-site.py unpacks a browser's save.")
+                if notes:
+                    say(f"NOTE: {len(notes)} thing(s) in {name} weren't extracted: a link, "
+                        "or a path leading out of the folder.")
+            return None
         if not into:
             unpacking.write_record(base, part, unpacker, options, name)
             if notes:
@@ -1370,8 +1212,7 @@ def load_targets(base, allow_unknown, decks_only=False, pptx_decks=False,
                 warned.append(warning)
                 say(f"WARNING: {warning}")
     # Two targets writing into one folder would each empty or overwrite
-    # the other's files. The book's own folder (output_dir: .) is warned of
-    # above, and the next release's layout ends it.
+    # the other's files.
     folders = {}
     for target in targets:
         folder = str(target["output_dir"])
@@ -3199,8 +3040,7 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
     out = []
     for stem in hand:
         target = os.path.join(pages_dir, stem + INTERMEDIATE)
-        # Named from the folder Pandoc runs in, which isn't the sources'
-        # in the layout with src/.
+        # Named from the folder Pandoc runs in, which isn't the sources'.
         source = os.path.relpath(
             os.path.abspath(variants.get(stem) if str(variants.get(stem, "")).endswith(
                 ".html") else hand_path(base, stem)), os.path.abspath(P(base).run_dir()))
@@ -7190,11 +7030,7 @@ def main():
                              "given to another option is then read from DIR")
     parser.add_argument("--quiet", action="store_true",
                         help="don't trace each command as it runs")
-    parser.add_argument("--linked-documents", action="store_true",
-                        help="when this run unpacks a Common Cartridge, make "
-                        "each document its pages link to that can be "
-                        "converted a page of the book (unpack-cartridge.py "
-                        "--linked-documents)")
+    parser.add_argument("--linked-documents", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--src-status", action="store_true",
                         help="say how each part's sources differ from what its upstream "
                              "file (project.parts.<part>.from) unpacks to, the files added, "
@@ -7242,99 +7078,92 @@ def main():
         die(f"{base} is inside the project {above}, among its sources or its outputs. Run "
             f"this from the project's folder, or give it with -d {above}. Nothing was "
             "converted.")
+    if args.linked_documents:
+        die("--linked-documents is unpack-cartridge.py's option, and a run takes it from "
+            "the part's from in project.yaml:\n\n      from:\n        file: "
+            "upstream/course.imscc\n        options: [--linked-documents]\n\nNothing was "
+            "converted.")
     part_folders(base)
+    why = projectpaths.not_a_project(base)
+    if why:
+        die(f"{why} Nothing was converted.")
     # Everything in a project's folder is the project's to read, so some
     # folders can't be one.
-    if projectpaths.is_tree(base):
-        why = projectpaths.refused_root(base)
-        if why:
-            die(f"{base} can't be a project's folder: {why}. Nothing was converted.")
-        try:
-            laid = sorted(e.name for e in os.scandir(P(base).top("src")))
-        except OSError:
-            laid = []
-        why = projectpaths.refused_link(base, laid)
-        if why:
-            die(f"{why}. Nothing was converted.")
+    why = projectpaths.refused_root(base)
+    if why:
+        die(f"{base} can't be a project's folder: {why}. Nothing was converted.")
+    try:
+        laid = sorted(e.name for e in os.scandir(P(base).top("src")))
+    except OSError:
+        laid = []
+    why = projectpaths.refused_link(base, laid)
+    if why:
+        die(f"{why}. Nothing was converted.")
 
     for required in (FIGURE_FILTER, MATH_FILTER, TITLE_FILTER, MEDIA_FILTER,
                      HEADER_FILTER, PAGE_CSS):
         if not os.path.isfile(required):
             die(f"Missing {required} -- save it alongside this script.")
-    # A project with a folder for each part: a run builds one part, so a
-    # project whose targets are made from more than one is a run of each,
-    # started here, one after another.
+    # A run builds one part, so a project whose targets are made from
+    # more than one is a run of each, started here, one after another.
     global PART, DEFAULT_PART, PART_KIND, PART_ARGS, BESIDE_ARGS
     parts, DEFAULT_PART = project_parts(base)
-    if parts is not None:
-        old = old_places(base)
-        if old:
-            die(f"{CONFIG_NAME} sets {', '.join(old)}, which this layout doesn't read: a "
-                "part's sidecars are in sidecars/<part>/ under their standard names, and "
-                "its drafts and reports are written to output/reports/<part>/. Take the "
-                "setting out, and move a sidecar it named to sidecars/<part>/ under its "
-                "standard name (util/move-to-src.py does both for a book in the old "
-                "layout). Nothing was converted.")
-    if parts is not None and not args.locked:
+    old = old_places(base)
+    if old:
+        die(f"{CONFIG_NAME} sets {', '.join(old)}, which isn't read: a part's sidecars are "
+            "in sidecars/<part>/ under their standard names, and its drafts and reports "
+            "are written to output/reports/<part>/. Take the setting out, and move a "
+            "sidecar it named to sidecars/<part>/ under its standard name. Nothing was "
+            "converted.")
+    if not args.locked:
         # output/ is the run's own, and one run at a time writes it.
         projectpaths.claim_output(base)
         projectpaths.lock(base)
-    if parts is not None:
-        # The run's temporary files, and those of every program it
-        # starts, are kept in the project and cleared by the next run.
-        projectpaths.use_tmp(base, empty=not args.locked)
-        # Each target is built beside its folder and swapped in when it's
-        # built; what a stopped run left of its builds is put right first.
-        if not args.locked:
-            for name in projectpaths.settle(base):
-                say(f"NOTE: output/{name}/ is put back as it was: an earlier run stopped "
-                    "while replacing it, and this run builds it again.")
-        if projectpaths.build_beside(base):
-            BESIDE_ARGS = ["--beside"]
-    if parts is not None:
-        wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
-        if args.part:
-            if args.part not in parts:
-                die(f"--part {args.part}: the project's parts are "
-                    f"{', '.join(parts) or 'none'}. Nothing was converted.")
-            PART = args.part
-        elif len(wanted) > 1:
-            worst = 0
-            for name in wanted:
-                say(f"\nPart {name} (src/{name}/):")
-                done = subprocess.run([sys.executable, os.path.abspath(__file__),
-                                       "--part", name, "--locked"]
-                                      + without_dir(sys.argv[1:]))
-                worst = max(worst, done.returncode)
-            return worst
-        else:
-            PART = wanted[0] if wanted else DEFAULT_PART
-        PART_KIND = parts.get(PART)
-        if PART != DEFAULT_PART and PART_KIND not in ("slides", None) \
-                and not part_setting(base, PART, "identifier"):
-            say(f"WARNING: the part {PART} has no identifier of its own (project.parts."
-                f"{PART}.identifier), so what's packaged from it carries the project's: an "
-                f"LMS would take its cartridge and {DEFAULT_PART}'s for one course, the "
-                "second imported over the first.")
-        PART_ARGS = ["--part", PART]
-        projectpaths.set_part(PART, base)
-    elif args.part:
-        die("--part is for a project with a folder for each part under src/; this folder "
-            "holds its sources itself. Nothing was converted.")
+    # The run's temporary files, and those of every program it starts,
+    # are kept in the project and cleared by the next run.
+    projectpaths.use_tmp(base, empty=not args.locked)
+    # Each target is built beside its folder and swapped in when it's
+    # built; what a stopped run left of its builds is put right first.
+    if not args.locked:
+        for name in projectpaths.settle(base):
+            say(f"NOTE: output/{name}/ is put back as it was: an earlier run stopped "
+                "while replacing it, and this run builds it again.")
+    if projectpaths.build_beside(base):
+        BESIDE_ARGS = ["--beside"]
+    wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
+    if args.part:
+        if args.part not in parts:
+            die(f"--part {args.part}: the project's parts are "
+                f"{', '.join(parts) or 'none'}. Nothing was converted.")
+        PART = args.part
+    elif len(wanted) > 1:
+        worst = 0
+        for name in wanted:
+            say(f"\nPart {name} (src/{name}/):")
+            done = subprocess.run([sys.executable, os.path.abspath(__file__),
+                                   "--part", name, "--locked"]
+                                  + without_dir(sys.argv[1:]))
+            worst = max(worst, done.returncode)
+        return worst
+    else:
+        PART = wanted[0] if wanted else DEFAULT_PART
+    PART_KIND = parts.get(PART)
+    if PART != DEFAULT_PART and PART_KIND not in ("slides", None) \
+            and not part_setting(base, PART, "identifier"):
+        say(f"WARNING: the part {PART} has no identifier of its own (project.parts."
+            f"{PART}.identifier), so what's packaged from it carries the project's: an "
+            f"LMS would take its cartridge and {DEFAULT_PART}'s for one course, the "
+            "second imported over the first.")
+    PART_ARGS = ["--part", PART]
+    projectpaths.set_part(PART, base)
 
     # What of Pandoc's data folders a run leaves alone (lib/pandocrun.py).
     for line in pandocrun.notices():
         say(line)
 
-    if parts is not None:
-        unpack_upstream(base, PART, check_only=args.check_only, status=args.src_status)
-        if args.src_status:
-            return 0
-    elif args.src_status:
-        die("--src-status is for a project with a folder for each part under src/. Nothing "
-            "was converted.")
-    unpack_archives(base, check_only=args.check_only,
-                    linked_documents=args.linked_documents)
+    unpack_upstream(base, PART, check_only=args.check_only, status=args.src_status)
+    if args.src_status:
+        return 0
     import deckrun
     # A deck's reference document beside the decks is their look, not a
     # deck (slides.reference_doc).
@@ -8055,13 +7884,9 @@ def main():
     # packager finds a package's pages itself, in the folder of the html
     # target its includes names (or the project's first), so this run
     # builds the packages whose pages it made; a package the command line
-    # names (--package) is the one asked for. In today's layout there's
-    # one, from the first html target's folder.
+    # names (--package) is the one asked for.
     packages = [None]
-    if parts is None:
-        if os.path.abspath(html_targets[0].output_dir) != os.path.abspath(P(base).sources()):
-            command += ["--pages", html_targets[0].output_dir]
-    elif not any(a in ("--package", "--target") or a.startswith(("--package=", "--target="))
+    if not any(a in ("--package", "--target") or a.startswith(("--package=", "--target="))
                  for a in passthrough):
         declared = oerconfig.declared_targets(P(base).packaging_file())
         if declared:
@@ -8111,7 +7936,7 @@ def stoppable():
     """main(), but for a run a person or a program stops (Ctrl-C, or a
     signal to end): one line and no traceback, the status a shell gives
     for the signal. What the run was building is in output/work/, which
-    the next run clears, in the layout with src/. A run of one part that
+    the next run clears. A run of one part that
     a project's run started says nothing; the project's does."""
     for name in ("SIGTERM", "SIGHUP"):
         if hasattr(signal, name):

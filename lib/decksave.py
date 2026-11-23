@@ -7,7 +7,7 @@ A slides run reads PowerPoint decks (.pptx). An OpenDocument presentation
 PowerPoint 97-2003 deck (.ppt) are saved as PowerPoint once, by
 LibreOffice, each beside its original, which is left as it is. From then
 on the PowerPoint file is the deck, as an archive's files are the book
-once it's unpacked (convert.py's unpack_archives): it's what the run
+once it's unpacked (convert.py's unpack_upstream): it's what the run
 reads, what the sidecars' rows name, and where a person corrects the
 deck, and a later run doesn't save the original again. A deck whose
 PowerPoint file is beside it already (Google Slides' other export, or

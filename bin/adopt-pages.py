@@ -32,14 +32,14 @@ sources as they stand. This writes a new directory where they can:
 
 The pages are HTML from an HTML target, or Markdown from a Markdown
 target. The book's directory is the pages' parent unless --book says;
-for a target's folder in a project laid out with src/ (output/html),
-it's the project's folder, and the part is the one the target is made
+for a target's folder in a project (output/html), it's the project's
+folder, and the part is the one the target is made
 from. Nothing in the book is changed.
 
-    python3 adopt-pages.py book/output/html -o course --part book
+    python3 adopt-pages.py book/output/html -o course
 
-With --part, -o names a project's folder and the pages are written as a
-part of it, in the layout with src/: the pages to src/<part>/, a
+-o names a project's folder, and the pages are written as a part of it,
+book unless --part names another: the pages to src/<part>/, a
 finished page to src/<part>/_pt/, the sidecars to sidecars/<part>/, and
 project.yaml at the top, naming the part. The part's folder must be
 missing or empty; a project.yaml or a sidecar already there is left as
@@ -150,7 +150,7 @@ def rename_contents(node, names):
 
 
 def source_part(book, target):
-    """The part a target of a project laid out with src/ is made from:
+    """The part a target of a project is made from:
     its part: in conversion.yaml, or the project's own."""
     try:
         with open(P(book).config_file(), encoding="utf-8") as fh:
@@ -177,10 +177,10 @@ def main():
                                        "pages' parent, or the project the "
                                        "pages are in)")
     parser.add_argument(
-        "--part", metavar="NAME",
-        help="write a part of a project laid out with src/: -o is then the project's "
-             "folder, the pages go to src/NAME/ (book, for a book), a finished page to "
-             "src/NAME/_pt/, the sidecars to sidecars/NAME/, and project.yaml to the top")
+        "--part", metavar="NAME", default="book",
+        help="the part of the project to write (default: book). -o names the project's "
+             "folder: the pages go to src/NAME/, a finished page to src/NAME/_pt/, the "
+             "sidecars to sidecars/NAME/, and project.yaml to the top")
     args = parser.parse_args()
     pages_dir = os.path.abspath(args.pages)
     if not os.path.isdir(pages_dir):
@@ -194,19 +194,14 @@ def main():
     except projectpaths.Refused as exc:
         sys.exit(str(exc))
     out = args.output
-    placed = None
-    if args.part:
-        # A part of a project: the rules an unpacker writes one by.
-        try:
-            placed = unpacking.Placed(out, args.part)
-        except SystemExit as exc:
-            # Its words are an unpacker's.
-            sys.exit(str(exc).replace("unpacking would", "adopting would")
-                     .replace("to unpack again", "to adopt again")
-                     .replace("Nothing was unpacked", "Nothing was written"))
-    elif os.path.exists(out) and os.listdir(out):
-        sys.exit(f"{out} exists and is not empty. Name another directory "
-                 "with -o.")
+    # A part of a project: the rules an unpacker writes one by.
+    try:
+        placed = unpacking.Placed(out, args.part)
+    except SystemExit as exc:
+        # Its words are an unpacker's.
+        sys.exit(str(exc).replace("unpacking would", "adopting would")
+                 .replace("to unpack again", "to adopt again")
+                 .replace("Nothing was unpacked", "Nothing was written"))
     html = [f for f in os.listdir(pages_dir) if f.endswith(".html")]
     md = [f for f in os.listdir(pages_dir) if f.endswith(".md")]
     ext = ".html" if html else ".md"
