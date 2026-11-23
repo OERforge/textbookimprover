@@ -314,7 +314,22 @@ luaotfload-tool --update
 luaotfload-tool --find="file:NotoSansMath-Regular.ttf"
 ```
 
-The first three lines download [notofonts' release](https://github.com/notofonts/math/releases) and take the font out of it; the next two copy it into your own fonts folder; and `luaotfload-tool --update` has LuaTeX list its fonts again, without which it goes on using the 2.001 copy where `fonts-noto-core` is installed, your copy beside it, and the formulas stay in Latin Modern Math. The last line says which copy LuaTeX uses, and should name the one in `~/.local/share/fonts`. The zip has other copies of the font too, in other formats. Take this one: the book asks for the font by this file's name, and the zip's `otf` copies are named differently. What's verified here, on Ubuntu 26.10's TeX Live 2026 with `fonts-noto-core`'s copy installed as well: a copy in `~/.local/share/fonts`, in `~/.fonts`, or in `~/texmf/fonts/truetype/` is the one LuaTeX uses once the font list is made again, and `fonts-noto-core`'s until then; and with TinyTeX 2026, a copy in `~/.local/share/fonts` is the one LuaTeX finds once the list is made again (2026-11-11). Other systems weren't tried; wherever the font is, `luaotfload-tool --find` says whether LuaTeX finds it.
+The first three lines download [notofonts' release](https://github.com/notofonts/math/releases) and take the font out of it; the next two copy it into your own fonts folder; and `luaotfload-tool --update` has LuaTeX list its fonts again. The zip has other copies of the font too, in other formats. Take this one: the book asks for the font by this file's name, and the zip's `otf` copies are named differently.
+
+The last line says which copy LuaTeX uses, and should name the one in `~/.local/share/fonts`. Where `fonts-noto-core` is installed, it may name that package's 2.001 instead, `/usr/share/fonts/truetype/noto/NotoSansMath-Regular.ttf`, however often the list is made again: luaotfload looks in the system's font folders before your own, and of two files with one name it keeps the first it finds. Then tell it to pass over that copy, with a blacklist in your own TeX folder, and make the list again from the start:
+
+```bash
+texmfhome="$(kpsewhich -var-value=TEXMFHOME)"
+mkdir -p "$texmfhome/tex/luatex/luaotfload"
+echo /usr/share/fonts/truetype/noto/NotoSansMath-Regular.ttf >> "$texmfhome/tex/luatex/luaotfload/luaotfload-blacklist.cnf"
+if [ -f "$texmfhome/ls-R" ]; then mktexlsr "$texmfhome"; fi
+luaotfload-tool --update --force
+luaotfload-tool --find="file:NotoSansMath-Regular.ttf"
+```
+
+Where the first `--find` named some other copy, put that path in the `echo` line instead. A plain `--update` doesn't read a new blacklist, so `--force` is needed once; later updates keep it. TinyTeX's own folder for this (`~/.TinyTeX/texmf-local`) has a file list of its own (`ls-R`), which TeX reads instead of the folder, so `mktexlsr` adds the new file to it; a full TeX Live's `~/texmf` usually has none, and the `if` line then does nothing. The blacklist leaves TeX Live's own in force, and names one file, so nothing else of `fonts-noto-core` changes.
+
+What's verified here: with TinyTeX 2026 (luaotfload 3.29) on Ubuntu 24.04, `fonts-noto-core` 20201225-2 installed and 3.000 in `~/.local/share/fonts`, `luaotfload-tool --find` named the 2.001 after `--update` and after `--update --force`, and LuaLaTeX set a formula in Latin Modern Math; with the blacklist, in a folder of its own and in TinyTeX's `texmf-local` once `mktexlsr` had run, it named 3.000, and LuaLaTeX set the formula in it with no warning, through a later plain `--update` and from an empty font cache (2026-11-22). On Ubuntu 26.10's own TeX Live 2026, `--update` alone was enough, a copy in `~/.local/share/fonts`, `~/.fonts`, or `~/texmf/fonts/truetype/` being the one LuaTeX used once the list was made again (2026-11-11); the blacklist wasn't tried there. Other systems weren't tried; wherever the font is, `luaotfload-tool --find` says whether LuaTeX finds it.
 
 ## Optional: veraPDF
 

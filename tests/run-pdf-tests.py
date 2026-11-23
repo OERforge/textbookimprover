@@ -6182,6 +6182,17 @@ def math_font_checks(paths, said):
          and "fonts-noto-core" in noto("Package unicode-math Warning: The first font loaded "
                                        "by unicode-math must be an\n")
          and noto("") == ""),
+        ("and where luaotfload still finds fonts-noto-core's older copy beside the user's, "
+         "how to have it passed over: a blacklist in TEXMFHOME, read by "
+         "luaotfload-tool --update --force",
+         lambda: all(all(words in noto(said_) for words in (
+                         "/usr/share/fonts/truetype/noto/NotoSansMath-Regular.ttf",
+                         "luaotfload-blacklist.cnf in tex/luatex/luaotfload/",
+                         "kpsewhich -var-value=TEXMFHOME", "mktexlsr",
+                         "luaotfload-tool --update --force"))
+                     for said_ in ("TextbookImprover math font: no NotoSansMath-Regular.ttf\n",
+                                   "Package unicode-math Warning: The first font loaded by "
+                                   "unicode-math must be an\n"))),
         ("a heading's formula is its text in the heading's bookmark, x², a script in "
          "Unicode's subscripts, x̄ₙ, one that has none, 4^(π), and a fraction, a/b, and its "
          "TeX where it can't be, a binomial, the run saying so once for each PDF, for the "
