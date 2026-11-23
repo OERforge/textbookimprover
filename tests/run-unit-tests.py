@@ -4927,6 +4927,85 @@ def check_not_a_project():
     ]
 
 
+def check_named_from_project():
+    """projectpaths.name_from_project: a program's messages name a file of
+    the project's by its path from the project's folder, a command it
+    echoes and any other path as they are, and the programs it starts are
+    told the folder."""
+    work = tempfile.mkdtemp(prefix="named-from-")
+    project = os.path.join(work, "book")
+    os.makedirs(os.path.join(project, "src", "book"))
+    lib = os.path.join(ROOT, "lib")
+    with open(os.path.join(work, "child.py"), "w", encoding="utf-8") as fh:
+        fh.write("import sys\nsys.path.insert(0, %r)\nimport projectpaths\n"
+                 "projectpaths.name_from_project()\nprint('child: ' + sys.argv[1])\n"
+                 "print('child says: ' + sys.argv[1], file=sys.stderr)\n" % lib)
+    with open(os.path.join(work, "parent.py"), "w", encoding="utf-8") as fh:
+        fh.write(
+            "import os, subprocess, sys\n"
+            "sys.path.insert(0, %r)\n"
+            "import projectpaths\n"
+            "root = sys.argv[1]\n"
+            "projectpaths.name_from_project(root, stdout=True)\n"
+            "print('Wrote ' + os.path.join(root, 'output', 'reports', 'book', 'x.csv') + '.')\n"
+            "print('the project ' + root + os.sep + ' and ' + root)\n"
+            "print('beside it, ' + root + '2' + os.sep + 'x, and ' "
+            "+ os.path.join(root, '.keep'))\n"
+            "print('+ pandoc ' + os.path.join(root, 'a.json'))\n"
+            "print('to stderr, ' + os.path.join(root, 'src', 'book', 'a.md'), "
+            "file=sys.stderr)\n"
+            "sys.stdout.flush()\n"
+            "subprocess.run([sys.executable, %r, "
+            "os.path.join(root, 'sidecars', 'book', 's.csv')])\n"
+            % (lib, os.path.join(work, "child.py")))
+    env = {k: v for k, v in os.environ.items() if k != "TEXTBOOKIMPROVER_NAMED_FROM"}
+    ran = subprocess.run([sys.executable, os.path.join(work, "parent.py"), project],
+                         capture_output=True, text=True, env=env)
+    # A root that isn't a folder, and the file system's own, change nothing.
+    odd = [sys.executable, os.path.join(work, "child.py"),
+           os.path.join(project, "src", "book", "a.md")]
+    odd_roots = [subprocess.run(odd, capture_output=True, text=True, env=one).stdout
+                 for one in [env] + [dict(env, TEXTBOOKIMPROVER_NAMED_FROM=value)
+                                     for value in (os.sep, "book",
+                                                   os.path.join(work, "missing"))]]
+    lines = ran.stdout.splitlines()
+    users = {}
+    for name in ("convert.py", "build-pdf.py", "build-epub.py", "build-cartridge.py",
+                 "read-conversion-config.py", "table-headers.py", "check-output.py",
+                 "split-pages.py"):
+        with open(os.path.join(ROOT, "bin", name), encoding="utf-8") as fh:
+            users[name] = "projectpaths.name_from_project(" in fh.read()
+    with open(os.path.join(ROOT, "lib", "unpacking.py"), encoding="utf-8") as fh:
+        users["unpacking.py"] = "projectpaths.name_from_project(" in fh.read()
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("a file of the project's is named from the project's folder, on both streams",
+         lambda: lines[0] == "Wrote " + os.path.join("output", "reports", "book", "x.csv") + "."
+         and ran.stderr.splitlines()[:1]
+         == ["to stderr, " + os.path.join("src", "book", "a.md")]),
+        ("the folder itself is named whole, with or without its last separator",
+         lambda: lines[1] == "the project " + project + os.sep + " and " + project),
+        ("a folder whose name only begins with the project's is left alone, and a dot "
+         "file of the project's is named from the folder",
+         lambda: lines[2] == "beside it, " + project + "2" + os.sep + "x, and .keep"),
+        ("a command the run echoes keeps its paths",
+         lambda: lines[3] == "+ pandoc " + os.path.join(project, "a.json")),
+        ("a program it starts is told the folder, and names the project's files so in its "
+         "messages; its standard output, which the run may read as the files it wrote, "
+         "keeps whole paths unless it asks otherwise",
+         lambda: ran.stderr.splitlines()[1:]
+         == ["child says: " + os.path.join("sidecars", "book", "s.csv")]
+         and lines[4] == "child: " + os.path.join(project, "sidecars", "book", "s.csv")),
+        ("with no folder given or told, and with one that's the file system's root, not "
+         "a whole path, or missing, paths are printed as they are",
+         lambda: len(odd_roots) == 4
+         and all(out.strip() == "child: " + os.path.join(project, "src", "book", "a.md")
+                 for out in odd_roots)),
+        ("the run, the builders, and the tools a run starts each ask for it",
+         lambda: all(users.values())),
+    ]
+
+
 def check_pages_written():
     """The pages of the PDF LaTeX wrote, as its last lines say, which a
     book's build counts in its last line beside the book's pages, and a
@@ -7305,6 +7384,16 @@ def check_head_only_tables():
         ("so does a head holding a table, and one of header rows only",
          lambda: divided("<tr><th><table><tr><td>1</td></tr></table></th></tr>" + data)[1] == 0
          and divided(header + header)[1] == 0),
+        ("an empty data cell of class empty-header, the run's own mark for an empty header "
+         "cell, is a header cell again with the class off, whatever else it's marked; a "
+         "cell holding something, and one not so marked, stay as they are",
+         lambda: htmlrepair.empty_headers_back(
+             '<td class="empty-header"></td><td class=\'a empty-header b\' id="c"> &nbsp;</td>'
+             '<td class="empty-header">x</td><td></td><td class="empty-headers"></td>')
+         == ('<th></th><th class="a b" id="c"> &nbsp;</th>'
+             '<td class="empty-header">x</td><td></td><td class="empty-headers"></td>', 2)
+         and '<th></th>' in htmlrepair.repaired(
+             '<table><tr><td class="empty-header"></td><td>1</td></tr></table>')[0]),
         ("a page's repair does it, to each such table on the page",
          lambda: htmlrepair.repaired("<table><thead>" + header + data + "</thead></table>"
                                      "<table><thead>" + header + data + "</thead></table>")[0]
@@ -11506,6 +11595,7 @@ GROUPS = [
     ("a file of TeX's own, looked for where TeX is installed", check_installed_tex_file),
     ("the suites' own laying out, held to a book's folder", check_suites_lay_out_only_books),
     ("a folder that isn't a project, and what a tool says of it", check_not_a_project),
+    ("a project's files named from its folder in what a tool says", check_named_from_project),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("the pages of the PDF LaTeX wrote, as it says", check_pages_written),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),

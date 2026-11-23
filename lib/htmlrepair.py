@@ -52,6 +52,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import html
 import re
 
+import headercells
+
 INSIDE = ("p|li|dt|dd|td|th|caption|figcaption|blockquote|em|strong|b|i|u|s|"
           "cite|q|sup|sub|small|mark|abbr|dfn|kbd|samp|var|ins|del|summary")
 BEFORE = "ul|ol|dl"
@@ -106,6 +108,7 @@ def repaired(markup):
     markup = NOTES_HEADING.sub("", markup)
     markup = words_as_text(markup)[0]
     markup = body_out_of_head(markup)[0]
+    markup = empty_headers_back(markup)[0]
     return auto_id_headings(markup), count + marked + titled
 
 
@@ -327,6 +330,40 @@ def body_out_of_head(markup):
         return (opening + inside[:starts[first]] + closing
                 + "<tbody>" + inside[starts[first]:] + "</tbody>")
     return _HEAD_ONLY.sub(divide, markup), count
+
+
+# A data cell the run wrote for an empty header cell (lib/headercells.py),
+# known by its class: its attributes, then nothing but white space.
+_EMPTY_HEADER = re.compile(
+    r"<td\b((?:[^<>\"']|\"[^\"]*\"|'[^']*')*)>((?:\s|\u00a0|&nbsp;|&#160;|&#x0*a0;)*)</td\s*>",
+    re.I)
+_CLASS = re.compile(r"""\sclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", re.I)
+
+
+def empty_headers_back(markup):
+    """(markup, count): each empty data cell of class empty-header made a
+    header cell again, the class taken off. A page the run wrote has one
+    wherever a header cell was empty (lib/headercells.py), in a head row
+    or down a header column, and read as a data cell it breaks the
+    column: Pandoc's reader takes a column for row heads only when every
+    row's cell in it is a <th>, so a table labeled down its first column,
+    one label empty, came back with no header column at all, its labels
+    data cells. The writer makes the cell a data cell again."""
+    count = 0
+
+    def cell(match):
+        nonlocal count
+        attributes = match.group(1)
+        found = _CLASS.search(attributes)
+        names = next((g for g in found.groups() if g is not None), "").split() if found else []
+        if headercells.MARK not in names:
+            return match.group(0)
+        count += 1
+        names.remove(headercells.MARK)
+        kept = attributes[:found.start()] + (
+            ' class="%s"' % " ".join(names) if names else "") + attributes[found.end():]
+        return "<th%s>%s</th>" % (kept, match.group(2))
+    return _EMPTY_HEADER.sub(cell, markup), count
 
 
 def repaired_copy(source, destination):

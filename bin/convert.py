@@ -7087,6 +7087,9 @@ def main():
     why = projectpaths.not_a_project(base)
     if why:
         die(f"{why} Nothing was converted.")
+    # From here on a file of the project's is named from its folder, by
+    # this run and by the tools it starts.
+    projectpaths.name_from_project(base, stdout=True)
     # Everything in a project's folder is the project's to read, so some
     # folders can't be one.
     why = projectpaths.refused_root(base)

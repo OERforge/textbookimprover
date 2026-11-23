@@ -88,6 +88,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 from bookcontents import slugify, stem_title, PIECE_SEPARATOR  # noqa: E402
 from bookassembly import formula_texts  # noqa: E402
+import projectpaths  # noqa: E402
 import sidecars  # noqa: E402
 
 INTERMEDIATE = ".filtered.json"
@@ -591,6 +592,7 @@ def main():
     # said why it couldn't, which this would only say again.
     parser.add_argument("--sidecar-checked", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    projectpaths.name_from_project()
 
     said, why = sidecars.rewrite_as_utf8(args.sidecar) \
         if args.sidecar and not args.sidecar_checked else ([], None)

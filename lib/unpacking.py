@@ -228,6 +228,9 @@ class Placed:
             if not os.listdir(sources):
                 os.rmdir(sources)
             sys.exit(str(exc).replace("Nothing was converted.", "Nothing was unpacked."))
+        # What's written is named from the project's folder: the one a
+        # run named, when a run started the unpacker.
+        projectpaths.name_from_project(None if from_run else out, stdout=True)
 
     def _upstream(self, upstream):
         """Settle where the part's upstream file is in the project,
@@ -281,13 +284,13 @@ class Placed:
     @property
     def where(self):
         """The folder the sources went to, for a message."""
-        return P(self.out).sources() if self.part else self.out
+        return P(self.out).sources()
 
     def settings(self, name):
         """The path to write a settings file of this name to: the top,
         or beside the report as a sample when the project has one."""
         top = P(self.out).top(name)
-        if not self.part or not os.path.lexists(top):
+        if not os.path.lexists(top):
             return top
         stem, ext = os.path.splitext(name)
         # Not -sample: the run writes a project-sample.yaml of its own there.
@@ -299,11 +302,10 @@ class Placed:
         """The path to write a drafted sidecar to, or None when the part
         has one of that name, which is left as it is."""
         path = P(self.out).sidecar(name)
-        if self.part:
-            if os.path.lexists(path):
-                self.kept.append((os.path.join("sidecars", self.part, name), None))
-                return None
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.lexists(path):
+            self.kept.append((os.path.join("sidecars", self.part, name), None))
+            return None
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
 
     def from_lines(self, indent=2):
@@ -321,22 +323,19 @@ class Placed:
 
     def write_project(self, text):
         """Write project.yaml's text, with the part declared in it."""
-        if self.part:
-            block = "\n".join(self.from_lines()) + "\n"
-            if "\n  contents:" in text:
-                text = text.replace("\n  contents:", "\n" + block + "  contents:", 1)
-            elif "\nproject:\n" in "\n" + text:
-                text = ("\n" + text).replace("\nproject:\n", "\nproject:\n" + block, 1)[1:]
-            else:
-                text += "project:\n" + block
+        block = "\n".join(self.from_lines()) + "\n"
+        if "\n  contents:" in text:
+            text = text.replace("\n  contents:", "\n" + block + "  contents:", 1)
+        elif "\nproject:\n" in "\n" + text:
+            text = ("\n" + text).replace("\nproject:\n", "\nproject:\n" + block, 1)[1:]
+        else:
+            text += "project:\n" + block
         with open(self.settings(projectpaths.PROJECT_NAME), "w", encoding="utf-8") as fh:
             fh.write(text)
 
     def finish(self):
         """Copy the upstream file in, record what was unpacked, and say
         what was left as it was."""
-        if not self.part:
-            return
         write_record(self.out, self.part, self.unpacker, self.options, self.source)
         if self.copy and os.path.isdir(self.copy[0]):
             files, left = copy_folder(*self.copy)

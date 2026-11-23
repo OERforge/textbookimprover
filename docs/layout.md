@@ -79,6 +79,8 @@ Start `convert.py` in the project's folder, or name the folder with `-d`:
 python3 $T/bin/convert.py -d ~/books/my-book
 ```
 
+Either way, what the run says names a file of the project's from the project's folder (`Wrote output/reports/book/image-alt-missing.csv`), not by its whole path, and so do the tools it starts and those you run by hand with the project's folder. A command it echoes (`+ pandoc ...`) keeps its whole paths, since it runs in a folder of the run's own.
+
 Started inside `src/` or `output/`, a run stops and names the project. A run also refuses a project's folder that is the file system's root, your home folder or a folder holding it, a Windows drive, a folder holding TextbookImprover or the TeX installation, a folder inside another project, or one whose path has a colon in it. It stops, too, when `src/`, `sidecars/`, `output/`, `output/work/`, `upstream/`, `originals/`, or a part's folder is a link.
 
 ## Unpacking a part from upstream

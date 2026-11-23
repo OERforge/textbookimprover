@@ -90,6 +90,7 @@ import acecheck  # noqa: E402
 import axecheck  # noqa: E402
 import outputcheck  # noqa: E402
 import pdfcheck  # noqa: E402
+import projectpaths  # noqa: E402
 import pptxcheck  # noqa: E402
 import pptxparse  # noqa: E402
 import findings as findings_lib  # noqa: E402
@@ -133,6 +134,7 @@ def main():
                              "page or the PDF has there (an element's markup, a link's "
                              "address), where each rule's are otherwise counted in one")
     args = parser.parse_args()
+    projectpaths.name_from_project()
 
     pages = list(args.pages)
     if args.pages_file:

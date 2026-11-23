@@ -73,7 +73,7 @@ def main():
                              f"description, at the value {CONFIG_NAME} gives "
                              "it or its default, and stop")
     parser.add_argument("-d", "--dir", default=".",
-                        help="directory holding the config (default: .)")
+                        help="the project's folder (default: .)")
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
@@ -86,6 +86,10 @@ def main():
         parser.error(f"give --init, to write {SAMPLE_NAME}")
 
     base = args.dir
+    why = projectpaths.not_a_project(base)
+    if why:
+        sys.exit(f"{why} Nothing was written.")
+    projectpaths.name_from_project(base, stdout=True)
     config_path = P(base).config_file()
 
     legacy = P(base).top(LEGACY_NAME)
@@ -135,16 +139,15 @@ def main():
     inline = oerconfig.inline_project(config_path)
     oerconfig.write_config(
         schema, project_schema, resolved, targets, out,
-        notes=["Written by --init."] + ([
-            "The sidecars and reports settings aren't here: in this layout a",
-            "part's sidecars are in sidecars/<part>/ under their standard",
-            "names, and its drafts and reports are written to",
-            "output/reports/<part>/."]
-            if projectpaths.is_tree(base) else []),
+        notes=["Written by --init.",
+               "The sidecars and reports settings aren't here: a part's",
+               "sidecars are in sidecars/<part>/ under their standard names,",
+               "and its drafts and reports are written to",
+               "output/reports/<part>/."],
         include_project=inline or False,
         # With a folder for each part, a sidecar and a report each have
         # one place, and a run stops at a setting that names another.
-        omit=("sidecars", "reports") if projectpaths.is_tree(base) else ())
+        omit=("sidecars", "reports"))
     use = projectpaths.adopt(out, P(base).config_file())
     print(f"Wrote {out}: every conversion setting with its description, "
           f"your own where you set one. {use[0].upper() + use[1:]} to use it.")

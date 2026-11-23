@@ -609,6 +609,9 @@ def case_tree_layout(work):
     by_hand = {tool: subprocess.run(["python3", os.path.join(BIN, tool), "-d", flat],
                                     capture_output=True, text=True, stdin=subprocess.DEVNULL)
                for tool in ("build-pdf.py", "build-epub.py", "build-cartridge.py")}
+    init_flat = subprocess.run(["python3", os.path.join(BIN, "read-conversion-config.py"),
+                                "-d", flat, "--init"], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
     loose = os.path.join(work, "loose")
     os.makedirs(os.path.join(loose, "src", "figures"))
     with open(os.path.join(loose, "src", "main.tex"), "w", encoding="utf-8") as fh:
@@ -659,6 +662,10 @@ def case_tree_layout(work):
                      and "Nothing was built." in run.stderr for run in by_hand.values())
          and files(flat) == flat_before
          or fail(str({k: (v.returncode, v.stderr[-200:]) for k, v in by_hand.items()}))),
+        ("and so does read-conversion-config.py --init, which writes no sample there",
+         lambda: init_flat.returncode != 0 and "isn't a project" in init_flat.stderr
+         and "Nothing was written." in init_flat.stderr and files(flat) == flat_before
+         or fail(init_flat.stderr[-300:])),
         ("a folder whose src/ holds a file beside its folders stops the run too, naming "
          "the file",
          lambda: ran_loose.returncode != 0
@@ -2062,8 +2069,7 @@ def case_samples_moved(work):
         ("a run that needs the book's name says to move project-sample.yaml from "
          "the reports to the project's top, and the sample moved there names the book",
          lambda: unnamed.returncode != 0
-         and "move it to " + os.path.join(work, "project.yaml") + ", and run again"
-         in said(unnamed)
+         and "move it to project.yaml, and run again" in said(unnamed)
          and "lost by moving it there" in said(unnamed)
          and "rename it" not in said(unnamed).lower()
          and named.returncode == 0 and "project-sample.yaml." not in said(named)
@@ -2071,13 +2077,14 @@ def case_samples_moved(work):
         ("--init says where each of the packaging and conversion samples goes, and a "
          "run reads them there",
          lambda: packaging.returncode == 0 and conversion.returncode == 0
-         and "Move it to " + os.path.join(work, "packaging.yaml") in said(packaging)
-         and "Move it to " + os.path.join(work, "conversion.yaml") in said(conversion)
+         and "Move it to packaging.yaml" in said(packaging)
+         and "Move it to conversion.yaml" in said(conversion)
          and old_sidecar.returncode == 0
          or fail_text(packaging, said(conversion) + said(old_sidecar)[-300:])),
         ("a sidecar's sample is moved over the sidecar, in sidecars/, after which the "
          "run writes none",
-         lambda: had_sample and "Move it to " + sidecar in said(old_sidecar)
+         lambda: had_sample
+         and "Move it to " + os.path.relpath(sidecar, work) in said(old_sidecar)
          and settled.returncode == 0 and not os.path.isfile(headers_sample)
          and "no drafted-by" not in said(settled)
          or fail_text(old_sidecar, said(settled)[-300:])),
@@ -6535,6 +6542,48 @@ HEAD_ONLY = """<!DOCTYPE html><html lang="en"><head><title>Heads</title></head><
 """
 
 
+def case_empty_header_read_back(work):
+    """A page the run wrote, read as a source: an empty header cell, which
+    a page has as a marked data cell, is a header cell again, so a table
+    labeled down its first column with one label empty keeps its header
+    column, and comes out as it went in."""
+    os.makedirs(work)
+    with open(place(work, "labels.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html>\n<html lang="en"><head><title>Labels</title></head><body>\n'
+                 "<h1>Labels</h1>\n"
+                 "<table><tbody>\n"
+                 '<tr><th scope="row">Python</th><td>one</td></tr>\n'
+                 '<tr><th scope="row"></th><td>two</td></tr>\n'
+                 '<tr><th scope="row">Pyret</th><td>three</td></tr>\n'
+                 "</tbody></table>\n"
+                 "<table><thead><tr><th></th><th>Left</th></tr></thead><tbody>\n"
+                 '<tr><th scope="row">Up</th><td>1</td></tr>\n'
+                 '<tr><th scope="row">Down</th><td>2</td></tr>\n'
+                 "</tbody></table>\n</body></html>\n")
+    first = convert(work, fixtures=())
+    written = read(work, "html", "labels.html") if exists(work, "html", "labels.html") else ""
+    back = beside(work, "back")
+    os.makedirs(back)
+    with open(place(back, "labels.html"), "w", encoding="utf-8") as fh:
+        fh.write(written)
+    second = convert(back, fixtures=())
+    again = read(back, "html", "labels.html") if exists(back, "html", "labels.html") else ""
+
+    def tables(page):
+        return re.findall(r"<table\b.*?</table>", page, re.S)
+    return [
+        ("a page has each empty header cell as a marked data cell, the others header cells",
+         lambda: first.returncode == 0 and len(tables(written)) == 2
+         and [t.count('class="empty-header"') for t in tables(written)] == [1, 1]
+         and [t.count('<th scope="row"') for t in tables(written)] == [2, 2]
+         or fail(first.stderr[-400:] + str(tables(written)))),
+        ("read as a source, the page keeps its header column and its head row's corner: "
+         "the tables come out as they went in",
+         lambda: second.returncode == 0 and tables(again) == tables(written)
+         or fail(second.stderr[-400:] + str(tables(again)))),
+    ]
+
+
 def case_head_only_tables(work):
     """A table whose <thead> holds every row, its rows of data too, as
     LibreTexts' editor writes one: Pandoc's reader made every row a header
@@ -9354,7 +9403,8 @@ def case_excel_sidecars(work):
          "without it" in left.stdout + left.stderr),
         ("and so is a link to a file that isn't there",
          lambda: "reading-order.csv is a link to %s, which isn't there, so this run goes on "
-         "without it" % place(work, "gone.csv") in left.stdout + left.stderr),
+         "without it" % os.path.relpath(place(work, "gone.csv"), work)
+         in left.stdout + left.stderr),
         ("and one of ASCII alone is given the mark too, the run saying so",
          lambda: "slide-titles.csv had no byte-order mark: one is added" in left.stdout + left.stderr
          and titles_now == b"\xef\xbb\xbf" + ascii_titles),
@@ -11589,6 +11639,8 @@ CASES = [
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
     ("a table whose <thead> holds every row", case_head_only_tables),
+    ("an empty header cell of a page the run wrote, read back as a source",
+     case_empty_header_read_back),
     ("bare links and their sidecar", case_bare_links),
     ("a docx target", case_docx_target),
     ("a box in a Word file", case_word_box),

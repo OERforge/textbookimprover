@@ -491,6 +491,7 @@ def main():
     # said why it couldn't, which this would only say again.
     ap.add_argument("--sidecar-checked", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    projectpaths.name_from_project()
 
     def warn(message):
         print("table-headers: " + message, file=sys.stderr)

@@ -49,6 +49,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 PROJECT_NAME = "project.yaml"
@@ -535,6 +536,64 @@ def not_a_project(folder):
             "book kept in one folder, as earlier versions read it, util/move-to-src.py -d "
             f"{folder} moves it into that layout, and with --dry-run says what it would do "
             "first. For a new book, make src/book/ and put its sources there.")
+
+
+# The variable by which a run tells the tools it starts which folder is
+# the project's, for name_from_project. It decides how a path is printed
+# and nothing else.
+NAMED_FROM = "TEXTBOOKIMPROVER_NAMED_FROM"
+
+
+class _NamedFromProject:
+    """A stream that prints a file of the project's by its path from the
+    project's folder (name_from_project)."""
+
+    def __init__(self, stream, roots):
+        self._stream = stream
+        # A path of the project's: the folder, a separator, and a name
+        # after it. The folder itself, and a folder merely beginning with
+        # its name, are left as they are.
+        self._inside = re.compile(
+            "(?:" + "|".join(re.escape(root + os.sep) for root in roots) + r")(?=\.?\w)")
+
+    def write(self, text):
+        # A command a run echoes ("+ pandoc ...") is run in another
+        # folder, and is printed as it was run.
+        if not text.startswith("+ "):
+            text = self._inside.sub("", text)
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def name_from_project(root=None, stdout=False):
+    """Have this program's messages name a file of the project's by its
+    path from the project's folder (output/reports/book/x.csv), as the
+    pages on a project's folders do, and not by its whole path, which is
+    longer, differs from one computer to the next, and tells whoever
+    reads the messages where on the computer the project is kept. root
+    is the project's folder; left out, it's the one the run that started
+    this program named (NAMED_FROM), and with neither nothing changes. A
+    program that starts others gives root, which they inherit.
+
+    What's written to standard error is a message. Standard output is
+    left as it is unless stdout says it holds messages too: a tool whose
+    standard output is read by the run that started it (the files
+    split-pages.py, build-epub.py, and build-pdf.py wrote, a line each)
+    writes whole paths there, which are read from another folder."""
+    if root is not None:
+        os.environ[NAMED_FROM] = os.path.abspath(root)
+    root = os.environ.get(NAMED_FROM, "")
+    if not os.path.isabs(root) or not os.path.isdir(root):
+        return
+    roots = sorted({os.path.abspath(root), os.path.realpath(root)}, key=len, reverse=True)
+    if any(os.path.dirname(one) == one for one in roots):   # the file system's root
+        return
+    for name in ("stderr",) + (("stdout",) if stdout else ()):
+        stream = getattr(sys, name)
+        if stream is not None and not isinstance(stream, _NamedFromProject):
+            setattr(sys, name, _NamedFromProject(stream, roots))
 
 
 # The file in output/ that says a run made the folder, and what it holds:

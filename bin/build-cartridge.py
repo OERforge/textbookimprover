@@ -612,10 +612,8 @@ def sample_commands(base, pages_dir):
     run that wrote only the project's."""
     here = os.path.dirname(os.path.abspath(__file__))
     where = os.path.relpath(P(base).top())
-    pages = "" if os.path.abspath(pages_dir) == os.path.abspath(P(base).top()) \
-        or projectpaths.is_tree(base) else f" --pages {os.path.relpath(pages_dir)}"
     return [
-        f"  python3 {os.path.join(here, 'build-cartridge.py')} -d {where}{pages} --init"
+        f"  python3 {os.path.join(here, 'build-cartridge.py')} -d {where} --init"
         f"    writes {SAMPLE_NAME}",
         f"  python3 {os.path.join(here, 'read-conversion-config.py')} -d {where} --init"
         "    writes conversion-sample.yaml",
@@ -1016,6 +1014,7 @@ def main():
     why = projectpaths.not_a_project(args.dir)
     if why:
         sys.exit(f"{why} Nothing was built.")
+    projectpaths.name_from_project(args.dir, stdout=True)
     projectpaths.set_part(args.part, args.dir)
     projectpaths.build_beside(args.dir, args.beside)
     if args.include_all_html_old:
@@ -1033,37 +1032,35 @@ def main():
     # A package's pages are a target's, found by its name in output/, and
     # its files go to its own folder under output/packages/: neither is a
     # path the command line gives.
-    laid_out = projectpaths.is_tree(base)
     package = None
-    if laid_out:
-        if args.pages or args.output:
-            sys.exit("--pages and -o are no longer taken: a "
-                     "package's pages are those of the html target its includes names, "
-                     "or the project's first, read from output/<target>/, and its "
-                     "manifest is written to output/packages/<package>/.")
-        declared = oerconfig.declared_targets(config_path)
-        package = args.package or (next(iter(declared)) if len(declared) == 1 else None)
-        if package and package not in declared and not args.init:
-            sys.exit(f"--package {package}: {CONFIG_NAME} declares "
-                     + (", ".join(declared) or "no package") + ".")
-        default_part = P(base).default_part()
-        includes = (declared.get(package) or {}).get("includes") or []
-        try:
-            found = oerconfig.pages_target(
-                P(base).config_file(), includes if isinstance(includes, list) else [],
-                projectpaths.run_part() or default_part, default_part)
-        except oerconfig.ConfigError as exc:
-            sys.exit(str(exc))
-        if found is None and not args.init:
-            sys.exit("No html target for the package's pages: its includes names none, "
-                     "and the part has none. A package is made from an html target's "
-                     "pages.")
-        if found:
-            if not projectpaths.run_part():
-                # The pages' part is the package's: its contents, and its
-                # own identifier and title where it has them.
-                projectpaths.set_part(found[2], base)
-            args.pages = P(base).target_place(found[0], found[1] or None)
+    if args.pages or args.output:
+        sys.exit("--pages and -o are no longer taken: a "
+                 "package's pages are those of the html target its includes names, "
+                 "or the project's first, read from output/<target>/, and its "
+                 "manifest is written to output/packages/<package>/.")
+    declared = oerconfig.declared_targets(config_path)
+    package = args.package or (next(iter(declared)) if len(declared) == 1 else None)
+    if package and package not in declared and not args.init:
+        sys.exit(f"--package {package}: {CONFIG_NAME} declares "
+                 + (", ".join(declared) or "no package") + ".")
+    default_part = P(base).default_part()
+    includes = (declared.get(package) or {}).get("includes") or []
+    try:
+        found = oerconfig.pages_target(
+            P(base).config_file(), includes if isinstance(includes, list) else [],
+            projectpaths.run_part() or default_part, default_part)
+    except oerconfig.ConfigError as exc:
+        sys.exit(str(exc))
+    if found is None and not args.init:
+        sys.exit("No html target for the package's pages: its includes names none, "
+                 "and the part has none. A package is made from an html target's "
+                 "pages.")
+    if found:
+        if not projectpaths.run_part():
+            # The pages' part is the package's: its contents, and its
+            # own identifier and title where it has them.
+            projectpaths.set_part(found[2], base)
+        args.pages = P(base).target_place(found[0], found[1] or None)
     sample_path = P(base).report(SAMPLE_NAME)
     output_path = args.output or P(base).package_file("imsmanifest.xml", package)
 
@@ -1072,7 +1069,7 @@ def main():
                  "reads its own configuration:\n"
                  "    python3 bin/read-conversion-config.py -d . DIR")
 
-    pages_dir = args.pages or (base if not laid_out else P(base).target_place("html"))
+    pages_dir = args.pages or P(base).target_place("html")
     # --init writes its samples before a first run has written any pages.
     listed = os.listdir(pages_dir) if os.path.isdir(pages_dir) or not args.init else []
     stems = sorted((f[:-5] for f in listed if f.endswith(".html")),
@@ -1597,20 +1594,9 @@ def main():
               f"{len(file_list)} entries).")
     else:
         print("\nTo build the cartridge:")
-        if laid_out:
-            # The list is in the package's folder and the pages in their
-            # target's, so zip -@ can't be run on it in either.
-            print("  re-run this script with --zip")
-        elif prefix:
-            # The manual route cannot produce a prefixed layout, so it is
-            # not offered as though it could.
-            print("  re-run this script with --zip")
-            print(f"  ({FILE_LIST_NAME} lists the files, but zip -@ cannot "
-                  f"place them under {prefix}/)")
-        else:
-            print(f"  cd {pages_dir} && zip -q -X "
-                  f"{config['manifest']['cartridge']} -@ < {FILE_LIST_NAME}")
-            print("  (or re-run this script with --zip)")
+        # The list is in the package's folder and the pages in their
+        # target's, so zip -@ can't be run on it in either.
+        print("  re-run this script with --zip")
 
     # Built beside the package's folder, in a run that does: put in its
     # place whole, now that the build is done.

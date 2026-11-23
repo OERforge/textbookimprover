@@ -234,8 +234,7 @@ def main():
         project.update({key: value for key, value in parts_block[of_part].items()
                         if key in ("identifier", "title", "contents", "numbering")
                         and value is not None})
-    if placed:
-        project["parts"] = {args.part: {"kind": "book"}}
+    project["parts"] = {args.part: {"kind": "book"}}
     declared = project.get("contents")
     problems = []
     contents = expand_split_sources(declared, stems, titles, parts, roles) \
@@ -244,17 +243,14 @@ def main():
     project["contents"] = rename_contents(contents_from_tree(tree), names)
     document["project"] = project
 
-    if placed:
-        shutil.copytree(pages_dir, P(out).sources(), dirs_exist_ok=True, ignore=not_links)
-    else:
-        shutil.copytree(pages_dir, out)
+    shutil.copytree(pages_dir, P(out).sources(), dirs_exist_ok=True, ignore=not_links)
     for stem in stems:
         path = P(out).source(stem + ext)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         text = strip_provenance(rewrite(text, names, ext), ext)
         os.remove(path)
-        where = P(out).sources() if placed else out
+        where = P(out).sources()
         passthrough = str(project.get("passthrough", "_pt") or "")
         if passthrough and os.path.isfile(P(book).source(passthrough,
                                                        stem + ext, part=of_part)):
@@ -263,9 +259,11 @@ def main():
         with open(os.path.join(where, names.get(stem, stem) + ext), "w",
                   encoding="utf-8") as fh:
             fh.write(text)
-    with open(placed.settings(projectpaths.PROJECT_NAME) if placed
-              else P(out).project_file(), "w", encoding="utf-8") as fh:
-        fh.write("# Written by adopt-pages.py from " + book + ".\n"
+    with open(placed.settings(projectpaths.PROJECT_NAME), "w", encoding="utf-8") as fh:
+        # Named by its folder alone: the file travels with the project,
+        # and where the book was kept on this computer isn't its business.
+        fh.write("# Written by adopt-pages.py from "
+                 + os.path.basename(os.path.abspath(book)) + ".\n"
                  + yaml.safe_dump(document, sort_keys=False,
                                   allow_unicode=True, width=1000))
     for name in SIDECARS:
@@ -275,17 +273,16 @@ def main():
             if unread:
                 problems.append(f"{name} isn't copied: {unread}")
                 continue
-            dest = placed.sidecar(name) if placed else P(out).sidecar(name)
+            dest = placed.sidecar(name)
             if dest:
                 shutil.copy2(kept, dest)
     for problem in problems:
         print(f"WARNING: {problem}", file=sys.stderr)
-    print(f"{len(stems)} page(s) written to {placed.where if placed else out}/, "
+    print(f"{len(stems)} page(s) written to {placed.where}/, "
           f"{len(names)} renamed.")
     for old, new in sorted(names.items()):
         print(f"  {old}{ext} -> {new}{ext}")
-    if placed:
-        placed.say_kept()
+    placed.say_kept()
     return 0
 
 

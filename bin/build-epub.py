@@ -1248,6 +1248,7 @@ def main():
     why = projectpaths.not_a_project(args.dir)
     if why:
         sys.exit(f"{why} Nothing was built.")
+    projectpaths.name_from_project(args.dir)
     projectpaths.set_part(args.part, args.dir)
     projectpaths.build_beside(args.dir, args.beside)
 

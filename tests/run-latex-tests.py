@@ -4127,7 +4127,7 @@ def case_babel_languages(work):
          lambda: skip(german) if german else
          "WARNING: pdf: babel has no language tag for klingon, so the PDF has the passages "
          "the book's babel commands put in it in the language around them" in said
-         and "Wrote " + pdf + ": " in said
+         and "Wrote " + os.path.relpath(pdf, book) + ": " in said
          and counted + " tagged in its language where babel or the table has a tag for it, "
              "and a \\selectlanguage's inside a paragraph from the next paragraph on, " in said),
         ("every word is where the book built without them has it, the structure is the same "
