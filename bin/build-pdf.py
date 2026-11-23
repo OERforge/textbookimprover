@@ -267,7 +267,10 @@ FACE_MISSING = re.compile(r"^TextbookImprover face: no (\S+)$", re.M)
 # book in Noto Sans, has the table from notofonts' 3.000 (their release
 # notes say from 2.539), where Debian's and Ubuntu's fonts-noto-core have
 # 2.001: LuaTeX finds a copy the user installs in place of the system's
-# only once luaotfload-tool --update has listed it (measured 2026-10-29).
+# only once luaotfload-tool --update has listed it (measured 2026-10-29),
+# and where fonts-noto-core is installed, luaotfload 3.29 keeps the
+# system's copy even then, until a blacklist in TEXMFHOME names it and
+# luaotfload-tool --update --force reads it (measured 2026-11-22).
 # MATH_MISSING's first group is "file " for a font its options give a Path.
 MATH_MISSING = re.compile(r"^TextbookImprover math font: no (file )?(.+)$", re.M)
 NOT_MATH = re.compile(r"Package unicode-math Warning: The first font loaded by unicode-math "
@@ -482,9 +485,14 @@ def math_font_said(said, meta):
                 "NotoSansMath-v3.000.zip from https://github.com/notofonts/math/releases, copy "
                 "NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf from it into "
                 "~/.local/share/fonts, and run luaotfload-tool --update, without which "
-                "LuaTeX keeps finding an older copy (docs/installation.md, \"Noto Sans "
-                "Math\"). To keep Latin Modern Math without this warning, take the mathfont "
-                "line out of the file.")
+                "LuaTeX keeps finding an older copy. Where luaotfload-tool "
+                "--find=file:NotoSansMath-Regular.ttf still names another copy then, as "
+                "fonts-noto-core's /usr/share/fonts/truetype/noto/NotoSansMath-Regular.ttf, put "
+                "that copy's path in a file luaotfload-blacklist.cnf in tex/luatex/luaotfload/ "
+                "under the folder kpsewhich -var-value=TEXMFHOME names, run mktexlsr on that "
+                "folder where it has an ls-R, and run luaotfload-tool --update --force "
+                "(docs/installation.md, \"Noto Sans Math\"). To keep Latin Modern Math without "
+                "this warning, take the mathfont line out of the file.")
     return (f"WARNING: The formulas are set in Latin Modern Math, not in {name}, the math "
             f"font the pdf.metadata file names (mathfont): {found}. Install it, or a "
             "version with the table, and run luaotfload-tool --update, which LuaTeX needs "
