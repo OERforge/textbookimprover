@@ -6772,6 +6772,16 @@ def check_head_only_tables():
         ("so does a head holding a table, and one of header rows only",
          lambda: divided("<tr><th><table><tr><td>1</td></tr></table></th></tr>" + data)[1] == 0
          and divided(header + header)[1] == 0),
+        ("an empty data cell of class empty-header, the run's own mark for an empty header "
+         "cell, is a header cell again with the class off, whatever else it's marked; a "
+         "cell holding something, and one not so marked, stay as they are",
+         lambda: htmlrepair.empty_headers_back(
+             '<td class="empty-header"></td><td class=\'a empty-header b\' id="c"> &nbsp;</td>'
+             '<td class="empty-header">x</td><td></td><td class="empty-headers"></td>')
+         == ('<th></th><th class="a b" id="c"> &nbsp;</th>'
+             '<td class="empty-header">x</td><td></td><td class="empty-headers"></td>', 2)
+         and '<th></th>' in htmlrepair.repaired(
+             '<table><tr><td class="empty-header"></td><td>1</td></tr></table>')[0]),
         ("a page's repair does it, to each such table on the page",
          lambda: htmlrepair.repaired("<table><thead>" + header + data + "</thead></table>"
                                      "<table><thead>" + header + data + "</thead></table>")[0]

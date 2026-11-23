@@ -5620,6 +5620,46 @@ HEAD_ONLY = """<!DOCTYPE html><html lang="en"><head><title>Heads</title></head><
 """
 
 
+def case_empty_header_read_back(work):
+    """A page the run wrote, read as a source: an empty header cell, which
+    a page has as a marked data cell, is a header cell again, so a table
+    labeled down its first column with one label empty keeps its header
+    column, and comes out as it went in."""
+    os.makedirs(work)
+    with open(os.path.join(work, "labels.html"), "w", encoding="utf-8") as fh:
+        fh.write('<!DOCTYPE html>\n<html lang="en"><head><title>Labels</title></head><body>\n'
+                 "<h1>Labels</h1>\n"
+                 "<table><tbody>\n"
+                 '<tr><th scope="row">Python</th><td>one</td></tr>\n'
+                 '<tr><th scope="row"></th><td>two</td></tr>\n'
+                 '<tr><th scope="row">Pyret</th><td>three</td></tr>\n'
+                 "</tbody></table>\n"
+                 "<table><thead><tr><th></th><th>Left</th></tr></thead><tbody>\n"
+                 '<tr><th scope="row">Up</th><td>1</td></tr>\n'
+                 '<tr><th scope="row">Down</th><td>2</td></tr>\n'
+                 "</tbody></table>\n</body></html>\n")
+    first = convert(work, fixtures=())
+    written = read(work, "html", "labels.html") if exists(work, "html", "labels.html") else ""
+    back = work + "-back"
+    os.makedirs(back)
+    with open(os.path.join(back, "labels.html"), "w", encoding="utf-8") as fh:
+        fh.write(written)
+    second = convert(back, fixtures=())
+    again = read(back, "html", "labels.html") if exists(back, "html", "labels.html") else ""
+
+    def tables(page):
+        return re.findall(r"<table\b.*?</table>", page, re.S)
+    return [
+        ("a page has each empty header cell as a marked data cell, the others header cells",
+         lambda: first.returncode == 0 and len(tables(written)) == 2
+         and [t.count('class="empty-header"') for t in tables(written)] == [1, 1]
+         and [t.count('<th scope="row"') for t in tables(written)] == [2, 2]),
+        ("read as a source, the page keeps its header column and its head row's corner: "
+         "the tables come out as they went in",
+         lambda: second.returncode == 0 and tables(again) == tables(written)),
+    ]
+
+
 def case_head_only_tables(work):
     """A table whose <thead> holds every row, its rows of data too, as
     LibreTexts' editor writes one: Pandoc's reader made every row a header
@@ -10664,6 +10704,8 @@ CASES = [
     ("link titles from every source through every target", case_link_titles),
     ("HTML table repairs", case_html_table_repairs),
     ("a table whose <thead> holds every row", case_head_only_tables),
+    ("an empty header cell of a page the run wrote, read back as a source",
+     case_empty_header_read_back),
     ("bare links and their sidecar", case_bare_links),
     ("a docx target", case_docx_target),
     ("a box in a Word file", case_word_box),
