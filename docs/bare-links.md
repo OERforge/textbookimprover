@@ -31,6 +31,7 @@ The replacement happens on the way through the filter, so the sources keep their
 [APA allows a shortDOI](https://apastyle.apa.org/style-grammar-guidelines/references/dois-urls) where a DOI is long or complex: `https://doi.org/10/b8xx35` for `https://doi.org/10.1080/08913810508443640`, which resolves to the same place. `util/shortdoi.py` fills them in, asking the International DOI Foundation's [shortDOI service](https://shortdoi.org/) for each DOI in the sidecar with no Replacement yet:
 
 ```bash
+cd sidecars/book
 python3 $T/util/shortdoi.py bare-links.csv --dry-run      # what it would look up
 python3 $T/util/shortdoi.py bare-links.csv                # look up and write
 python3 $T/util/shortdoi.py bare-links.csv --min-length 40  # only the long ones

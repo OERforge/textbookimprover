@@ -132,18 +132,16 @@ Both books were crawled with the wget commands above and compared with the brows
 
 ## Converting it
 
-Put the WARC in a directory of its own and run `convert.py` there. Finding a web archive and no sources, it unpacks the archive into the directory, then converts the pages:
+Unpack the WARC as a new project with `unpack-site.py`, then run `convert.py` in the project's folder:
 
 ```bash
-mkdir ~/books/cs168 && cp ~/warcs/cs168/cs168.warc.gz ~/books/cs168/
+python3 $T/bin/unpack-site.py ~/warcs/cs168/cs168.warc.gz -o ~/books/cs168
 cd ~/books/cs168
 python3 $T/bin/convert.py
 ```
 
-A WACZ from Browsertrix works the same way, and the file is recognized by what it holds, whatever it's called. A `project.yaml` already in the directory is kept, with the unpacker's written beside it as `project-unpacked.yaml`, and `--check-only` says what it would unpack without doing it. The unpacking is `unpack-site.py`'s, which you can also run yourself, into a new directory, when you need its options (a generator's profile, or whole pages for an offline copy):
+The unpacker writes the pages to `src/book/` with their images once each, a `project.yaml` with the site's title and the order its menus gave, and a copy of the WARC in `upstream/`, which `project.yaml` names as the book's `from` ([A book saved from the web](site-input.md), [A project's folders](layout.md)). A WACZ from Browsertrix works the same way, and the file is recognized by what it holds, whatever it's called. The unpacker also takes the options a run can't guess: a generator's profile, or whole pages for an offline copy.
 
-```bash
-python3 $T/bin/unpack-site.py ~/warcs/cs168/cs168.warc.gz -o ~/books/cs168
-```
+A run can do the unpacking instead. Put the WARC in a project's `upstream/`, name it as the book's `from` in a `project.yaml` of your own, and run `convert.py`: finding `src/book/` empty, it unpacks the archive there, then converts the pages ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)). `--check-only` says what it would unpack without doing it. Your `project.yaml` is kept as it is, so the title and the order the unpacker read from the site are written to `output/reports/book/project-unpacked.yaml`, for you to copy across.
 
-The directory is the book from then on. It holds the pages, their images once each, and a `project.yaml` with the order the site's menus gave, and it's where your corrections go: `project.yaml`, the sidecars, a `_pt/` of finished pages. Converting again reads the directory, not the WARC, and says it didn't read the archive: once there are pages, they're the sources, so a correction to one is never overwritten. Keep the WARC as the record of what was fetched and when. To start from a newer crawl, unpack it into a new directory (the unpacker won't write into one that isn't empty) and copy your `project.yaml` and sidecars across; `table-headers.csv` and `image-alt.csv` are keyed on a table's content and an image's path, so their rows still apply wherever those are unchanged.
+The project is the book from then on, and it's where your corrections go: `project.yaml`, the sidecars in `sidecars/book/`, a `_pt/` of finished pages in `src/book/`. Converting again reads `src/book/`, not the WARC: once there are pages, they're the sources, so a correction to one is never overwritten, and each run says how many files differ from what was unpacked (`convert.py --src-status` lists them). Keep the WARC as the record of what was fetched and when. To start from a newer crawl, unpack it as a new project and copy your `project.yaml` and `sidecars/` across; `table-headers.csv` and `image-alt.csv` are keyed on a table's content and an image's path, so their rows still apply wherever those are unchanged.

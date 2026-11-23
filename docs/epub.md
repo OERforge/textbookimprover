@@ -8,12 +8,12 @@ One EPUB for the whole book, assembled from the same pages the cartridge holds a
 # in conversion.yaml
 targets:
   html:
-    format: html             # writes html/
+    format: html             # writes output/html/
   epub:
-    format: epub3            # writes epub/<identifier>.epub
+    format: epub3            # writes output/epub/<identifier>.epub
 ```
 
-`output_dir` defaults to the target's name and `filename` to the book's identifier with `.epub` added, so the block above writes `epub/org.example.book.epub` and nothing else needs saying. The settings an `epub3` target reads beyond the shared ones are under `epub:` in the [conversion settings](conversion-settings.md): `toc_depth` and `accessibility_summary`.
+`output_dir` defaults to the target's name and `filename` to the book's identifier with `.epub` added, so the block above writes `output/epub/org.example.book.epub` and nothing else needs saying. The settings an `epub3` target reads beyond the shared ones are under `epub:` in the [conversion settings](conversion-settings.md): `toc_depth` and `accessibility_summary`.
 
 The book's own details come from `project.yaml`, or from `conversion.yaml`'s own `project:` block, since an EPUB can't see `packaging.yaml`'s ([Where the book is named](configuration.md#where-the-book-is-named)): `title`, `language`, `identifier` (the EPUB's identifier too, so a rebuilt edition is recognized as the same book rather than a new one), `publisher`, `description`, and `authors`, which becomes one creator entry each. The book's language is the package's, and Pandoc's writer gives every chapter file it too; a page in another language says so on the root of each of its chapter files, the `footer` setting's footer in them in the book's ([A page's language](sidecars.md#a-pages-language)).
 

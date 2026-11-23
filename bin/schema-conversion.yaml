@@ -1201,8 +1201,7 @@ keys:
     book_level: true
     description: >
       CSV files holding decisions a person made about the source. These
-      describe the book rather than one rendering, so a target should
-      rarely override them.
+      describe the book rather than one rendering.
 
       Not read: a part's sidecars are in sidecars/<part>/, each under the
       default name given here, and this setting stops the run. It names
@@ -1211,16 +1210,9 @@ keys:
       These files are read, and written only to make each one UTF-8 with
       the byte-order mark (one Excel saved in a code page rewritten as
       UTF-8, one without the mark given it), and hold work no script can
-      reproduce. A bare name resolves against the content directory,
-      which is convenient but leaves them among the generated HTML, the
-      extracted media, and the disposable reports: the directory you
-      would delete to rebuild, and the one replaced wholesale when the
-      publisher reissues the source. An absolute path, or one relative
-      to the content directory such as
-      "../corrections/ibs2e/table-captions.csv", keeps them somewhere
-      you can put under version control. A path set here that doesn't
-      exist stops the run, because the alternative is converting the
-      whole book while silently discarding every correction in it.
+      reproduce: sidecars/ is apart from output/, the folder deleted
+      to rebuild, and from src/, the one replaced when the publisher
+      reissues the source.
     keys:
 
       table_captions:

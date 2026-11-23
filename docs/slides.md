@@ -35,9 +35,9 @@ Wrote image-alt-missing.csv (165 picture(s) and object(s) needing alt text).
 Fill in the second column, then append the rows to image-alt.csv.
 ```
 
-It then writes a copy of each deck to `remediated/` and checks the copies (`output-check.csv`). On the first run, nothing has been decided yet, so the copies match their originals. The 21 placeholders are `...` and `..`, 12 of them on the regression deck's scatter plots.
+It then writes a copy of each deck to `output/remediated/` and checks the copies (`output-check.csv`). On the first run, nothing has been decided yet, so the copies match their originals. The 21 placeholders are `...` and `..`, 12 of them on the regression deck's scatter plots.
 
-A folder holding `.pptx` files, or decks to save as PowerPoint ([Decks in other formats](#decks-in-other-formats)), and nothing a book is read from (a `README.md` aside) is slides without being told. In a folder with other files, `project.kind: slides` in `project.yaml` says so; the other files are then left out, and the run names them. A deck in a book's folder is left out of the book, and the run says so too. Decks can come in a zip or a tar (`.tar.gz`, `.tgz`, `.tar`), which the first run unpacks as it unpacks a book's archive: a folder that wraps everything is dropped, and what macOS adds (`__MACOSX`, `._` files) is left out. An entry that would land outside the folder, or a link, is refused and listed in `unpack-report.csv`. With no target in `conversion.yaml`, the run implies one, `remediated`, with format `source`. A deck that can't be read, such as one saved with a password, is named with the reason, and the rest go on.
+A part whose folder holds `.pptx` files, or decks to save as PowerPoint ([Decks in other formats](#decks-in-other-formats)), and nothing a book is read from (a `README.md` aside) is slides without being told. Where the folder holds other files too, the part's `kind: slides` in `project.yaml` says so (`project.kind: slides` in a project of one part); the other files are then left out, and the run names them. A deck among a book's sources is left out of the book, and the run says so too. Decks can come in a zip or a tar (`.tar.gz`, `.tgz`, `.tar`), kept in the project's `upstream/` and named as the part's `from`, which the first run unpacks as it unpacks a book's archive ([A book that arrives as an archive](first-run.md#a-book-that-arrives-as-an-archive)): a folder that wraps everything is dropped, and what macOS adds (`__MACOSX`, `._` files) is left out. An entry that would land outside the folder, or a link, is refused and listed in `output/reports/slides/unpack-report.csv`. With no target in `conversion.yaml`, the run implies one, `remediated`, with format `source`. A deck that can't be read, such as one saved with a password, is named with the reason, and the rest go on.
 
 ## Decks in other formats
 
@@ -147,7 +147,7 @@ Each part of the deck is copied byte for byte unless a decision changes it, and 
 
 On the OpenStax decks, with every row of `image-alt-missing.csv` decided (155 described and 10 marked decorative), the copies' check finds nothing. Their changed parts are well-formed XML, the rest is byte for byte, and LibreOffice opens them and exports them to PDF.
 
-A target's `archive` setting packs its folder into one file once the folder is written: `zip` or `tar.gz`, beside the folder and named after it (`remediated.zip`), holding the folder. Nothing is archived in a run where a deck couldn't be read or a copy couldn't be read back, so an archive is never part of the set. Later runs don't read the archive as a source to unpack:
+A target's `archive` setting packs its folder into one file once the folder is written: `zip` or `tar.gz`, beside the folder and named after it (`output/remediated.zip`), holding the folder. Nothing is archived in a run where a deck couldn't be read or a copy couldn't be read back, so an archive is never part of the set. Later runs don't read the archive as a source to unpack:
 
 ```yaml
 targets:
@@ -243,7 +243,7 @@ project:
   kind: slides
 ```
 
-Each `.md` file there is a deck, but for a repository's own (`README.md` and the rest), named as a book's page would be (`S05 Value and Demand.md` is `S05-Value-and-Demand`). A deck can be written as an `html` target, a `pdf` target, a `pptx` target, a `revealjs` target, a `markdown` target, or a `source` target; with none declared, the run implies `html`, as a book's does. A target of another format is skipped, and the run says so. A folder holding both PowerPoint decks and Markdown ones stops the run, since one run reads one kind for now, and so does one holding no deck at all. Word, HTML, and AsciiDoc files beside the decks are left out, and the run names them. Slides aren't packaged yet.
+Each `.md` file there is a deck, but for a repository's own (`README.md` and the rest), named as a book's page would be (`S05 Value and Demand.md` is `S05-Value-and-Demand`). A deck can be written as an `html` target, a `pdf` target, a `pptx` target, a `revealjs` target, a `markdown` target, or a `source` target; with none declared, the run implies `html`, as a book's does. A target of another format is skipped, and the run says so. A part holding both PowerPoint decks and Markdown ones stops the run, since one run reads one kind for now, and so does one holding no deck at all. Word, HTML, and AsciiDoc files beside the decks are left out, and the run names them. Slides aren't packaged yet.
 
 ```yaml
 # conversion.yaml
