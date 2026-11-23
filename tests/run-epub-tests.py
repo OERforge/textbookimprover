@@ -149,7 +149,7 @@ def write_config(work, contents, extra_project="", extra_epub=""):
                  + extra_project + "  contents:\n" + contents)
     with open(P(work).config_file(), "w",
               encoding="utf-8") as fh:
-        fh.write("targets:\n  html:\n    format: html\n    output_dir: .\n"
+        fh.write("targets:\n  html:\n    format: html\n"
                  "  epub:\n    format: epub3\n" + extra_epub)
 
 
@@ -403,14 +403,14 @@ def case_targets(work):
     write_config(work, "    - tables\n")
     with open(P(work).config_file(), "w",
               encoding="utf-8") as fh:
-        fh.write("targets:\n  html:\n    format: html\n    output_dir: .\n")
+        fh.write("targets:\n  html:\n    format: html\n")
     none = Built(work)
     quiet = subprocess.run(
         ["python3", os.path.join(BIN, "build-epub.py"), "-d", work,
          "--if-declared"], capture_output=True, text=True)
     with open(P(work).config_file(), "w",
               encoding="utf-8") as fh:
-        fh.write("targets:\n  html:\n    format: html\n    output_dir: .\n"
+        fh.write("targets:\n  html:\n    format: html\n"
                  "  epub:\n    format: epub3\n    output_dir: books\n"
                  "    filename: fixtures\n")
     named = subprocess.run(

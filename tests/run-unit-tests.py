@@ -4833,6 +4833,43 @@ def check_installed_tex_file():
     ]
 
 
+def check_suites_lay_out_only_books():
+    """The suites' own laying out (tests/laidout.py) moves a folder's files
+    into src/ when a tool is first run there, so it's held to a book's
+    folder: one with a settings file or a source at its top, and never the
+    system's temporary folder, a home folder, or the repository, which a
+    tool given -d may be run from."""
+    sys.path.insert(0, os.path.join(ROOT, "tests"))
+    import laidout
+    work = tempfile.mkdtemp(prefix="lay-")
+    above, book, empty = work, os.path.join(work, "book"), os.path.join(work, "empty")
+    os.makedirs(book)
+    os.makedirs(empty)
+    open(os.path.join(book, "one.md"), "w").close()
+    open(os.path.join(above, "notes.txt"), "w").close()
+    asked = []
+    saved = laidout.subprocess.run
+    laidout.subprocess.run = lambda arguments, cwd=None, **options: asked.append(cwd)
+    try:
+        laidout.started(["python3", os.path.join(ROOT, "bin", "convert.py"), "-d", book],
+                        cwd=above)
+    finally:
+        laidout.subprocess.run = saved
+    left = sorted(os.listdir(above))
+    laid = os.path.isfile(os.path.join(book, "src", "book", "one.md"))
+    bare = laidout.is_book(empty), laidout.is_book(above)
+    shutil.rmtree(work, ignore_errors=True)
+    return [
+        ("the system's temporary folder, a home folder, and the repository aren't a book's",
+         lambda: not any(laidout.is_book(folder) for folder in (
+             tempfile.gettempdir(), os.path.expanduser("~"), ROOT, os.sep))),
+        ("nor is a folder with no settings file and no source at its top",
+         lambda: bare == (False, False)),
+        ("a tool given -d has that folder laid out, and the one it's run from left as it is",
+         lambda: laid and left == ["book", "empty", "notes.txt"] and asked == [above]),
+    ]
+
+
 def check_pages_written():
     """The pages of the PDF LaTeX wrote, as its last lines say, which a
     book's build counts in its last line beside the book's pages, and a
@@ -11410,6 +11447,7 @@ GROUPS = [
     ("the WCAG modules' folder, and the summary their notes go in", check_wcag_setup),
     ("tlmgr, with sudo where it needs it", check_tlmgr_command),
     ("a file of TeX's own, looked for where TeX is installed", check_installed_tex_file),
+    ("the suites' own laying out, held to a book's folder", check_suites_lay_out_only_books),
     ("a PDF's lines too wide, and its fitted blanks", check_fitted_blanks),
     ("the pages of the PDF LaTeX wrote, as it says", check_pages_written),
     ("Pandoc's LaTeX template, the font setting before its fonts", check_book_template),

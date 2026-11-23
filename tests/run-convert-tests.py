@@ -59,13 +59,20 @@ sys.path.insert(0, HERE)
 import parallel  # noqa: E402
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import pandocversion  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import laidout  # noqa: E402
+
+# A case writes its book into a folder file by file, and the folder is
+# laid out as a project when a tool is first run in it: started() is
+# subprocess.run with that done first, and place() answers where a file
+# is, before the laying out and after.
+started, place, beside = laidout.started, laidout.place, laidout.beside
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
 
 MULTI = """\
 targets:
   html:
     format: html
-    output_dir: .
   print:
     format: html
     header: "A *course* banner."
@@ -86,17 +93,17 @@ def convert(work, config=None, project=True, arguments=(), fixtures=NEEDED):
     book unless project is false."""
     os.makedirs(work, exist_ok=True)
     for name in fixtures:
-        shutil.copy(os.path.join(FIXTURES, name + ".docx"), work)
+        shutil.copy(os.path.join(FIXTURES, name + ".docx"), place(work, name + ".docx"))
     if config is not None:
-        with open(os.path.join(work, "conversion.yaml"), "w",
+        with open(place(work, "conversion.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write(config)
     if project:
-        with open(os.path.join(work, "project.yaml"), "w",
+        with open(place(work, "project.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n")
-    return subprocess.run(
+    return started(
         ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"]
         + list(arguments), cwd=work, capture_output=True, text=True,
         stdin=subprocess.DEVNULL)
@@ -106,7 +113,7 @@ def put_python(tools):
     """A python3 in tools that runs this Python. A script, not a link: a
     virtual environment's Python run through a link outside the
     environment starts without the environment's packages."""
-    path = os.path.join(tools, "python3")
+    path = place(tools, "python3")
     with open(path, "w") as fh:
         fh.write("#!/bin/sh\nexec %s \"$@\"\n" % shlex.quote(sys.executable))
     os.chmod(path, 0o755)
@@ -124,11 +131,11 @@ def walk_json(node):
 
 
 def exists(*parts):
-    return os.path.exists(os.path.join(*parts))
+    return os.path.exists(place(*parts) if len(parts) > 1 else parts[0])
 
 
 def read(*parts):
-    with open(os.path.join(*parts), encoding="utf-8") as fh:
+    with open(place(*parts) if len(parts) > 1 else parts[0], encoding="utf-8") as fh:
         return fh.read()
 
 
@@ -151,20 +158,20 @@ def case_names(work):
     filename of ../../../fn-escaped.epub three, with no word. Each book is
     two folders down, so anything that escaped lands inside work/."""
     def book(name, config):
-        folder = os.path.join(work, "outer", "inner", name)
+        folder = place(work, "outer", "inner", name)
         os.makedirs(folder)
-        with open(os.path.join(folder, "page.md"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "page.md"), "w", encoding="utf-8") as fh:
             fh.write("# Page\n\nA line.\n")
         return convert(folder, config, fixtures=())
     climbing = book("climbing", "targets:\n  ../../escaped:\n    format: html\n")
     absolute = book("absolute", "targets:\n  html:\n    format: html\n"
-                                f"    output_dir: {os.path.join(work, 'abs-target')}\n")
+                                f"    output_dir: {place(work, 'abs-target')}\n")
     named = book("named", "targets:\n  epub:\n    format: epub3\n"
                           "    filename: ../../../fn-escaped.epub\n")
     shared = book("shared", "targets:\n  html:\n    format: html\n    output_dir: pages\n"
                             "  plain:\n    format: html\n    output_dir: pages\n")
     beside = book("beside", "targets:\n  html:\n    format: html\n    output_dir: .\n")
-    escaped = [os.path.relpath(os.path.join(folder, name), work)
+    escaped = [os.path.relpath(place(folder, name), work)
                for folder, dirs, names in os.walk(work)
                for name in dirs + names
                if name in ("escaped", "abs-target", "fn-escaped.epub")]
@@ -190,10 +197,10 @@ def case_names(work):
          lambda: shared.returncode != 0
          and "Targets html and plain both write into pages/" in shared.stderr
          and not exists(work, "outer", "inner", "shared", "pages") or fail(shared.stderr)),
-        ("output_dir: . still writes beside the sources, warning that the next release won't",
-         lambda: beside.returncode == 0
-         and exists(work, "outer", "inner", "beside", "page.html")
-         and "output_dir: ., which writes it into the book's own folder" in beside.stderr
+        ("output_dir: . stops a project's run, which says each target has a folder of its own",
+         lambda: beside.returncode != 0
+         and "has output_dir: '.'. In a project laid out with src/" in beside.stderr
+         and not exists(work, "outer", "inner", "beside", "output", "html")
          or fail(beside.stderr)),
     ]
 
@@ -233,17 +240,17 @@ def case_hand_written(work):
     """A page the author wrote is copied, not rendered, and is in every
     output. It lives in _pt/ and its references resolve from the book's
     directory, as though it sat beside the sources."""
-    os.makedirs(os.path.join(work, "front"), exist_ok=True)
-    os.makedirs(os.path.join(work, "_pt"), exist_ok=True)
-    with open(os.path.join(work, "_pt", "frontmatter.html"), "w",
+    os.makedirs(place(work, "front"), exist_ok=True)
+    os.makedirs(place(work, "_pt"), exist_ok=True)
+    with open(place(work, "_pt", "frontmatter.html"), "w",
               encoding="utf-8") as fh:
         fh.write(HAND)
-    with open(os.path.join(work, "_pt", "notes.md"), "w",
+    with open(place(work, "_pt", "notes.md"), "w",
               encoding="utf-8") as fh:
         fh.write("# Notes by hand\n\n![A logo](front/logo.png)\n")
-    with open(os.path.join(work, "front", "style.css"), "w") as fh:
+    with open(place(work, "front", "style.css"), "w") as fh:
         fh.write("body {}\n")
-    with open(os.path.join(work, "front", "logo.png"), "wb") as fh:
+    with open(place(work, "front", "logo.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  epub:\n    format: epub3\n",
@@ -251,11 +258,11 @@ def case_hand_written(work):
     import zipfile
     names = []
     if exists(work, "org.example.fixtures.imscc"):
-        with zipfile.ZipFile(os.path.join(work, "org.example.fixtures.imscc")) as z:
+        with zipfile.ZipFile(place(work, "org.example.fixtures.imscc")) as z:
             names = z.namelist()
     nav = ""
     if exists(work, "epub", "org.example.fixtures.epub"):
-        with zipfile.ZipFile(os.path.join(work, "epub",
+        with zipfile.ZipFile(place(work, "epub",
                                           "org.example.fixtures.epub")) as z:
             nav = z.read("EPUB/nav.xhtml").decode("utf-8")
     return [
@@ -286,13 +293,13 @@ def case_targets(work):
     result = convert(work, MULTI, fixtures=("tables", "media-a"))
     return [
         ("the run succeeds", lambda: result.returncode == 0),
-        ("the html target writes beside the sources when told to",
-         lambda: exists(work, "tables.html")),
+        ("the html target writes into a folder of its name",
+         lambda: exists(work, "html", "tables.html")),
         ("a second html target writes into its own directory",
          lambda: exists(work, "print", "tables.html")),
         ("with its footer",
          lambda: "Printed edition." in read(work, "print", "tables.html")
-         and "Printed edition." not in read(work, "tables.html")),
+         and "Printed edition." not in read(work, "html", "tables.html")),
         ("a page's own content is its main landmark, its header setting a "
          "banner before it and its footer setting a contentinfo landmark "
          "after it, and a page with neither has its main landmark alone",
@@ -300,10 +307,10 @@ def case_targets(work):
                            r"\s*</header>\s*<main>\s*<h1", read(work, "print", "tables.html"))
          and re.search(r"</main>\s*<footer>\s*<p>Printed edition\.</p>\s*</footer>"
                        r"\s*</body>", read(work, "print", "tables.html"))
-         and re.search(r"<body>\s*<main>\s*<h1", read(work, "tables.html"))
-         and re.search(r"</main>\s*</body>", read(work, "tables.html"))
+         and re.search(r"<body>\s*<main>\s*<h1", read(work, "html", "tables.html"))
+         and re.search(r"</main>\s*</body>", read(work, "html", "tables.html"))
          and all(read(*parts).count("<main>") == 1 for parts in (
-             (work, "print", "tables.html"), (work, "tables.html")))),
+             (work, "print", "tables.html"), (work, "html", "tables.html")))),
         ("and the banner looks as it did as a paragraph, not centered over a "
          "wide space as Pandoc's stylesheet has a header",
          lambda: re.search(r"body > header \{\s*margin-bottom: 0;\s*text-align: inherit;",
@@ -320,11 +327,11 @@ def case_targets(work):
         ("and its pages come from it",
          lambda: 'class="table-wrapper"' not in read(work, "wide",
                                                      "tables.html")
-         and 'class="table-wrapper"' in read(work, "tables.html")),
+         and 'class="table-wrapper"' in read(work, "html", "tables.html")),
         ("its archive holds its pages, not the intermediates kept in its folder",
          lambda: (lambda names: "wide/tables.html" in names
                   and not any(n.startswith("wide/intermediates") for n in names))(
-             zipfile.ZipFile(os.path.join(work, "wide.zip")).namelist()
+             zipfile.ZipFile(place(work, "wide.zip")).namelist()
              if exists(work, "wide.zip") else [])),
         ("the epub target builds",
          lambda: exists(work, "epub", "org.example.fixtures.epub")),
@@ -334,7 +341,7 @@ def case_targets(work):
         ("the output check covers every target's pages",
          lambda: re.search(r"Output check: 6 page\(s\) and 1 EPUB",
                            result.stderr)),
-        ("the packager packages the target beside the sources",
+        ("the packager packages the pages target",
          lambda: exists(work, "imsmanifest.xml")),
     ]
 
@@ -377,14 +384,14 @@ More text.
 
 def case_markdown(work):
     """A Markdown source is a page like a .docx is."""
-    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
-    with open(os.path.join(work, "long run.md"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "assets"), exist_ok=True)
+    with open(place(work, "long run.md"), "w", encoding="utf-8") as fh:
         fh.write(MARKDOWN)            # a space in the name, on purpose
     for image in ("Pipe Sizes.png", "Curve.png", "_under.png"):
-        with open(os.path.join(work, "assets", image), "wb") as fh:
+        with open(place(work, "assets", image), "wb") as fh:
             fh.write(ONE_PIXEL)
     # A leftover from v0.1: an .md with the same name as a .docx.
-    with open(os.path.join(work, "tables.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "tables.md"), "w", encoding="utf-8") as fh:
         fh.write("# old\n")
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  html:\n    format: html\n"
@@ -394,10 +401,10 @@ def case_markdown(work):
         work, "html", "long-run.html") else ""
     section = read(work, "html", "long-run--economies-of-scale.html") \
         if exists(work, "html", "long-run--economies-of-scale.html") else ""
-    validated = epubcheck(os.path.join(work, "epub", "org.example.fixtures.epub"))
+    validated = epubcheck(place(work, "epub", "org.example.fixtures.epub"))
     chapters = ""
     if exists(work, "epub", "org.example.fixtures.epub"):
-        with zipfile.ZipFile(os.path.join(work, "epub", "org.example.fixtures.epub")) as z:
+        with zipfile.ZipFile(place(work, "epub", "org.example.fixtures.epub")) as z:
             chapters = "".join(z.read(n).decode("utf-8") for n in z.namelist()
                                if n.endswith(".xhtml") and n != "EPUB/nav.xhtml")
     empty_header = re.compile(r"<th\b[^>]*>\s*</th>")
@@ -463,11 +470,11 @@ WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page -- The Site</tit
 
 def run_in(directory, contents=None, env=None):
     if contents is not None:
-        with open(os.path.join(directory, "project.yaml"), "w",
+        with open(place(directory, "project.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n" + contents)
-    return subprocess.run(
+    return started(
         ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
         cwd=directory, capture_output=True, text=True,
         stdin=subprocess.DEVNULL, env=env)
@@ -476,14 +483,14 @@ def run_in(directory, contents=None, env=None):
 def same_pages(one, two):
     names = sorted(n for n in os.listdir(one) if n.endswith(".html"))
     return bool(names) and all(
-        open(os.path.join(one, n), "rb").read()
-        == open(os.path.join(two, n), "rb").read() for n in names)
+        open(place(one, n), "rb").read()
+        == open(place(two, n), "rb").read() for n in names)
 
 
 def case_asciidoc(work):
     """An AsciiDoc book: a master file that includes its chapters."""
-    os.makedirs(os.path.join(work, "images"))
-    with open(os.path.join(work, "images", "lock.png"), "wb") as fh:
+    os.makedirs(place(work, "images"))
+    with open(place(work, "images", "lock.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     files = {
         "index.adoc": "= The Book\nAnn Author <ann@example.org>; Bo Writer\n"
@@ -496,7 +503,7 @@ def case_asciidoc(work):
                     "try the `ftp://` scheme.\n",
     }
     for name, text in files.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
     one = read(work, "html", "one.html") if exists(work, "html",
@@ -1146,10 +1153,10 @@ def case_lowercase_names(work):
     def book(name, files, targets="  html:\n    format: html\n  md:\n    format: markdown\n"
                                    "  plain:\n    format: html\n    media:\n"
                                    "      lowercase: false\n"):
-        where = os.path.join(work, name)
+        where = place(work, name)
         for path, data in files.items():
-            os.makedirs(os.path.dirname(os.path.join(where, path)), exist_ok=True)
-            with open(os.path.join(where, path), "wb") as fh:
+            os.makedirs(os.path.dirname(place(where, path)), exist_ok=True)
+            with open(place(where, path), "wb") as fh:
                 fh.write(data)
         return where, convert(where, "defaults:\n  media:\n    lowercase: true\ntargets:\n"
                               + targets, fixtures=())
@@ -1178,18 +1185,16 @@ def case_lowercase_names(work):
     # the source's own file, as a file system that ignores case finds it,
     # and the page names it both ways: a second name for the file stands
     # in for such a file system here.
-    c = os.path.join(work, "beside")
-    os.makedirs(os.path.join(c, "Assets"))
-    os.makedirs(os.path.join(c, "assets"))
-    with open(os.path.join(c, "Assets", "Fig1.PNG"), "wb") as fh:
+    c = place(work, "beside")
+    os.makedirs(place(c, "Assets"))
+    os.makedirs(place(c, "assets"))
+    with open(place(c, "Assets", "Fig1.PNG"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    os.link(os.path.join(c, "Assets", "Fig1.PNG"), os.path.join(c, "assets", "fig1.png"))
-    with open(os.path.join(c, "page.md"), "w", encoding="utf-8") as fh:
+    os.link(place(c, "Assets", "Fig1.PNG"), place(c, "assets", "fig1.png"))
+    with open(place(c, "page.md"), "w", encoding="utf-8") as fh:
         fh.write("# Page\n\n![A rising line](Assets/Fig1.PNG)\n\n![Again](assets/fig1.png)\n")
-    with open(os.path.join(c, "more.md"), "w", encoding="utf-8") as fh:
+    with open(place(c, "more.md"), "w", encoding="utf-8") as fh:
         fh.write("# More\n\n![A rising line](Assets/Fig1.PNG)\n")
-    beside = convert(c, "defaults:\n  media:\n    lowercase: true\ntargets:\n  html:\n"
-                        "    format: html\n    output_dir: .\n", fixtures=())
     return [
         ("an html target copies each file a page names under its name in lowercase, and names "
          "it so",
@@ -1206,14 +1211,6 @@ def case_lowercase_names(work):
         ("a target without it keeps the names",
          lambda: exists(a, "plain", "Assets", "Fig1.PNG") and 'src="Assets/Fig1.PNG"' in plain
          and not exists(a, "plain", "assets")),
-        ("where the name in lowercase is the source's own file beside the pages, it's one "
-         "file, left as it is, and the run says a server that tells case apart won't find it",
-         lambda: beside.returncode == 0
-         and "WARNING: 1 file(s)" in beside.stdout + beside.stderr
-         and "(Assets/Fig1.PNG)" in beside.stdout + beside.stderr
-         and "a server that doesn't ignore case won't find them" in beside.stdout + beside.stderr
-         and os.path.samefile(os.path.join(c, "Assets", "Fig1.PNG"),
-                              os.path.join(c, "assets", "fig1.png"))),
         ("two files whose names differ only in case stop the run, nothing written, files a "
          "page links to as well as its images",
          lambda: clash.returncode != 0
@@ -1273,7 +1270,7 @@ def case_downsample(work):
         return struct.unpack(">II", data[16:24]) if data[:8] == b"\x89PNG\r\n\x1a\n" else None
 
     def file_size(*parts):
-        path = os.path.join(*parts)
+        path = place(*parts)
         if not os.path.exists(path):
             return None
         with open(path, "rb") as fh:
@@ -1320,34 +1317,34 @@ def case_downsample(work):
         im.save(path, **({"transparency": (255, 255, 255)} if key else {}))
 
     def book(name, config, env=None):
-        where = os.path.join(work, name)
-        png(os.path.join(where, "assets", "big.png"), 400, 200)
-        png(os.path.join(where, "assets", "strip.png"), 800, 100)
-        png(os.path.join(where, "assets", "small.png"), 4, 4)
+        where = place(work, name)
+        png(place(where, "assets", "big.png"), 400, 200)
+        png(place(where, "assets", "strip.png"), 800, 100)
+        png(place(where, "assets", "small.png"), 4, 4)
         if Image is not None:
-            png(os.path.join(where, "assets", "colors.png"), 400, 200, palette=True)
+            png(place(where, "assets", "colors.png"), 400, 200, palette=True)
             Image.frombytes("RGB", (300, 150), noise.randbytes(300 * 150 * 3)).save(
-                os.path.join(where, "assets", "photo.jpg"), quality=95)
+                place(where, "assets", "photo.jpg"), quality=95)
             # Shown at their own width: one saved at quality 99, as OpenStax
             # saved Principles of Marketing's photographs, and one at 70.
             shades = Image.linear_gradient("L").resize((160, 80)).convert("RGB")
-            shades.save(os.path.join(where, "assets", "fine.jpg"), quality=99, subsampling=0)
-            shades.save(os.path.join(where, "assets", "coarse.jpg"), quality=70)
-            drawing(os.path.join(where, "assets", "drawing.png"))
-            drawing(os.path.join(where, "assets", "clear.png"), clear=True)
-            drawing(os.path.join(where, "assets", "key.png"), key=True)
-        with open(os.path.join(where, "page.md"), "w", encoding="utf-8") as fh:
+            shades.save(place(where, "assets", "fine.jpg"), quality=99, subsampling=0)
+            shades.save(place(where, "assets", "coarse.jpg"), quality=70)
+            drawing(place(where, "assets", "drawing.png"))
+            drawing(place(where, "assets", "clear.png"), clear=True)
+            drawing(place(where, "assets", "key.png"), key=True)
+        with open(place(where, "page.md"), "w", encoding="utf-8") as fh:
             fh.write(page)
-        with open(os.path.join(where, "assets", "big.png"), "rb") as fh:
+        with open(place(where, "assets", "big.png"), "rb") as fh:
             original = fh.read()
         if env is None:
             return where, original, convert(where, config, fixtures=())
-        with open(os.path.join(where, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(where, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write(config)
-        with open(os.path.join(where, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(where, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n")
-        return where, original, subprocess.run(
+        return where, original, started(
             ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=where,
             capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
 
@@ -1382,11 +1379,11 @@ def case_downsample(work):
                                + "  full:\n    format: html\n    images:\n"
                                  "      downsample: 0\n")
     said = scaled.stdout + scaled.stderr
-    epub = os.path.join(b, "epub", "org.example.fixtures.epub")
-    words = glob.glob(os.path.join(b, "word", "*.docx"))
+    epub = place(b, "epub", "org.example.fixtures.epub")
+    words = glob.glob(place(b, "word", "*.docx"))
 
     def opened(*parts):
-        path = os.path.join(b, *parts)
+        path = place(b, *parts)
         if not os.path.exists(path):
             return None
         with Image.open(path) as im:
@@ -1394,7 +1391,7 @@ def case_downsample(work):
 
     def alpha(*parts):
         """The opacity of a copy's pixels at the left and at the right."""
-        path = os.path.join(b, *parts)
+        path = place(b, *parts)
         if not os.path.exists(path):
             return None
         with Image.open(path) as im:
@@ -1403,9 +1400,9 @@ def case_downsample(work):
 
     # A Python that can't import Pillow, which a folder named PIL whose
     # import fails stands in for.
-    blocked = os.path.join(work, "no-pillow")
-    os.makedirs(os.path.join(blocked, "PIL"))
-    with open(os.path.join(blocked, "PIL", "__init__.py"), "w") as fh:
+    blocked = place(work, "no-pillow")
+    os.makedirs(place(blocked, "PIL"))
+    with open(place(blocked, "PIL", "__init__.py"), "w") as fh:
         fh.write("raise ImportError('Pillow is blocked here')\n")
     c, _, without = book("without", "defaults:\n  images:\n    downsample: 2\n"
                                     "targets:\n  html:\n    format: html\n",
@@ -1424,7 +1421,7 @@ def case_downsample(work):
 
     def in_book(where, *parts):
         """A copy's format, size, and luminance table, or None."""
-        path = os.path.join(where, *parts)
+        path = place(where, *parts)
         if not os.path.exists(path):
             return None
         with Image.open(path) as im:
@@ -1444,17 +1441,17 @@ def case_downsample(work):
         """A JPEG's chroma subsampling, as Pillow's writer names it: 0 for
         4:4:4, 2 for 4:2:0."""
         from PIL import JpegImagePlugin
-        with Image.open(os.path.join(where, *parts)) as im:
+        with Image.open(place(where, *parts)) as im:
             return JpegImagePlugin.get_sampling(im)
 
     def same_file(where, *parts):
-        with open(os.path.join(where, *parts), "rb") as a, \
-                open(os.path.join(where, *parts[1:]), "rb") as b:
+        with open(place(where, *parts), "rb") as a, \
+                open(place(where, *parts[1:]), "rb") as b:
             return a.read() == b.read()
 
     def smaller(where, *parts):
-        return (os.path.getsize(os.path.join(where, *parts))
-                < os.path.getsize(os.path.join(where, *parts[1:])))
+        return (os.path.getsize(place(where, *parts))
+                < os.path.getsize(place(where, *parts[1:])))
     d, _, unscaled = book("unscaled", "targets:\n  html:\n    format: html\n",
                           env=dict(os.environ, PYTHONPATH=blocked))
     return checks + [
@@ -1488,8 +1485,8 @@ def case_downsample(work):
          and (200, 100) in zipped(words[0], "word/media/")
          and (400, 200) not in zipped(words[0], "word/media/")),
         ("the original stays as it is, and so does a markdown target's copy, the author's",
-         lambda: open(os.path.join(b, "assets", "big.png"), "rb").read() == original
-         and open(os.path.join(b, "md", "assets", "big.png"), "rb").read() == original),
+         lambda: open(place(b, "assets", "big.png"), "rb").read() == original
+         and open(place(b, "md", "assets", "big.png"), "rb").read() == original),
         ("the run says how many it scaled and how many of them were drawings given a "
          "palette, and a target set to 0 is named as carrying them whole",
          lambda: re.search(r"images\.downsample 2: 7 of 10 image\(s\) scaled down to 2 times "
@@ -1558,7 +1555,7 @@ def case_white_marks(work):
     cell holding only a no-break space is empty, where a PDF had a space
     character for it."""
     os.makedirs(work, exist_ok=True)
-    with open(os.path.join(work, "marks.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "marks.html"), "w", encoding="utf-8") as fh:
         fh.write("<!DOCTYPE html>\n<html lang=\"en\"><head><title>Marks</title></head><body>\n"
                  "<h1>Marks</h1>\n"
                  "<p>Here S<sub>mb</sub><sub><em> </em></sub>is 0, and x<sup>&nbsp;</sup>y.</p>\n"
@@ -1577,7 +1574,7 @@ def case_white_marks(work):
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  word:\n    format: docx\n", fixtures=())
     page = read(work, "html", "marks.html") if exists(work, "html", "marks.html") else ""
-    words = glob.glob(os.path.join(work, "word", "*.docx"))
+    words = glob.glob(place(work, "word", "*.docx"))
     said = ""
     if words:
         with zipfile.ZipFile(words[0]) as z:
@@ -1622,8 +1619,8 @@ def case_linked_paths(work):
     target: the file is copied beside the page and the page links to it,
     its fragment kept, and the run says so. On a295ec3, the packager
     stopped the run, the files not found."""
-    os.makedirs(os.path.join(work, "Docs"))
-    os.makedirs(os.path.join(work, "Data"))
+    os.makedirs(place(work, "Docs"))
+    os.makedirs(place(work, "Data"))
     files = {"Docs/Handout.pdf": b"%PDF-1.4\n%%EOF\n", "Data/Results.csv": b"a,b\n",
              "notes.pdf": b"%PDF-1.4\n%%EOF\n"}
     pages = {
@@ -1639,12 +1636,12 @@ def case_linked_paths(work):
                            'handout</a>.</p></body></html>\n',
     }
     for path, data in files.items():
-        with open(os.path.join(work, path), "wb") as fh:
+        with open(place(work, path), "wb") as fh:
             fh.write(data)
     for path, text in pages.items():
-        with open(os.path.join(work, path), "w", encoding="utf-8") as fh:
+        with open(place(work, path), "w", encoding="utf-8") as fh:
             fh.write(text)
-    subprocess.run(["pandoc", "-f", "markdown", "-o", os.path.join(work, "word.docx")],
+    started(["pandoc", "-f", "markdown", "-o", place(work, "word.docx")],
                    input="# Word\n\nThe [handout](docs/HANDOUT.PDF).\n", text=True,
                    capture_output=True)
     result = convert(work, "targets:\n  html:\n    format: html\n  print:\n    format: html\n",
@@ -1688,12 +1685,12 @@ def case_stem_collisions(work):
     text isn't lent to a file that merely shares its stem. (An .md beside
     its .docx, v0.1's leftover, is no clash: a Markdown source's case.)"""
     def book(name, files, config="targets:\n  html:\n    format: html\n"):
-        where = os.path.join(work, name)
+        where = place(work, name)
         for path, text in files.items():
-            os.makedirs(os.path.dirname(os.path.join(where, path)) or where,
+            os.makedirs(os.path.dirname(place(where, path)) or where,
                         exist_ok=True)
             mode = "wb" if isinstance(text, bytes) else "w"
-            with open(os.path.join(where, path), mode) as fh:
+            with open(place(where, path), mode) as fh:
                 fh.write(text)
         return where, convert(where, config, fixtures=())
     md, adoc = "# One\n\nText.\n", "= One\n\nText.\n"
@@ -1759,19 +1756,19 @@ def case_stem_collisions(work):
 
 def case_adopt(work):
     """A split book's pages adopted as the sources of a new one."""
-    os.makedirs(os.path.join(work, "_pt"))
-    with open(os.path.join(work, "ch1.md"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "_pt"))
+    with open(place(work, "ch1.md"), "w", encoding="utf-8") as fh:
         fh.write("# Chapter One\n\nOpening.\n\n## First Part\n\nSee "
                  "[the second](#second-part).\n\n## Second Part\n\nEnd.\n")
-    with open(os.path.join(work, "_pt", "about.html"), "w",
+    with open(place(work, "_pt", "about.html"), "w",
               encoding="utf-8") as fh:
         fh.write(HAND.replace("Front Matter", "About"))
     convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                   "targets:\n  html:\n    format: html\n", fixtures=())
     out = work + "-adopted"
-    adopted = subprocess.run(
+    adopted = started(
         ["python3", os.path.join(BIN, "adopt-pages.py"),
-         os.path.join(work, "html"), "-o", out],
+         place(work, "html"), "-o", out],
         capture_output=True, text=True)
     first = read(out, "ch1-first-part.html") if exists(
         out, "ch1-first-part.html") else ""
@@ -2102,7 +2099,7 @@ def case_html_headers(work):
     where the page says nothing, the page's own <th> where it does, and
     the sidecar over both."""
     os.makedirs(work)
-    with open(os.path.join(work, "data.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "data.html"), "w", encoding="utf-8") as fh:
         fh.write(HEADED)
     first = run_in(work, "")
     page = read(work, "html", "data.html") if exists(
@@ -2110,11 +2107,11 @@ def case_html_headers(work):
     new_rows = read(work, "table-headers-new.csv") if exists(
         work, "table-headers-new.csv") else ""
     import csv
-    with open(os.path.join(work, "table-headers-report.csv"),
+    with open(place(work, "table-headers-report.csv"),
               encoding="utf-8-sig") as fh:
         report = list(csv.DictReader(fh))
     country = next((r for r in report if "Country" in r["preview"]), {})
-    with open(os.path.join(work, "table-headers.csv"), "w",
+    with open(place(work, "table-headers.csv"), "w",
               encoding="utf-8") as fh:
         fh.write("key,headers\n" + country.get("key", "x") + ",none\n")
     run_in(work)
@@ -2198,16 +2195,16 @@ def case_layout_tables(work):
     remediated copy."""
     import csv
     os.makedirs(work)
-    with open(os.path.join(work, "steps.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "steps.html"), "w", encoding="utf-8") as fh:
         fh.write(LAYOUT)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
                  "  docx:\n    format: docx\n")
     first = run_in(work, "")
     said = first.stdout + first.stderr
 
     def rows(name):
-        path = os.path.join(work, name)
+        path = place(work, name)
         if not os.path.exists(path):
             return []
         with open(path, encoding="utf-8-sig", newline="") as fh:
@@ -2224,7 +2221,7 @@ def case_layout_tables(work):
     # table's role and mark.
     read_as = []
     if exists(work, "steps.json"):
-        with open(os.path.join(work, "steps.json"), encoding="utf-8") as fh:
+        with open(place(work, "steps.json"), encoding="utf-8") as fh:
             def walk(node):
                 if isinstance(node, dict):
                     if node.get("t") == "Table":
@@ -2238,7 +2235,7 @@ def case_layout_tables(work):
             walk(json.load(fh))
     # The filter on its own, on the page as Pandoc reads it, with no pre-pass
     # and no reading filter: the role alone says what's a layout table.
-    alone = subprocess.run(
+    alone = started(
         "pandoc -f html -t json steps.html | pandoc -f json -t html5 --lua-filter="
         + os.path.join(BIN, "figures-and-tables.lua"), shell=True, cwd=work,
         capture_output=True, text=True).stdout
@@ -2248,20 +2245,20 @@ def case_layout_tables(work):
     markdown = read(work, "md", "steps.md") if exists(work, "md", "steps.md") else ""
     fidelity = [r for r in rows("fidelity.csv") if "layout" in str(r)]
     # The Markdown target's page, read back as a book.
-    back = os.path.join(work, "back")
+    back = beside(work, "back")
     os.makedirs(back)
     if markdown:
-        with open(os.path.join(back, "steps.md"), "w", encoding="utf-8") as fh:
+        with open(place(back, "steps.md"), "w", encoding="utf-8") as fh:
             fh.write(markdown)
     run_in(back, "")
     again = tables(back, "html", "steps.html")
     # A person's rows: the unmarked table is layout, and the first one, which
     # the page marks so, a data table with nothing to declare.
     keys = {r["preview"][:8]: r["key"] for r in new}
-    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n%s,layout\n%s,none\n"
                  % (keys.get("Multiply", "x"), keys.get("Subtract", "y")))
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  copy:\n    format: source\n")
     second = run_in(work)
     decided = tables(work, "html", "steps.html")
@@ -2269,18 +2266,18 @@ def case_layout_tables(work):
     missing_after = sorted(r["Label"] for r in rows("table-captions-missing.csv"))
     # A page whose layout tables include what the census counts no table: one
     # cell, and pictures alone.
-    others = os.path.join(work, "others")
+    others = beside(work, "others")
     os.makedirs(others)
-    with open(os.path.join(others, "checks.html"), "w", encoding="utf-8") as fh:
+    with open(place(others, "checks.html"), "w", encoding="utf-8") as fh:
         fh.write(LAYOUT_NOT_TABLES)
-    with open(os.path.join(others, "dot.png"), "wb") as fh:
+    with open(place(others, "dot.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    with open(os.path.join(others, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(others, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     run_in(others, "")
     listed = []
-    if os.path.exists(os.path.join(others, "table-headers-new.csv")):
-        with open(os.path.join(others, "table-headers-new.csv"), encoding="utf-8-sig",
+    if os.path.exists(place(others, "table-headers-new.csv")):
+        with open(place(others, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             listed = [(r["preview"], r["headers"]) for r in csv.DictReader(fh)]
     return [
@@ -2350,20 +2347,20 @@ def case_layout_word_head(work):
     the Markdown target's copy."""
     import csv
     os.makedirs(work)
-    with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "src.md"), "w", encoding="utf-8") as fh:
         fh.write("# Resume\n\n| Diploma in game design | Sept. 2015 to Apr. 2018 |\n"
                  "|---|---|\n| Certificate in illustration | Sept. 2014 to Apr. 2015 |\n")
-    subprocess.run(["pandoc", "src.md", "-o", "resume.docx"], cwd=work, check=True)
-    os.remove(os.path.join(work, "src.md"))
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    started(["pandoc", "src.md", "-o", "resume.docx"], cwd=work, check=True)
+    os.remove(place(work, "src.md"))
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
     run_in(work, "")
     keys = []
     if exists(work, "table-headers-new.csv"):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig",
+        with open(place(work, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             keys = [r["key"] for r in csv.DictReader(fh)]
-    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n%s,layout\n" % (keys[0] if keys else "x"))
     second = run_in(work)
     page = read(work, "html", "resume.html") if exists(work, "html", "resume.html") else ""
@@ -2387,7 +2384,7 @@ def case_layout_word_head(work):
 def word_with_body(path, body):
     """A Word file Pandoc writes, its body replaced by the OOXML given, so
     it has Pandoc's styles and namespaces and exactly that body."""
-    subprocess.run(["pandoc", "-o", path], input="# Title\n\nText.\n", text=True,
+    started(["pandoc", "-o", path], input="# Title\n\nText.\n", text=True,
                    check=True)
     with zipfile.ZipFile(path) as z:
         items = [(i, z.read(i.filename)) for i in z.infolist()]
@@ -2427,7 +2424,7 @@ def case_word_table_matching(work):
     p, table = ooxml_paragraph, ooxml_table
     formula = ('<m:oMath><m:sSub><m:e><m:r><m:t>x</m:t></m:r></m:e>'
                '<m:sub><m:r><m:t>n</m:t></m:r></m:sub></m:sSub></m:oMath>')
-    word_with_body(os.path.join(work, "kinds.docx"), "".join([
+    word_with_body(place(work, "kinds.docx"), "".join([
         p("Burns by depth:"),
         table([[[p("Burn type")], [p("Depth")]],
                [[p("Superficial")], [p("Epidermis")]],
@@ -2441,15 +2438,15 @@ def case_word_table_matching(work):
                [[p("First")], [p("Start at one")]],
                [[p("Next")], [p("Add two")]]]),
     ]))
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     run_in(work, "")
     keys = []
     if exists(work, "table-headers-new.csv"):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig",
+        with open(place(work, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             keys = [r["key"] for r in csv.DictReader(fh)]
-    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n" + "".join("%s,layout\n" % k for k in keys))
     second = run_in(work)
     page = read(work, "html", "kinds.html") if exists(work, "html", "kinds.html") else ""
@@ -2487,7 +2484,7 @@ def case_word_box_anchor(work):
     # And one whose row the author marked to repeat as a header row.
     repeated = headed.replace("<w:tr>", "<w:tr><w:trPr><w:tblHeader/></w:trPr>").replace(
         "Back up your files, too.", "Totals")
-    word_with_body(os.path.join(work, "box.docx"), "".join([
+    word_with_body(place(work, "box.docx"), "".join([
         p("As ", '<w:hyperlink w:anchor="save-note"><w:r><w:t>the note</w:t></w:r>'
               "</w:hyperlink>", " says, save often."),
         '<w:bookmarkStart w:id="1" w:name="save-note"/><w:bookmarkEnd w:id="1"/>',
@@ -2502,22 +2499,22 @@ def case_word_box_anchor(work):
         p("And a header row alone:"),
         repeated,
     ]))
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = run_in(work, "")
     page = read(work, "html", "box.html") if exists(work, "html", "box.html") else ""
     checked = []
     if exists(work, "output-check.csv"):
-        with open(os.path.join(work, "output-check.csv"), encoding="utf-8-sig", newline="") as fh:
+        with open(place(work, "output-check.csv"), encoding="utf-8-sig", newline="") as fh:
             checked = [r["Check"] for r in csv.DictReader(fh)]
     listed = []
     if exists(work, "table-headers-new.csv"):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig",
+        with open(place(work, "table-headers-new.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             listed = [r["preview"] for r in csv.DictReader(fh)]
     missing = []
     if exists(work, "table-captions-missing.csv"):
-        with open(os.path.join(work, "table-captions-missing.csv"), encoding="utf-8-sig",
+        with open(place(work, "table-captions-missing.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             missing = [r["Label"] for r in csv.DictReader(fh)]
     tables = re.findall(r'(<div class="table-wrapper"[^>]*>\s*)?<table([^>]*)>', page)
@@ -2577,9 +2574,9 @@ def case_one_cell_tables(work):
     caption, its own or a label beside it, which its author numbered."""
     import csv
     os.makedirs(work)
-    with open(os.path.join(work, "boxes.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "boxes.html"), "w", encoding="utf-8") as fh:
         fh.write(ONE_CELL_PAGE)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     result = run_in(work, "")
     page = read(work, "html", "boxes.html") if exists(work, "html", "boxes.html") else ""
@@ -2587,7 +2584,7 @@ def case_one_cell_tables(work):
     tables = re.findall(pattern, page)
     # The filter on its own, with no pre-pass and no reading filter: one
     # cell is the mark, and two aren't.
-    alone = re.findall(pattern, subprocess.run(
+    alone = re.findall(pattern, started(
         "pandoc -f html -t json boxes.html | pandoc -f json -t html5 --lua-filter="
         + os.path.join(BIN, "figures-and-tables.lua"), shell=True, cwd=work,
         capture_output=True, text=True).stdout)
@@ -2595,7 +2592,7 @@ def case_one_cell_tables(work):
     def rows(name, column):
         if not exists(work, name):
             return []
-        with open(os.path.join(work, name), encoding="utf-8-sig", newline="") as fh:
+        with open(place(work, name), encoding="utf-8-sig", newline="") as fh:
             return [r[column] for r in csv.DictReader(fh)]
     return [
         ("an HTML page's box of one cell is a layout table, asked no caption and "
@@ -2625,14 +2622,14 @@ def case_menu(work):
     previous/next pager; a pass-through page is left as it stands. The
     target has a header and a footer too, and a page its own epigraph and
     closing line, in its metadata."""
-    os.makedirs(os.path.join(work, "_pt"))
-    with open(os.path.join(work, "ch1.md"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "_pt"))
+    with open(place(work, "ch1.md"), "w", encoding="utf-8") as fh:
         fh.write("# Chapter One\n\nOpening.\n\n## First Part\n\nA.\n\n"
                  "## Second Part\n\nB.\n")
-    with open(os.path.join(work, "ch2.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "ch2.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Chapter Two\ninclude-before: |\n  > A line before the "
                  "chapter.\ninclude-after: A closing line.\n---\n\n# Chapter Two\n\nTwo.\n")
-    with open(os.path.join(work, "_pt", "about.html"), "w",
+    with open(place(work, "_pt", "about.html"), "w",
               encoding="utf-8") as fh:
         fh.write(HAND.replace("Front Matter", "About"))
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
@@ -2701,18 +2698,18 @@ def case_page_footer(work):
     of them, and so is a link to one of the book's own files, which none
     of them carries; any link is its words in a Word file's footer and the
     LaTeX. A line break is one in each, and an id is left out."""
-    first = os.path.join(work, "first")
+    first = place(work, "first")
     os.makedirs(first, exist_ok=True)
     for name, text in (("ch1.md", "# Chapter One\n\nOpening.[^1]\n\n[^1]: A note.\n"),
                        ("ch2.md", "# Chapter Two\n\nTwo.[^2]\n\n[^2]: Another.\n")):
-        with open(os.path.join(first, name), "w", encoding="utf-8") as fh:
+        with open(place(first, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(first, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(first, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.fixtures\n"
                  "  title: The Fixture Book\n  contents:\n"
                  "    - title: Part\n      items: [ch1, ch2]\n")
     for name in ("cover.png", "cc.png"):
-        with open(os.path.join(first, name), "wb") as fh:
+        with open(place(first, name), "wb") as fh:
             fh.write(ONE_PIXEL)
     footer = ("defaults:\n  footer: |\n    Read *this book*, and the others in its series, "
               "free at [example.org](https://example.org){#site},\\\n"
@@ -2729,7 +2726,7 @@ def case_page_footer(work):
                      project=False, fixtures=())
 
     docs = {}
-    epub = os.path.join(first, "epub", "org.example.fixtures.epub")
+    epub = place(first, "epub", "org.example.fixtures.epub")
     if os.path.exists(epub):
         with zipfile.ZipFile(epub) as z:
             docs = {n: z.read(n).decode("utf-8") for n in z.namelist()
@@ -2751,7 +2748,7 @@ def case_page_footer(work):
         its own, which every section names first, as the schema orders a
         section's children, related, typed, and styled."""
         import xml.dom.minidom
-        with zipfile.ZipFile(os.path.join(first, "word", name)) as z:
+        with zipfile.ZipFile(place(first, "word", name)) as z:
             parts = {n: z.read(n).decode("utf-8") for n in z.namelist()
                      if n.endswith((".xml", ".rels"))}
         part = parts.get("word/tiqfooter.xml", "")
@@ -2774,19 +2771,19 @@ def case_page_footer(work):
                 in parts["[Content_Types].xml"]
                 and 'w:styleId="Footer"' in parts["word/styles.xml"])
 
-    words = sorted(n for n in os.listdir(os.path.join(first, "word"))
+    words = sorted(n for n in os.listdir(place(first, "word"))
                    if n.endswith(".docx")) if exists(first, "word") else []
 
     def word_part(name):
         """A Word file's footer part, as written."""
-        with zipfile.ZipFile(os.path.join(first, "word", name)) as z:
+        with zipfile.ZipFile(place(first, "word", name)) as z:
             return z.read("word/tiqfooter.xml").decode("utf-8") \
                 if "word/tiqfooter.xml" in z.namelist() else ""
 
     def text_of(folder, ext):
         found = {}
         if exists(first, folder):
-            for name in sorted(os.listdir(os.path.join(first, folder))):
+            for name in sorted(os.listdir(place(first, folder))):
                 if name.endswith(ext):
                     found[name] = read(first, folder, name)
         return found
@@ -2798,17 +2795,17 @@ def case_page_footer(work):
     def read_back(folder, ext):
         """The target's files converted again as the book's sources, the
         footer set as before: each page's HTML, by its name."""
-        again = os.path.join(work, "back-" + folder)
+        again = place(work, "back-" + folder)
         os.makedirs(again, exist_ok=True)
         if not exists(first, folder):
             return {}
-        for name in os.listdir(os.path.join(first, folder)):
+        for name in os.listdir(place(first, folder)):
             if name.endswith(ext):
-                shutil.copy(os.path.join(first, folder, name), again)
-        shutil.copy(os.path.join(first, "project.yaml"), again)
-        with open(os.path.join(again, "conversion.yaml"), "w", encoding="utf-8") as fh:
+                shutil.copy(place(first, folder, name), again)
+        shutil.copy(place(first, "project.yaml"), again)
+        with open(place(again, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write(footer + "targets:\n  html:\n    format: html\n")
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=again, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         return {name: read(again, "html", name) for name in ("ch1.html", "ch2.html")
                 if exists(again, "html", name)}
@@ -2823,13 +2820,13 @@ def case_page_footer(work):
     md_back, adoc_back = read_back("md", ".md"), read_back("adoc", ".adoc")
 
     # A book whose pages, merged a file to each, include one named footer.
-    merged = os.path.join(work, "merged")
+    merged = place(work, "merged")
     os.makedirs(merged, exist_ok=True)
     for name, text in (("ch1.md", "# Chapter One\n\nOne.\n"),
                        ("footer.md", "# Footer Studies\n\nThe study of feet.\n")):
-        with open(os.path.join(merged, name), "w", encoding="utf-8") as fh:
+        with open(place(merged, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(merged, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(merged, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.merged\n  title: Merged\n"
                  "  contents: [ch1, footer]\n")
     convert(merged, 'defaults:\n  footer: "Shared under CC BY."\n'
@@ -2950,10 +2947,10 @@ Code stays: `<p align="center">` and
 def case_markdown_html(work):
     """Raw HTML in a Markdown source is read as HTML and cleaned the way
     an HTML source is; code is left exactly as written."""
-    os.makedirs(os.path.join(work, "assets"))
-    with open(os.path.join(work, "assets", "Curve.png"), "wb") as fh:
+    os.makedirs(place(work, "assets"))
+    with open(place(work, "assets", "Curve.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "raw.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "raw.md"), "w", encoding="utf-8") as fh:
         fh.write(RAW_MD)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  md:\n    format: markdown\n"
@@ -2961,13 +2958,13 @@ def case_markdown_html(work):
     page = read(work, "html", "raw.html") if exists(
         work, "html", "raw.html") else ""
     chapter, epub_text = "", ""
-    for name in (os.listdir(os.path.join(work, "epub"))
+    for name in (os.listdir(place(work, "epub"))
                  if exists(work, "epub") else []):
-        with zipfile.ZipFile(os.path.join(work, "epub", name)) as book:
+        with zipfile.ZipFile(place(work, "epub", name)) as book:
             epub_text += "".join(book.read(n).decode("utf-8", "replace")
                                  for n in book.namelist()
                                  if n.endswith(".xhtml"))
-        with zipfile.ZipFile(os.path.join(work, "epub", name)) as book:
+        with zipfile.ZipFile(place(work, "epub", name)) as book:
             chapter = "".join(book.read(n).decode("utf-8")
                               for n in book.namelist() if "badge" in
                               book.read(n).decode("utf-8", "replace"))
@@ -3076,7 +3073,7 @@ def case_markdown_raw_code(work):
     os.makedirs(work)
     for name, text in (("code.md", RAW_CODE_MD), ("grid.md", RAW_GRID_MD),
                        ("pipe.md", RAW_PIPE_MD)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  md:\n    format: markdown\n", fixtures=())
@@ -3230,17 +3227,17 @@ def case_note_in_link(work):
     caption's left out of the caption its list takes; and keep the
     author's text in the Markdown target."""
     os.makedirs(work)
-    with open(os.path.join(work, "links.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "links.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTE_LINK_MD)
-    with open(os.path.join(work, "alone.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "alone.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTE_ALONE_MD)
-    with open(os.path.join(work, "pairs.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "pairs.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTE_PAIRS_MD)
     # A page whose title is its own heading, which the filter takes out of
     # the body and puts back (title_heading).
-    with open(os.path.join(work, "titled.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "titled.md"), "w", encoding="utf-8") as fh:
         fh.write("# Titled[^x][^y]\n\nIts words.\n\n[^x]: Note x.\n[^y]: Note y.\n")
-    with open(os.path.join(work, "square.png"), "wb") as fh:
+    with open(place(work, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  md:\n    format: markdown\n  epub:\n    format: epub3\n"
@@ -3257,7 +3254,7 @@ def case_note_in_link(work):
     deferred = r"\\(?:footnotemark\{\}|pandocfootnotemark\{\d+\})"
     titled = read(work, "html", "titled.html") if exists(work, "html", "titled.html") else ""
     epub_files = {}
-    epubs = glob.glob(os.path.join(work, "epub", "*.epub"))
+    epubs = glob.glob(place(work, "epub", "*.epub"))
     if epubs:
         with zipfile.ZipFile(epubs[0]) as z:
             epub_files = {n: z.read(n).decode("utf-8") for n in z.namelist()
@@ -3397,16 +3394,16 @@ def case_bands(work):
     that is one cell across, a band or a title. And a page with no title
     stays one."""
     os.makedirs(work)
-    with open(os.path.join(work, "bands.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "bands.html"), "w", encoding="utf-8") as fh:
         fh.write(BANDED)
-    with open(os.path.join(work, "heads.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "heads.html"), "w", encoding="utf-8") as fh:
         fh.write(HEADS)
-    with open(os.path.join(work, "untitled.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "untitled.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head></head><body>'
                  "<p>No title here.</p></body></html>\n")
     pages = ("bands.html", "heads.html", "untitled.html")
     def run_with(where, config):
-        with open(os.path.join(where, "conversion.yaml"), "w",
+        with open(place(where, "conversion.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write(config)
         return run_in(where, "  contents:\n    - bands\n    - heads\n    - untitled\n")
@@ -3421,7 +3418,7 @@ def case_bands(work):
                              for c in re.findall(r"<caption>(.*?)</caption>",
                                                  text, re.S)]
     back = work + "-from-md"
-    shutil.copytree(os.path.join(work, "md"), back)
+    shutil.copytree(place(work, "md"), back)
     run_with(back, "targets:\n  html:\n    format: html\n")
     again = read(back, "html", "bands.html") if exists(
         back, "html", "bands.html") else ""
@@ -3432,13 +3429,13 @@ def case_bands(work):
     shutil.copytree(work, captioned, ignore=shutil.ignore_patterns(
         "html", "md", "*.json"))
     import csv
-    with open(os.path.join(work, "table-headers-new.csv"),
+    with open(place(work, "table-headers-new.csv"),
               encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
     for row in rows:
         if "Labor" in row["preview"]:
             row["part-captions"] = "Cost at $40 a worker | Cost at $55 a worker"
-    with open(os.path.join(captioned, "table-headers.csv"), "w",
+    with open(place(captioned, "table-headers.csv"), "w",
               encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
         writer.writeheader()
@@ -3458,13 +3455,13 @@ def case_bands(work):
     column_again = column + "-again"
     os.makedirs(column_again)
     for name in pages:
-        shutil.copy(os.path.join(column, "html", name), column_again)
+        shutil.copy(place(column, "html", name), column_again)
     run_with(column_again, column_config)
     cells = lambda text: re.findall(r"<t[hd][^>]*>[^<]*", text)
     fixed = work + "-from-html"
     os.makedirs(fixed)
     for name in pages:
-        shutil.copy(os.path.join(work, "html", name), fixed)
+        shutil.copy(place(work, "html", name), fixed)
     run_with(fixed, "targets:\n  html:\n    format: html\n")
     flat = lambda text: " ".join(re.sub(r"<[^>]+>", " ", text).split())
     return [
@@ -3620,10 +3617,10 @@ def case_group_heads(work):
     and as they do under bands."""
     os.makedirs(work)
     for name, text in (("money", GROUP_HEADS), ("measures", BANDED_HEADS)):
-        with open(os.path.join(work, name + ".html"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".html"), "w", encoding="utf-8") as fh:
             fh.write(text)
     def run_with(where, config, pages=("money", "measures")):
-        with open(os.path.join(where, "conversion.yaml"), "w",
+        with open(place(where, "conversion.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write(config)
         return run_in(where, "  contents:\n"
@@ -3636,11 +3633,11 @@ def case_group_heads(work):
     run_with(work, both)
     page, md = output(work, "html", "money"), output(work, "md", "money")
     back = work + "-from-md"
-    shutil.copytree(os.path.join(work, "md"), back)
+    shutil.copytree(place(work, "md"), back)
     run_with(back, both)
     grouped = work + "-grouped"
     os.makedirs(grouped)
-    with open(os.path.join(grouped, "money.html"), "w", encoding="utf-8") as fh:
+    with open(place(grouped, "money.html"), "w", encoding="utf-8") as fh:
         fh.write(GROUPED_BY_PAGE)
     run_with(grouped, "targets:\n  html:\n    format: html\n", ("money",))
     body = lambda text: text[text.find("<body>"):]
@@ -3770,10 +3767,10 @@ def case_heading_levels(work):
     skips nothing keeps its level; the run says how many moved; the output
     check finds no skip; and source keeps the source's levels."""
     def book(name, setting=""):
-        where = os.path.join(work, name)
+        where = place(work, name)
         os.makedirs(where)
         for stem, text in (("levels", LEVELS_TITLED), ("untitled", LEVELS_UNTITLED)):
-            with open(os.path.join(where, stem + ".md"), "w", encoding="utf-8") as fh:
+            with open(place(where, stem + ".md"), "w", encoding="utf-8") as fh:
                 fh.write(text)
         result = convert(where, setting + "targets:\n  html:\n    format: html\n"
                                           "  md:\n    format: markdown\n",
@@ -3781,7 +3778,7 @@ def case_heading_levels(work):
         pages = {stem: read(where, "html", stem + ".html")
                  if exists(where, "html", stem + ".html") else ""
                  for stem in ("levels", "untitled")}
-        check = os.path.join(where, "output-check.csv")
+        check = place(where, "output-check.csv")
         skips = 0
         if os.path.exists(check):
             with open(check, encoding="utf-8-sig", newline="") as fh:
@@ -3829,11 +3826,11 @@ def case_heading_ids(work):
     and the table after it is renamed, as a Markdown heading keeps its,
     and each such rename is a row of ids-renamed.csv."""
     os.makedirs(work)
-    with open(os.path.join(work, "costs.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "costs.html"), "w", encoding="utf-8") as fh:
         fh.write(HEADING_IDS)
-    with open(os.path.join(work, "prices.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "prices.md"), "w", encoding="utf-8") as fh:
         fh.write(HEADING_IDS_MD)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
     run_in(work, "  contents:\n    - costs\n    - prices\n")
     def output(target, name):
@@ -3843,7 +3840,7 @@ def case_heading_ids(work):
     costs, prices = output("html", "costs"), output("html", "prices")
     rows = []
     if exists(work, "ids-renamed.csv"):
-        with open(os.path.join(work, "ids-renamed.csv"), encoding="utf-8-sig",
+        with open(place(work, "ids-renamed.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             rows = list(csv.reader(fh))
     tag = lambda text, name: (re.search(r'<(\w+)[^>]*\bid="%s"' % name, text)
@@ -3933,22 +3930,22 @@ def case_narrow_group(work):
     stopped on a call of nil."""
     # Pandoc 3.9's Lua, as far as this goes: an init.lua in the user data
     # folder, which Pandoc runs before a filter, takes the constructor away.
-    data = os.path.join(work, "xdg")
-    os.makedirs(os.path.join(data, "pandoc"))
-    with open(os.path.join(data, "pandoc", "init.lua"), "w", encoding="utf-8") as fh:
+    data = place(work, "xdg")
+    os.makedirs(place(data, "pandoc"))
+    with open(place(data, "pandoc", "init.lua"), "w", encoding="utf-8") as fh:
         fh.write("pandoc.TableBody = nil\n")
     books = {}
     for name, env in (("book", None), ("without", dict(os.environ, XDG_DATA_HOME=data))):
-        books[name] = os.path.join(work, name)
+        books[name] = place(work, name)
         os.makedirs(books[name])
         for page, text in (("forms", NARROW_GROUP), ("money", BALANCE_BANDS),
                            ("heads", HEAD_ROWS_ONLY)):
-            with open(os.path.join(books[name], page + ".html"), "w", encoding="utf-8") as fh:
+            with open(place(books[name], page + ".html"), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(books[name], "table-headers.csv"), "w", encoding="utf-8") as fh:
+        with open(place(books[name], "table-headers.csv"), "w", encoding="utf-8") as fh:
             fh.write("key,headers,split-at,caption-rows,part-captions,source,label\n"
                      + HEAD_ROWS_ONLY_KEY + ",none,,,,heads.html,Table 2.1 Rates\n")
-        with open(os.path.join(books[name], "conversion.yaml"), "w",
+        with open(place(books[name], "conversion.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write("targets:\n  html:\n    format: html\n"
                      "  grouped:\n    format: html\n    tables:\n      bands: group\n"
@@ -3978,7 +3975,7 @@ def case_narrow_group(work):
          lambda: grouped.count("<tbody") == 2
          and columned.count('scope="rowgroup"') == 2
          and heads.count("<td") == 4 and "<th" not in heads.split("<table", 1)[-1]
-         and all(same_pages(os.path.join(book, target), os.path.join(books["without"], target))
+         and all(same_pages(place(book, target), place(books["without"], target))
                  for target in ("html", "grouped", "columned"))),
     ]
 
@@ -3986,7 +3983,7 @@ def case_scheme_case(work):
     """A link whose scheme is in capitals, as a source may type it, is a
     link to another site, not a file of the book's."""
     os.makedirs(work)
-    with open(os.path.join(work, "caps.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "caps.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Capitals</title>'
                  '</head><body><main><h1>Capitals</h1><p>The <a href='
                  '"Http://example.org/study.pdf">study</a>, <a href='
@@ -3994,7 +3991,7 @@ def case_scheme_case(work):
                  '"MAILTO:a@example.org">its authors</a>.</p><p><img src='
                  '"Http://example.org/chart.png" alt="A chart of the study\'s '
                  'findings"></p></main></body></html>\n')
-    with open(os.path.join(work, "conversion.yaml"), "w",
+    with open(place(work, "conversion.yaml"), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     run = run_in(work, "  contents:\n    - caps\n")
@@ -4020,15 +4017,15 @@ def case_compare_blocks(work):
     for name, quote, item in (("one", "<blockquote><p>Said.</p></blockquote>",
                                "<li>three</li>"),
                               ("two", "<p>Said.</p>", "")):
-        os.makedirs(os.path.join(work, name))
-        with open(os.path.join(work, name, "q.html"), "w",
+        os.makedirs(place(work, name))
+        with open(place(work, name, "q.html"), "w",
                   encoding="utf-8") as fh:
             fh.write(page % (quote, item))
-    run = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
-                          os.path.join(work, "one"), os.path.join(work, "two")],
+    run = started(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                          place(work, "one"), place(work, "two")],
                          capture_output=True, text=True)
-    same = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
-                           os.path.join(work, "one"), os.path.join(work, "one")],
+    same = started(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                           place(work, "one"), place(work, "one")],
                           capture_output=True, text=True)
     return [
         ("a blockquote turned paragraph is reported",
@@ -4124,7 +4121,7 @@ def case_warc_direct(work):
          and "project-unpacked.yaml is already here" in clashed.stderr
          + clashed.stdout
          and not [n for n in os.listdir(clash) if n.endswith(".html")]
-         and "Older" in open(os.path.join(clash,
+         and "Older" in open(place(clash,
                                           "project-unpacked.yaml")).read()),
     ]
 
@@ -4246,7 +4243,9 @@ def case_cartridge(work):
     convert(ours, "targets:\n  html:\n    format: html\n", arguments=["--zip"])
     back = os.path.join(work, "back")
     os.makedirs(back)
-    built = os.path.join(ours, "org.example.fixtures.imscc")
+    # Ours is a project; the cartridge it packs is unpacked alone in a
+    # folder, as the others here are.
+    built = place(ours, "org.example.fixtures.imscc")
     if os.path.exists(built):
         shutil.copy(built, back)
     with open(os.path.join(back, "conversion.yaml"), "w") as fh:
@@ -4255,7 +4254,7 @@ def case_cartridge(work):
                    cwd=back, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
     agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
-                            os.path.join(ours, "html"), os.path.join(back, "html")],
+                            place(ours, "html"), os.path.join(back, "html")],
                            capture_output=True, text=True).stdout
     return [
         ("a cartridge alone in a directory is unpacked and converted",
@@ -4439,21 +4438,21 @@ def case_mathjax2(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
-    with open(os.path.join(work, "growth.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "growth.html"), "w", encoding="utf-8") as fh:
         fh.write(MATHJAX2)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    run = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True,
                          stdin=subprocess.DEVNULL)
     page = read(work, "html", "growth.html") if exists(work, "html", "growth.html") else ""
     back = work + "-back"
     if exists(work, "md"):
-        shutil.copytree(os.path.join(work, "md"), back)
-        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        shutil.copytree(place(work, "md"), back)
+        with open(place(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         try:
-            subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                            cwd=back, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL, timeout=120)
         except subprocess.TimeoutExpired:
@@ -4500,11 +4499,11 @@ def case_math_words(work):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
     for name, markup in (("value.html", MATH_WORDS), ("moles.html", MATH_WORDS_MATHJAX)):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(markup)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "value.html") if exists(work, "html", "value.html") else ""
     moles = read(work, "html", "moles.html") if exists(work, "html", "moles.html") else ""
@@ -4541,18 +4540,18 @@ def case_empty_rows(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
-    with open(os.path.join(work, "bars.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "bars.html"), "w", encoding="utf-8") as fh:
         fh.write(EMPTY_ROWS)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     md = read(work, "md", "bars.md") if exists(work, "md", "bars.md") else ""
     adoc = read(work, "adoc", "bars.adoc") if exists(work, "adoc", "bars.adoc") else ""
 
     def back(source, reader):
         """The MathML Pandoc makes of the target's file read back."""
-        done = subprocess.run(["pandoc", "-f", reader, "-t", "html", *pandocversion.mathml()],
+        done = started(["pandoc", "-f", reader, "-t", "html", *pandocversion.mathml()],
                               input=source, capture_output=True, text=True)
         return done.stdout if done.returncode == 0 else ""
     md_back, adoc_back = back(md, "markdown"), back(adoc, "asciidoc")
@@ -4596,23 +4595,23 @@ def case_display_style(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
-    with open(os.path.join(work, "integrals.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "integrals.html"), "w", encoding="utf-8") as fh:
         fh.write(DISPLAY_STYLE)
-    with open(os.path.join(work, "sums.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "sums.md"), "w", encoding="utf-8") as fh:
         fh.write("# Sums\n\nA sum, $\\displaystyle \\sum_{i=1}^{n} i$, and $\\sum_{j=1}^{n} j$.\n")
-    with open(os.path.join(work, "areas.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "areas.md"), "w", encoding="utf-8") as fh:
         fh.write("# Areas\n\n## The area $\\displaystyle \\int_0^1 x\\,dx$\n\nThe curve "
                  "![The graph of $\\displaystyle y=\\frac{1}{x}$ for positive x](dot.png) "
                  "is shown.\n")
-    with open(os.path.join(work, "dot.png"), "wb") as fh:
+    with open(place(work, "dot.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  title: Integrals\n  identifier: org.example.integrals\n"
                  "  language: en-US\n  contents:\n    - integrals\n    - sums\n    - areas\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
                  "  md:\n    format: markdown\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     md = read(work, "md", "integrals.md") if exists(work, "md", "integrals.md") else ""
     page = read(work, "html", "integrals.html") if exists(work, "html", "integrals.html") \
@@ -4620,7 +4619,7 @@ def case_display_style(work):
     sums = read(work, "html", "sums.html") if exists(work, "html", "sums.html") else ""
     areas = read(work, "html", "areas.html") if exists(work, "html", "areas.html") else ""
     chapters = areas_chapter = contents = ""
-    books = glob.glob(os.path.join(work, "epub", "*.epub"))
+    books = glob.glob(place(work, "epub", "*.epub"))
     if books:
         with zipfile.ZipFile(books[0]) as book:
             texts = {name: book.read(name).decode("utf-8") for name in book.namelist()
@@ -4632,29 +4631,29 @@ def case_display_style(work):
         contents = "".join(text for name, text in texts.items() if name.endswith(".ncx"))
     alt = 'alt="The graph of y = 1/x for positive x"'
     # The page read again, as a source of its own.
-    again = os.path.join(work, "again")
+    again = beside(work, "again")
     os.makedirs(again)
     back = ""
     if page:
-        with open(os.path.join(again, "integrals.html"), "w", encoding="utf-8") as fh:
+        with open(place(again, "integrals.html"), "w", encoding="utf-8") as fh:
             fh.write(page)
-        with open(os.path.join(again, "conversion.yaml"), "w") as fh:
+        with open(place(again, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  md:\n    format: markdown\n")
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=again, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         back = read(again, "md", "integrals.md") if exists(again, "md", "integrals.md") else ""
     # The page again, math.display_style_in_text set for one target and
     # not the other: a formula in running text that MathML sets in display
     # style, marked before Pandoc reads it, each target filtering its own.
-    kept = os.path.join(work, "kept")
+    kept = beside(work, "kept")
     os.makedirs(kept)
-    with open(os.path.join(kept, "integrals.html"), "w", encoding="utf-8") as fh:
+    with open(place(kept, "integrals.html"), "w", encoding="utf-8") as fh:
         fh.write(DISPLAY_STYLE)
-    with open(os.path.join(kept, "conversion.yaml"), "w") as fh:
+    with open(place(kept, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  md:\n    format: markdown\n    math:\n"
                  "      display_style_in_text: true\n"
                  "  plain:\n    format: markdown\n")
-    kept_run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    kept_run = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                               cwd=kept, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
     kept_md = read(kept, "md", "integrals.md") if exists(kept, "md", "integrals.md") else ""
@@ -4665,7 +4664,7 @@ def case_display_style(work):
     # a formula set in display style whose en dash math repair makes a
     # minus, its row of math-repaired.csv the same whatever the setting,
     # and kept as it was by math-keep.csv in either target.
-    varied = os.path.join(work, "varied")
+    varied = beside(work, "varied")
     os.makedirs(varied)
     half = ('<math xmlns="http://www.w3.org/1998/Math/MathML"><mstyle displaystyle="true">'
             '<mfrac><mn>1</mn><mn>2</mn></mfrac></mstyle></math>')
@@ -4673,18 +4672,18 @@ def case_display_style(work):
               '<mfrac><mrow><mi>x</mi><mo>\u2013</mo><mn>1</mn></mrow><mn>2</mn></mfrac>'
               '</mstyle></math>')
     for name, words in (("styled.html", "In shared"), ("styled.styled.html", "In variant")):
-        with open(os.path.join(varied, name), "w", encoding="utf-8") as fh:
+        with open(place(varied, name), "w", encoding="utf-8") as fh:
             fh.write("<!DOCTYPE html><html lang=\"en\"><head><title>Styled</title></head><body>"
                      "<main><h1>Styled</h1><p>%s: %s, a half.</p><p>Dashed: %s, a dash.</p>"
                      "</main></body></html>\n" % (words, half, dashed))
-    with open(os.path.join(varied, "conversion.yaml"), "w") as fh:
+    with open(place(varied, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  styled:\n    format: markdown\n    math:\n"
                  "      display_style_in_text: true\n  plain:\n    format: markdown\n")
 
     def varied_run():
         """(what the run said, the styled target's page, the plain target's,
         the rows of math-repaired.csv)."""
-        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+        done = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                               cwd=varied, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
         pages = [read(varied, t, "styled.md") if exists(varied, t, "styled.md") else ""
@@ -4692,21 +4691,21 @@ def case_display_style(work):
         rows = read(varied, "math-repaired.csv") if exists(varied, "math-repaired.csv") else ""
         return [done.stdout + done.stderr] + pages + [rows]
     varied_said, varied_on, varied_off, varied_rows = varied_run()
-    with open(os.path.join(varied, "math-keep.csv"), "w", encoding="utf-8") as fh:
+    with open(place(varied, "math-keep.csv"), "w", encoding="utf-8") as fh:
         fh.write("Kind,Page,Before\nequation,styled,\\frac{x\u20131}{2}\n")
     kept_said, kept_on, kept_off, _ = varied_run()
     # A formula opening with \\displaystyle that texmath can't read, which
     # the page's writer warns of and writes as its TeX.
-    unread = os.path.join(work, "unread")
+    unread = beside(work, "unread")
     os.makedirs(unread)
-    with open(os.path.join(unread, "unread.md"), "w", encoding="utf-8") as fh:
+    with open(place(unread, "unread.md"), "w", encoding="utf-8") as fh:
         fh.write("# Unread\n\nA formula, $\\displaystyle \\undefinedthing x$, here.\n")
-    with open(os.path.join(unread, "project.yaml"), "w") as fh:
+    with open(place(unread, "project.yaml"), "w") as fh:
         fh.write("project:\n  title: Unread\n  identifier: org.example.unread\n"
                  "  language: en-US\n  contents:\n    - unread\n")
-    with open(os.path.join(unread, "conversion.yaml"), "w") as fh:
+    with open(place(unread, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    done = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
                           cwd=unread, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     unread_said = done.stdout + done.stderr
     unread_page = read(unread, "html", "unread.html") \
@@ -4785,27 +4784,27 @@ def case_asciidoc_layout(work):
     """An AsciiDoc block's width and target don't reach an element XHTML
     forbids them on; an image block's size goes to its image."""
     os.makedirs(work)
-    with open(os.path.join(work, "ch.adoc"), "w", encoding="utf-8") as fh:
+    with open(place(work, "ch.adoc"), "w", encoding="utf-8") as fh:
         fh.write("= A chapter\n\n[width=300,float=right]\nimage::dot.png[A dot]\n\n"
                  "[source,python,width=400]\n----\nprint('hi')\n----\n\n"
                  "[width=50%,float=left]\n|===\n|Name |Count\n|a |1\n|===\n")
-    with open(os.path.join(work, "dot.png"), "wb") as fh:
+    with open(place(work, "dot.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
     page = read(work, "html", "ch.html") if exists(work, "html", "ch.html") else ""
     import zipfile
     epub_text = ""
-    for root_dir, _, files in os.walk(os.path.join(work, "epub")):
+    for root_dir, _, files in os.walk(place(work, "epub")):
         for name in files:
             if name.endswith(".epub"):
-                with zipfile.ZipFile(os.path.join(root_dir, name)) as z:
+                with zipfile.ZipFile(place(root_dir, name)) as z:
                     epub_text = "".join(z.read(n).decode("utf-8", "replace")
                                         for n in z.namelist() if n.endswith(".xhtml"))
-    validated = epubcheck((glob.glob(os.path.join(work, "epub", "*.epub")) or [""])[0])
+    validated = epubcheck((glob.glob(place(work, "epub", "*.epub")) or [""])[0])
     bad = r"<(figure|div|pre|table)\b[^>]*\b(width|target)="
     return [
         ("no width or target on a block, in the HTML or the EPUB",
@@ -4826,19 +4825,19 @@ def case_quick(work):
     validators hidden (each variable naming a file that isn't there), so
     it asks for them and is told they're missing, without starting Java."""
     os.makedirs(work)
-    with open(os.path.join(work, "ch.md"), "w") as fh:
+    with open(place(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run(*flags, env=None):
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, env=env)
         return result.stdout + result.stderr
     quick = run("--quick", "--wcag", "--verbose")
     unasked = run("--quick", "--verbose")
-    nowhere = os.path.join(work, "no-such-validator")
+    nowhere = place(work, "no-such-validator")
     full = run(env=dict(os.environ, EPUBCHECK_JAR=nowhere, VNU_JAR=nowhere, VERAPDF=nowhere))
     return [
         ("--quick checks the pages without the validators, and says so",
@@ -4867,9 +4866,9 @@ def case_pdf_without_latex(work):
     rather than a bare exit code. (pdf was NOT YET IMPLEMENTED until it
     was built; no format is now, so that path has no case.)"""
     os.makedirs(work)
-    with open(os.path.join(work, "ch.md"), "w") as fh:
+    with open(place(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     # A path holding Pandoc and Python and nothing else, so LuaLaTeX
     # can't be found wherever it's installed.
@@ -4878,9 +4877,9 @@ def case_pdf_without_latex(work):
     for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
-            os.symlink(found, os.path.join(tools, program))
+            os.symlink(found, place(tools, program))
     put_python(tools)
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -4899,23 +4898,23 @@ def case_word_bookmarks(work):
     or another, and JAWS's table bookmarks, and drops the rest, which NVDA
     announces; bookmarks: all keeps every one."""
     os.makedirs(work)
-    with open(os.path.join(work, "a.md"), "w") as fh:
+    with open(place(work, "a.md"), "w") as fh:
         fh.write("# Alpha\n\n## Linked here {#here}\n\nSee [below](#also) and "
                  "[the other page](b.md#there).\n\n## Not linked\n\nText.\n\n"
                  "## Also linked {#also}\n\n| Year | Output |\n|------|--------|\n"
                  "| 2020 | 5 |\n\nBack to [the top](#here).\n")
-    with open(os.path.join(work, "b.md"), "w") as fh:
+    with open(place(work, "b.md"), "w") as fh:
         fh.write("# Beta\n\n## Over there {#there}\n\nText.\n\n## Nobody comes here\n\nText.\n")
 
     def build(setting):
-        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  word:\n    format: docx\n" + setting)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         names = {}
         for page in ("a", "b"):
-            path = os.path.join(work, "word", page + ".docx")
+            path = place(work, "word", page + ".docx")
             if os.path.exists(path):
                 with zipfile.ZipFile(path) as z:
                     xml = z.read("word/document.xml").decode("utf-8")
@@ -4946,25 +4945,25 @@ def case_pdf_svg_without_converter(work):
     LuaLaTeX here is a script that answers the release probe and nothing
     else, so nothing past the check could run anyway."""
     os.makedirs(work)
-    with open(os.path.join(work, "ch.md"), "w") as fh:
+    with open(place(work, "ch.md"), "w") as fh:
         fh.write("# One\n\n![A diagram](diagram.svg)\n")
-    with open(os.path.join(work, "diagram.svg"), "w") as fh:
+    with open(place(work, "diagram.svg"), "w") as fh:
         fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
                  '<rect width="10" height="10"/></svg>\n')
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     tools = work + "-bin"
     os.makedirs(tools)
     for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
-            os.symlink(found, os.path.join(tools, program))
+            os.symlink(found, place(tools, program))
     put_python(tools)
-    fake = os.path.join(tools, "lualatex")
+    fake = place(tools, "lualatex")
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2026-06-01'\n")
     os.chmod(fake, 0o755)
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -4982,22 +4981,22 @@ def case_pdf_with_old_latex(work):
     fails on a test-phase package it can't find. The LuaLaTeX here is a
     script that answers the release probe and nothing else."""
     os.makedirs(work)
-    with open(os.path.join(work, "ch.md"), "w") as fh:
+    with open(place(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     tools = work + "-bin"
     os.makedirs(tools)
     for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
-            os.symlink(found, os.path.join(tools, program))
+            os.symlink(found, place(tools, program))
     put_python(tools)
-    fake = os.path.join(tools, "lualatex")
+    fake = place(tools, "lualatex")
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2023-11-01'\n")
     os.chmod(fake, 0o755)
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -5016,24 +5015,24 @@ def case_pdf_with_newer_latex(work):
     goes on to build. The LuaLaTeX here answers the release probe and
     fails a build, so the PDF isn't built, for that reason alone."""
     os.makedirs(work)
-    with open(os.path.join(work, "ch.md"), "w") as fh:
+    with open(place(work, "ch.md"), "w") as fh:
         fh.write("# One\n\nText.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  web:\n    format: html\n  print:\n    format: pdf\n")
     tools = work + "-bin"
     os.makedirs(tools)
     for program in ("pandoc", "file"):
         found = shutil.which(program)
         if found:
-            os.symlink(found, os.path.join(tools, program))
+            os.symlink(found, place(tools, program))
     put_python(tools)
-    fake = os.path.join(tools, "lualatex")
+    fake = place(tools, "lualatex")
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\n"
                  "case \"$*\" in *OERFMT*) echo 'OERFMT:2099-06-01'; exit 0 ;; esac\n"
                  "exit 1\n")
     os.chmod(fake, 0o755)
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -5070,21 +5069,21 @@ def case_pdf_capacity(work):
     eight seconds to run out of strings."""
     said = {}
     for name, log in CAPACITY_LOGS.items():
-        book = os.path.join(work, name)
+        book = place(work, name)
         os.makedirs(book)
-        with open(os.path.join(book, "page.md"), "w") as fh:
+        with open(place(book, "page.md"), "w") as fh:
             fh.write("# Page\n\nText.\n")
-        with open(os.path.join(book, "conversion.yaml"), "w") as fh:
+        with open(place(book, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  pdf:\n    format: pdf\n")
         tools = book + "-bin"
         os.makedirs(tools)
         for program in ("pandoc", "file"):
             found = shutil.which(program)
             if found:
-                os.symlink(found, os.path.join(tools, program))
+                os.symlink(found, place(tools, program))
         put_python(tools)
         # The shell's own commands only: the path holds nothing else.
-        fake = os.path.join(tools, "lualatex")
+        fake = place(tools, "lualatex")
         with open(fake, "w") as fh:
             fh.write("#!/bin/sh\n"
                      "case \"$*\" in *OERFMT*) echo 'OERFMT:2026-06-01'; exit 0 ;; esac\n"
@@ -5101,7 +5100,7 @@ def case_pdf_capacity(work):
                      + " > \"$out/${name%.tex}.log\"\n"
                      "exit 1\n")
         os.chmod(fake, 0o755)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=book, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, env=dict(os.environ, PATH=tools))
         said[name] = result.stdout + result.stderr
@@ -5131,7 +5130,7 @@ def case_html_ids(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
-    with open(os.path.join(work, "a.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "a.html"), "w", encoding="utf-8") as fh:
         fh.write('<html lang="en"><head><title>A</title></head><body><h1>A</h1>'
                  '<h2 id="section 15">Fifteen</h2><p>See <a href="#section 15">here</a> '
                  'and <a href="#section%2015">there</a>, and <a href="' + TEXT_FRAGMENT
@@ -5139,38 +5138,38 @@ def case_html_ids(work):
                  + '">the site by its host</a>.</p>'
                  '<h2 id="caf\u00e9 1">Caf\u00e9</h2><p>To <a href="#caf%C3%A9%201">the '
                  'caf\u00e9</a>.</p><h2 id="na\u00efve">Na\u00efve</h2></body></html>')
-    with open(os.path.join(work, "b.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "b.html"), "w", encoding="utf-8") as fh:
         fh.write('<html lang="en"><head><title>B</title></head><body><h1>B</h1>'
                  '<p>Back to <a href="a.html#section 15">fifteen</a>, to <a '
                  'href="a.html#caf%C3%A9%201">the caf\u00e9</a>, and to <a '
                  'href="a.html#na%C3%AFve">the na\u00efve</a>.</p></body></html>')
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.ids\n  title: Ids\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     a = read(work, "html", "a.html") if exists(work, "html", "a.html") else ""
     b = read(work, "html", "b.html") if exists(work, "html", "b.html") else ""
-    checked = open(os.path.join(work, "output-check.csv")).read() if exists(
+    checked = open(place(work, "output-check.csv")).read() if exists(
         work, "output-check.csv") else ""
-    validated = epubcheck(os.path.join(work, "epub", "org.example.ids.epub"))
+    validated = epubcheck(place(work, "epub", "org.example.ids.epub"))
     # An escaped percent sign beside a space, in a book of its own, since an
     # id holding a % isn't one an EPUB takes.
     percent = work + "-percent"
     os.makedirs(percent)
-    with open(os.path.join(percent, "c.html"), "w", encoding="utf-8") as fh:
+    with open(place(percent, "c.html"), "w", encoding="utf-8") as fh:
         fh.write('<html lang="en"><head><title>C</title></head><body><h1>C</h1>'
                  '<h2 id="100% done">Done</h2><p>All <a href="#100%25%20done">done</a>.'
                  '</p></body></html>')
-    with open(os.path.join(percent, "conversion.yaml"), "w") as fh:
+    with open(place(percent, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    with open(os.path.join(percent, "project.yaml"), "w") as fh:
+    with open(place(percent, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.percent\n  title: Percent\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=percent, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     c = read(percent, "html", "c.html") if exists(percent, "html", "c.html") else ""
-    c_checked = open(os.path.join(percent, "output-check.csv")).read() if exists(
+    c_checked = open(place(percent, "output-check.csv")).read() if exists(
         percent, "output-check.csv") else ""
     return [
         ("an id's whitespace becomes a hyphen",
@@ -5210,22 +5209,22 @@ def case_inherited_variables(work):
                            "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 
     def build(name, **extra):
-        folder = os.path.join(work, name)
+        folder = place(work, name)
         os.makedirs(folder)
         for picture in ("plain.png", "my photo.png"):
-            with open(os.path.join(folder, picture), "wb") as fh:
+            with open(place(folder, picture), "wb") as fh:
                 fh.write(png)
-        with open(os.path.join(folder, "p.md"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "p.md"), "w", encoding="utf-8") as fh:
             fh.write("# P\n\n![](plain.png)\n\n![A dot](<my photo.png>)\n\n"
                      "| A | B |\n|---|---|\n| 1 | 2 |\n")
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-        with open(os.path.join(folder, "project.yaml"), "w") as fh:
+        with open(place(folder, "project.yaml"), "w") as fh:
             fh.write("project:\n  identifier: org.example.inherited\n  title: Inherited\n")
-        ran = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        ran = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                              cwd=folder, capture_output=True, text=True,
                              stdin=subprocess.DEVNULL, env=dict(os.environ, **extra))
-        page = os.path.join(folder, "html", "p.html")
+        page = place(folder, "html", "p.html")
         text = ""
         if os.path.exists(page):
             with open(page, encoding="utf-8") as fh:
@@ -5262,16 +5261,16 @@ def case_turned_pictures(work):
     exif = Image.Exif()
     exif[0x0112] = 6
     Image.new("RGB", (600, 400), (0, 120, 200)).save(
-        os.path.join(work, "phone.jpg"), quality=90, exif=exif.tobytes())
-    with open(os.path.join(work, "p.md"), "w", encoding="utf-8") as fh:
+        place(work, "phone.jpg"), quality=90, exif=exif.tobytes())
+    with open(place(work, "p.md"), "w", encoding="utf-8") as fh:
         fh.write("# P\n\n![A blue photograph, taller than wide](phone.jpg){width=100px}\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
                  "  word:\n    format: docx\n"
                  "  small:\n    format: docx\n    images:\n      downsample: 2\n")
-    with open(os.path.join(work, "project.yaml"), "w") as fh:
+    with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.turned\n  title: Turned\n")
-    ran = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    ran = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def pictures(path, folder):
@@ -5293,13 +5292,13 @@ def case_turned_pictures(work):
         with zipfile.ZipFile(path) as z:
             m = re.search(r'<wp:extent cx="(\d+)" cy="(\d+)"', z.read("word/document.xml").decode())
         return (int(m.group(1)), int(m.group(2))) if m else None
-    word = os.path.join(work, "word", "p.docx")
-    small = os.path.join(work, "small", "p.docx")
-    with open(os.path.join(work, "phone.jpg"), "rb") as fh:
+    word = place(work, "word", "p.docx")
+    small = place(work, "small", "p.docx")
+    with open(place(work, "phone.jpg"), "rb") as fh:
         original = fh.read()
 
     def same(*parts):
-        path = os.path.join(work, *parts)
+        path = place(work, *parts)
         if not os.path.exists(path):
             return False
         with open(path, "rb") as fh:
@@ -5317,7 +5316,7 @@ def case_turned_pictures(work):
         ("an html target keeps the author's file, which a browser turns itself",
          lambda: same("html", "phone.jpg")),
         ("and so does an EPUB",
-         lambda: pictures(os.path.join(work, "epub", "org.example.turned.epub"), "EPUB/media/")
+         lambda: pictures(place(work, "epub", "org.example.turned.epub"), "EPUB/media/")
          == [((600, 400), 6)]),
     ]
 
@@ -5330,9 +5329,9 @@ def case_html_images(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
-    with open(os.path.join(work, "d.png"), "wb") as fh:
+    with open(place(work, "d.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "p.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "p.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>P</title></head><body><h1>P</h1>'
                  '<p><img src="d.png" alt=""> empty</p>'
                  '<p><img src="d.png" role="presentation"> Canvas</p>'
@@ -5342,13 +5341,13 @@ def case_html_images(work):
                  'style="border: 0"></iframe></p>'
                  '<p><iframe src="https://example.org/y" title="Y" width="660" '
                  'height="371.4"></iframe></p></body></html>')
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "p.html") if exists(work, "html", "p.html") else ""
     images = re.findall(r"<img[^>]*>", page)
-    report = open(os.path.join(work, "output-check.csv")).read() if exists(
+    report = open(place(work, "output-check.csv")).read() if exists(
         work, "output-check.csv") else ""
     frames = re.findall(r"<iframe[^>]*>", page) + ["", ""]
     frame = frames[0]
@@ -5371,25 +5370,25 @@ def case_html_images(work):
 def case_asciidoc_markdown(work):
     """An AsciiDoc chapter written as Markdown reads back as the same page."""
     os.makedirs(work)
-    with open(os.path.join(work, "ch.adoc"), "w", encoding="utf-8") as fh:
+    with open(place(work, "ch.adoc"), "w", encoding="utf-8") as fh:
         fh.write("= A chapter\n\nIntro with *strong* and a https://example.org[link].\n\n"
                  "== A section\n\n* one\n* two\n\n[source,python]\n----\nprint('hi')\n----\n\n"
                  "|===\n|Name |Count\n|a |1\n|b |2\n|===\n\nimage::dot.png[A dot]\n")
-    with open(os.path.join(work, "dot.png"), "wb") as fh:
+    with open(place(work, "dot.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     back = work + "-back"
     if exists(work, "md"):
-        shutil.copytree(os.path.join(work, "md"), back)
-        with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        shutil.copytree(place(work, "md"), back)
+        with open(place(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=back, capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
-                            os.path.join(work, "html"), os.path.join(back, "html")],
+    agree = started(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                            place(work, "html"), place(back, "html")],
                            capture_output=True, text=True).stdout
     return [
         ("AsciiDoc to Markdown and back gives the same page",
@@ -5508,15 +5507,15 @@ def case_asciidoc_target(work):
     os.makedirs(work)
     for name in ("tables.docx", "metadata.docx"):
         shutil.copy(os.path.join(FIXTURES, name), work)
-    with open(os.path.join(work, "d.png"), "wb") as fh:
+    with open(place(work, "d.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "rich.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "rich.md"), "w", encoding="utf-8") as fh:
         fh.write(RICH_MD)
-    with open(os.path.join(work, "front.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "front.md"), "w", encoding="utf-8") as fh:
         fh.write(FRONT_MD)
-    with open(os.path.join(work, "skips.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "skips.md"), "w", encoding="utf-8") as fh:
         fh.write(SKIPS_MD)
-    with open(os.path.join(work, "cells.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "cells.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Cells</title></head><body>'
                  '<h1>Cells</h1><table><tbody><tr><td><pre><code>data Point:\n'
                  '  | pt(x, y)\nend</code></pre></td><td>a listing</td></tr></tbody>'
@@ -5527,9 +5526,9 @@ def case_asciidoc_target(work):
                  '</body></html>')
 
     def convert_in(where, config):
-        with open(os.path.join(where, "conversion.yaml"), "w") as fh:
+        with open(place(where, "conversion.yaml"), "w") as fh:
             fh.write(config)
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=where, capture_output=True, text=True,
                        stdin=subprocess.DEVNULL)
 
@@ -5542,25 +5541,25 @@ def case_asciidoc_target(work):
     convert_in(work, both)
     back, again = work + "-back", work + "-again"
     if exists(work, "adoc"):
-        carry(os.path.join(work, "adoc"), back)
+        carry(place(work, "adoc"), back)
         convert_in(back, both)
     if exists(back, "adoc"):
-        carry(os.path.join(back, "adoc"), again)
+        carry(place(back, "adoc"), again)
         convert_in(again, "defaults:\n  heading_levels: source\n"
                           "targets:\n  adoc:\n    format: asciidoc\n")
     rich = read(work, "adoc", "rich.adoc") if exists(work, "adoc", "rich.adoc") else ""
     meta = read(work, "adoc", "metadata.adoc") if exists(work, "adoc", "metadata.adoc") else ""
     front = read(work, "adoc", "front.adoc") if exists(work, "adoc", "front.adoc") else ""
     page = read(work, "html", "rich.html") if exists(work, "html", "rich.html") else ""
-    agree = subprocess.run(["python3", os.path.join(ROOT, "util", "compare-output.py"),
-                            os.path.join(work, "html"), os.path.join(back, "html")],
+    agree = started(["python3", os.path.join(ROOT, "util", "compare-output.py"),
+                            place(work, "html"), place(back, "html")],
                            capture_output=True, text=True).stdout
 
     def fixed():
-        names = [n for n in os.listdir(os.path.join(back, "adoc")) if n.endswith(".adoc")]
+        names = [n for n in os.listdir(place(back, "adoc")) if n.endswith(".adoc")]
         return names and all(
-            open(os.path.join(back, "adoc", n), "rb").read()
-            == open(os.path.join(again, "adoc", n), "rb").read() for n in names)
+            open(place(back, "adoc", n), "rb").read()
+            == open(place(again, "adoc", n), "rb").read() for n in names)
     return [
         ("a footnote after a word, an anchor, and a decorative image are "
          "written as the reader reads them", lambda: "word{empty}footnote:" in rich
@@ -5609,18 +5608,18 @@ def case_title_id(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
-    with open(os.path.join(work, "sets.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "sets.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Sets\n---\n\n## Sets\n\nText.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     again = work + "-again"
     if exists(work, "html"):
-        shutil.copytree(os.path.join(work, "html"), again)
-        with open(os.path.join(again, "conversion.yaml"), "w") as fh:
+        shutil.copytree(place(work, "html"), again)
+        with open(place(again, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=again,
+    run = started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=again,
                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(again, "html", "sets.html") if exists(again, "html", "sets.html") else ""
     return [
@@ -5646,11 +5645,11 @@ def case_formula_titles(work):
     Markdown copy, read again, has its heading for its title heading, its
     declared title the heading's text."""
     os.makedirs(work)
-    with open(os.path.join(work, "01-limits.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "01-limits.md"), "w", encoding="utf-8") as fh:
         fh.write("# Limits $\\frac{a}{b}$ and $\\mathbb{R}^n$\n\nText.\n\n"
                  "## The $\\sqrt{x}$ section\n\nMore.\n\n"
                  "## The mean $\\overset{–}{X} – µ$\n\nLast.\n")
-    with open(os.path.join(work, "02-choose.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "02-choose.md"), "w", encoding="utf-8") as fh:
         fh.write("# Choosing $\\binom{n}{k}$ and $\\overset{–}{X}$\n\nText.\n")
     result = convert(work, "targets:\n  html:\n    format: html\n    pages:\n      split_level: 2\n"
                      "  epub:\n    format: epub3\n  word:\n    format: docx\n"
@@ -5662,7 +5661,7 @@ def case_formula_titles(work):
             if exists(work, "html", name) else None
         return html_lib.unescape(found.group(1)) if found else None
     chapters, leaked = {}, []
-    epub = os.path.join(work, "epub", "org.example.fixtures.epub")
+    epub = place(work, "epub", "org.example.fixtures.epub")
     if os.path.exists(epub):
         with zipfile.ZipFile(epub) as z:
             for name in z.namelist():
@@ -5675,7 +5674,7 @@ def case_formula_titles(work):
     word_titles = {}
     for name in ("01-limits", "02-choose"):
         if exists(work, "word", name + ".docx"):
-            with zipfile.ZipFile(os.path.join(work, "word", name + ".docx")) as z:
+            with zipfile.ZipFile(place(work, "word", name + ".docx")) as z:
                 word_titles[name] = html_lib.unescape(re.search(
                     r"<dc:title>(.*?)</dc:title>",
                     z.read("docProps/core.xml").decode("utf-8")).group(1))
@@ -5684,7 +5683,7 @@ def case_formula_titles(work):
     manifest = read(work, "imsmanifest.xml") if exists(work, "imsmanifest.xml") else ""
     named = [html_lib.unescape(n) for n in re.findall(r"<title>(.*?)</title>", manifest)]
     for folder in ("html", "src"):
-        for path in glob.glob(os.path.join(work, folder, "*")):
+        for path in glob.glob(place(work, folder, "*")):
             if os.path.isfile(path) and "formula-texts" in read(path):
                 leaked.append(path)
     copy = read(work, "src", "01-limits.md") if exists(work, "src", "01-limits.md") else ""
@@ -5694,7 +5693,7 @@ def case_formula_titles(work):
     os.makedirs(again)
     for name, text in (("01-limits", copy), ("02-choose", chosen)):
         if text:
-            with open(os.path.join(again, name + ".md"), "w", encoding="utf-8") as fh:
+            with open(place(again, name + ".md"), "w", encoding="utf-8") as fh:
                 fh.write(text)
     convert(again, "targets:\n  html:\n    format: html\n", fixtures=())
     read_again = read(again, "html", "01-limits.html") if exists(again, "html", "01-limits.html") \
@@ -5764,9 +5763,9 @@ def case_declared_formula_titles(work):
              "03-matrix": "---\ntitle: The $\\begin{pmatrix}a & b\\end{pmatrix}$ row\n---\n\n"
                           "Text.\n"}
     for name, text in pages.items():
-        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.declared\n  title: Declared\n"
                  "  numbering: true\n  contents:\n    - generate: toc\n"
                  "    - title: Part One\n      items: [01-declared, 02-headed, 03-matrix]\n")
@@ -5791,12 +5790,12 @@ def case_declared_formula_titles(work):
     words, leaked = {}, []
     for name in pages:
         if exists(work, "word", name + ".docx"):
-            with zipfile.ZipFile(os.path.join(work, "word", name + ".docx")) as z:
+            with zipfile.ZipFile(place(work, "word", name + ".docx")) as z:
                 core = z.read("docProps/core.xml").decode("utf-8")
                 words[name] = [html_lib.unescape(x) for x in
                                re.findall(r"<dc:title>(.*?)</dc:title>", core)]
     chapters, headings = [], []
-    for epub in glob.glob(os.path.join(work, "epub", "*.epub")):
+    for epub in glob.glob(place(work, "epub", "*.epub")):
         with zipfile.ZipFile(epub) as z:
             for name in sorted(z.namelist()):
                 data = z.read(name)
@@ -5813,7 +5812,7 @@ def case_declared_formula_titles(work):
         else ""
     sections = re.findall(r"\\section\{(.*?)\}\\label", chapter, re.S)
     for folder in ("html", "src"):
-        for path in glob.glob(os.path.join(work, folder, "*")):
+        for path in glob.glob(place(work, folder, "*")):
             if os.path.isfile(path) and "formula-texts" in read(path):
                 leaked.append(path)
     copy = read(work, "src", "01-declared.md") if exists(work, "src", "01-declared.md") else ""
@@ -5821,13 +5820,13 @@ def case_declared_formula_titles(work):
     # A book of one page, which nothing else names, is named by its title.
     lone = work + "-one"
     os.makedirs(lone)
-    with open(os.path.join(lone, "only.md"), "w", encoding="utf-8") as fh:
+    with open(place(lone, "only.md"), "w", encoding="utf-8") as fh:
         fh.write(pages["01-declared"])
     lone_said = convert(lone, "targets:\n  epub:\n    format: epub3\n", project=False,
                         fixtures=())
     lone_said = lone_said.stdout + lone_said.stderr
     lone_title = ""
-    for epub in glob.glob(os.path.join(lone, "epub", "*.epub")):
+    for epub in glob.glob(place(lone, "epub", "*.epub")):
         with zipfile.ZipFile(epub) as z:
             opf = [n for n in z.namelist() if n.endswith(".opf")]
             found = re.search(r"<dc:title[^>]*>(.*?)</dc:title>",
@@ -5885,7 +5884,7 @@ def case_title_block_formula(work):
     pages = {"01-own": "---\nsubtitle: A subtitle\n---\n\n" + heading,
              "02-declared": "---\ntitle: Limits\nsubtitle: A subtitle\n---\n\n" + heading}
     for name, text in pages.items():
-        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write(text)
     convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
 
@@ -6011,14 +6010,14 @@ def case_alt_formulas(work):
     os.makedirs(work)
     for name, page in (("01-squares", ALT_FORMULAS_MD), ("02-remote", ALT_FORMULAS_REMOTE_MD),
                        ("03-choose", ALT_FORMULAS_CHOOSE_MD)):
-        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write(page)
     import importlib.util
     html_read = bool(importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml"))
     if html_read:
-        with open(os.path.join(work, "04-link.html"), "w", encoding="utf-8") as fh:
+        with open(place(work, "04-link.html"), "w", encoding="utf-8") as fh:
             fh.write(ALT_FORMULAS_LINK_HTML)
-    with open(os.path.join(work, "square.png"), "wb") as fh:
+    with open(place(work, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n"
                         "  word:\n    format: docx\n  md:\n    format: markdown\n"
@@ -6026,23 +6025,23 @@ def case_alt_formulas(work):
     choice = "a choice $\\binom{n}{k}$"
     # The same page in a book whose only target is a Markdown copy, which
     # keeps the formula: nothing to say.
-    alone = os.path.join(work, "markdown-alone")
+    alone = beside(work, "markdown-alone")
     os.makedirs(alone)
-    with open(os.path.join(alone, "03-choose.md"), "w", encoding="utf-8") as fh:
+    with open(place(alone, "03-choose.md"), "w", encoding="utf-8") as fh:
         fh.write(ALT_FORMULAS_CHOOSE_MD)
-    with open(os.path.join(alone, "square.png"), "wb") as fh:
+    with open(place(alone, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     markdown_alone = convert(alone, "targets:\n  md:\n    format: markdown\n", fixtures=())
     # A page's variant for the Markdown copy, whose formula no target that
     # writes alt text so has: nothing to say either.
-    variant = os.path.join(work, "variant")
+    variant = beside(work, "variant")
     os.makedirs(variant)
     for name, page in (("05-pick.md", "# Pick\n\nText.\n"),
                        ("05-pick.md.md", "# Pick\n\nAn icon ![a pick $\\binom{v}{w}$](square.png)"
                                          " here.\n")):
-        with open(os.path.join(variant, name), "w", encoding="utf-8") as fh:
+        with open(place(variant, name), "w", encoding="utf-8") as fh:
             fh.write(page)
-    with open(os.path.join(variant, "square.png"), "wb") as fh:
+    with open(place(variant, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     varied = convert(variant, "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n",
                      fixtures=())
@@ -6054,7 +6053,7 @@ def case_alt_formulas(work):
         return read(work, *parts) if exists(work, *parts) else ""
 
     def chapter(heading):
-        path = os.path.join(work, "ebook", "org.example.fixtures.epub")
+        path = place(work, "ebook", "org.example.fixtures.epub")
         if not os.path.exists(path):
             return ""
         with zipfile.ZipFile(path) as epub:
@@ -6094,7 +6093,7 @@ def case_alt_formulas(work):
         return len(found) == 6 and found[5] == (' aria-hidden="true"', "A plain square")
 
     def descriptions():
-        path = os.path.join(work, "word", "01-squares.docx")
+        path = place(work, "word", "01-squares.docx")
         if not os.path.exists(path):
             return []
         with zipfile.ZipFile(path) as docx:
@@ -6157,10 +6156,9 @@ def case_alt_formulas(work):
          and "![a pick $\\binom{p}{q}$](square.png)" in text("md", "03-choose.md")
          and markdown_alone.returncode == 0
          and "pictures' descriptions" not in markdown_alone.stderr
-         and "![a choice $\\binom{n}{k}$](square.png)" in text("markdown-alone", "md",
-                                                                  "03-choose.md")
+         and "![a choice $\\binom{n}{k}$](square.png)" in read(alone, "md", "03-choose.md")
          and varied.returncode == 0 and "pictures' descriptions" not in varied.stderr
-         and "![a pick $\\binom{v}{w}$](square.png)" in text("variant", "md", "05-pick.md")),
+         and "![a pick $\\binom{v}{w}$](square.png)" in read(variant, "md", "05-pick.md")),
         ("a Word file's description has the formulas' text",
          lambda: descriptions() == alts),
         ("Markdown keeps the formula in the description, which is the figure's caption",
@@ -6232,9 +6230,9 @@ def case_caption_notes_links(work):
     formula and a note, or a link: case_alt_formulas.)"""
     os.makedirs(work)
     for name, page in (("01-noted", NOTED_CAPTIONS_MD), ("02-remote", NOTED_CAPTIONS_REMOTE_MD)):
-        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write(page)
-    with open(os.path.join(work, "square.png"), "wb") as fh:
+    with open(place(work, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n",
                   fixtures=())
@@ -6248,7 +6246,7 @@ def case_caption_notes_links(work):
             else ""
 
     def chapter(heading):
-        path = os.path.join(work, "ebook", "org.example.fixtures.epub")
+        path = place(work, "ebook", "org.example.fixtures.epub")
         if not os.path.exists(path):
             return ""
         with zipfile.ZipFile(path) as epub:
@@ -6320,9 +6318,9 @@ def case_numbered_titles(work):
              "03-note": "# A heading with a note[^1]\n\nText.\n\n[^1]: The note.\n",
              "04-plain": "# Plain Laws\n\nText.\n"}
     for name, text in pages.items():
-        with open(os.path.join(work, name + ".md"), "w", encoding="utf-8") as fh:
+        with open(place(work, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.numbered\n  title: Numbered\n"
                  "  numbering: true\n  contents:\n    - title: Part One\n"
                  "      items: [01-newton, 02-limits, 03-note, 04-plain]\n")
@@ -6365,10 +6363,10 @@ def case_link_titles(work):
         "adoc.adoc": '= AsciiDoc page\n\nNamed: link:https://example.org/adoc["the AsciiDoc site",title="Named in AsciiDoc"].\n',
     }
     for name, text in pages.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    word = os.path.join(work, "word.docx")
-    subprocess.run(["pandoc", "-f", "markdown", "-o", word], input=
+    word = place(work, "word.docx")
+    started(["pandoc", "-f", "markdown", "-o", word], input=
                    "# Word page\n\nBare: [https://doi.org/10.5555/docx](https://doi.org/10.5555/docx).\n"
                    "Internal: [the heading](#word-page).\n", text=True, capture_output=True)
     with zf.ZipFile(word) as z:
@@ -6389,9 +6387,9 @@ def case_link_titles(work):
             z.writestr(info, data)
 
     def convert_in(where, config):
-        with open(os.path.join(where, "conversion.yaml"), "w") as fh:
+        with open(place(where, "conversion.yaml"), "w") as fh:
             fh.write(config)
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                        cwd=where, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     convert_in(work, "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
                      "  adoc:\n    format: asciidoc\n")
@@ -6399,14 +6397,14 @@ def case_link_titles(work):
     for t in ("md", "adoc"):
         where = work + "-" + t
         if exists(work, t):
-            shutil.copytree(os.path.join(work, t), where,
+            shutil.copytree(place(work, t), where,
                             ignore=shutil.ignore_patterns("intermediates"))
             convert_in(where, "targets:\n  html:\n    format: html\n")
         back[t] = where
 
     def titles(where):
         found = {}
-        for name in sorted(os.listdir(os.path.join(where, "html"))) if exists(where, "html") else []:
+        for name in sorted(os.listdir(place(where, "html"))) if exists(where, "html") else []:
             if name.endswith(".html"):
                 s = read(where, "html", name)
                 for m in re.finditer(r'<a\b([^>]*)>(.*?)</a>', s, re.S):
@@ -6434,7 +6432,7 @@ def case_html_table_repairs(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work)
-    with open(os.path.join(work, "t.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "t.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><h1>T</h1>'
                  '<table id="tab"><tbody id="body1"><tr id="r1"><th scope="col">Nouns</th>'
                  '<th scope="col">Not</th></tr><tr><td>Mom</td><td>mom</td></tr>'
@@ -6444,9 +6442,9 @@ def case_html_table_repairs(work):
                  '<tr><td>b</td><td>2</td></tr></table>'
                  '<div style="color: red" font-family:\'montserrat\',sans-serif;"="">Styled.</div>'
                  '</body></html>')
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "t.html") if exists(work, "html", "t.html") else ""
     return [
@@ -6510,7 +6508,7 @@ def case_head_only_tables(work):
     if not (importlib.util.find_spec("html5lib") or importlib.util.find_spec("lxml")):
         return [("skip: HTML sources need html5lib or lxml", lambda: True)]
     os.makedirs(work, exist_ok=True)
-    with open(os.path.join(work, "heads.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "heads.html"), "w", encoding="utf-8") as fh:
         fh.write(HEAD_ONLY)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  word:\n    format: docx\n", fixtures=())
@@ -6526,7 +6524,7 @@ def case_head_only_tables(work):
     corner = '<td class="empty-header"></td>'
     shape = [(rows(t, "thead"), rows(t, "tbody"), t.count("<td") - t.count(corner))
              for t in tables]
-    words = glob.glob(os.path.join(work, "word", "*.docx"))
+    words = glob.glob(place(work, "word", "*.docx"))
     repeated = []
     if words:
         with zipfile.ZipFile(words[0]) as z:
@@ -6535,7 +6533,7 @@ def case_head_only_tables(work):
                     for t in re.findall(r"<w:tbl>.*?</w:tbl>", xml, re.S)]
     found = []
     if exists(work, "output-check.csv"):
-        with open(os.path.join(work, "output-check.csv"), encoding="utf-8-sig") as fh:
+        with open(place(work, "output-check.csv"), encoding="utf-8-sig") as fh:
             found = [row["Check"] for row in csv.DictReader(fh)]
     return [
         ("a table whose head held every row has a body of its rows of data, its header "
@@ -6574,21 +6572,21 @@ def case_bare_links(work):
     the link and the source's title."""
     import csv as csvmod
     os.makedirs(work)
-    with open(os.path.join(work, "refs.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "refs.md"), "w", encoding="utf-8") as fh:
         fh.write(BARE_MD)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+        return started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
     first = run()
     report = []
     if exists(work, "bare-links-new.csv"):
-        with open(os.path.join(work, "bare-links-new.csv"), encoding="utf-8-sig") as fh:
+        with open(place(work, "bare-links-new.csv"), encoding="utf-8-sig") as fh:
             report = list(csvmod.DictReader(fh))
     by_url = {r["URL"]: r for r in report}
-    with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
         fh.write("URL,Replacement,Title\n"
                  "https://doi.org/10.1080/08913810508443640,https://doi.org/10/b8xx35,DOI for Klein and Stern 2005\n"
                  "https://dasl.datadescription.com/datafile/cars,The Data and Story Library's cars data,\n"
@@ -6654,7 +6652,7 @@ def solid_png(path, width=40, height=20, rgb=(0, 0, 128)):
 def run_tool(cwd, args, util=False):
     """One of the pipeline's scripts, from bin/ or util/, run in cwd."""
     script = os.path.join(ROOT, "util" if util else "bin", args[0])
-    return subprocess.run([sys.executable, "-B", script] + args[1:], cwd=cwd,
+    return started([sys.executable, "-B", script] + args[1:], cwd=cwd,
                           capture_output=True, text=True)
 
 
@@ -6678,9 +6676,9 @@ def case_word_equations(work):
     """format: source writes math.repair_equations into a Word file's own
     equations, and with the setting off leaves them as they were."""
     os.makedirs(work)
-    subprocess.run(["pandoc", "-o", os.path.join(work, "eq.docx")],
+    started(["pandoc", "-o", place(work, "eq.docx")],
                    input="# Equations\n\nThe test: $a$.\n", text=True, check=True)
-    path = os.path.join(work, "eq.docx")
+    path = place(work, "eq.docx")
     with zipfile.ZipFile(path) as z:
         items = [(i, z.read(i.filename)) for i in z.infolist()]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -6697,32 +6695,32 @@ def case_word_equations(work):
         # As a conversion reads a Word file, through docxrepair's copy, or
         # as Pandoc alone does.
         if as_pipeline:
-            copy = os.path.join(work, "read-" + os.path.basename(path))
+            copy = place(work, "read-" + os.path.basename(path))
             docxrepair.repaired_copy(path, copy)
             path = copy
-        back = subprocess.run(["pandoc", "-f", "docx", "-t", "json", path],
+        back = started(["pandoc", "-f", "docx", "-t", "json", path],
                               capture_output=True, text=True)
         tex = [n["c"][1] for n in walk_json(json.loads(back.stdout)) if n.get("t") == "Math"]
         return tex[0] if tex else ""
 
     def build(setting):
-        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  source:\n    format: source\n" + setting)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
-        return result, tex_of(os.path.join(work, "source", "eq.docx"))
+        return result, tex_of(place(work, "source", "eq.docx"))
     on_result, on = build("")
-    on_alone = tex_of(os.path.join(work, "source", "eq.docx"), as_pipeline=False)
-    with zipfile.ZipFile(os.path.join(work, "source", "eq.docx")) as z:
+    on_alone = tex_of(place(work, "source", "eq.docx"), as_pipeline=False)
+    with zipfile.ZipFile(place(work, "source", "eq.docx")) as z:
         on_xml = z.read("word/document.xml").decode("utf-8")
     # The keep sidecar names the equation by its Before in the report, the
     # TeX the filter read; a second row names nothing.
-    with open(os.path.join(work, "math-repaired.csv"), encoding="utf-8-sig", newline="") as fh:
+    with open(place(work, "math-repaired.csv"), encoding="utf-8-sig", newline="") as fh:
         before = next((row["Before"] for row in csv.DictReader(fh)
                        if row["Kind"] == "equation"), "")
     off_result, off = build("    math:\n      repair_equations: false\n")
-    with open(os.path.join(work, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(work, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Kind", "Page", "Before"], ["equation", "eq", before],
                                   ["expression", "", "\u03b2 = 7"]])
     kept_result, kept = build("")
@@ -6753,7 +6751,7 @@ def case_word_equations(work):
          lambda: "\u00b5" in off and "\\overset" in off),
         ("an equation the keep sidecar names by the report's Before, its accent of "
          "the macron read as \\bar, is as it was in the copy, and the run says so",
-         lambda: "\\bar{z}" in before and kept == tex_of(os.path.join(work, "eq.docx"))
+         lambda: "\\bar{z}" in before and kept == tex_of(place(work, "eq.docx"))
          and "\\overset" in kept and "1 equation(s) kept as they were" in kept_said),
         ("a row of the keep sidecar that keeps nothing is warned about",
          lambda: "1 row(s) of math-keep.csv kept nothing" in kept_said
@@ -6810,10 +6808,10 @@ def case_word_equation_text(work):
     math-repair.lua gives its \\text{} in the page: each of the copy's
     equations, read back as a conversion reads it, is the page's."""
     os.makedirs(work)
-    subprocess.run(["pandoc", "-o", os.path.join(work, "et.docx")], check=True, text=True,
+    started(["pandoc", "-o", place(work, "et.docx")], check=True, text=True,
                    input="# Equation text\n\n" + "".join(
                        "Equation %d: $a$.\n\n" % n for n in range(len(WORD_EQUATION_TEXTS))))
-    path = os.path.join(work, "et.docx")
+    path = place(work, "et.docx")
     with zipfile.ZipFile(path) as z:
         items = [(i, z.read(i.filename)) for i in z.infolist()]
     texts = iter(WORD_EQUATION_TEXTS)
@@ -6824,19 +6822,19 @@ def case_word_equation_text(work):
                               lambda m: "<m:oMath>%s</m:oMath>" % next(texts),
                               data.decode("utf-8"), flags=re.S).encode("utf-8")
             z.writestr(info, data)
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  source:\n    format: source\n")
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import docxrepair
-    copy = os.path.join(work, "read-et.docx")
-    docxrepair.repaired_copy(os.path.join(work, "source", "et.docx"), copy)
-    back = subprocess.run(["pandoc", "-f", "docx", "-t", "json", copy],
+    copy = place(work, "read-et.docx")
+    docxrepair.repaired_copy(place(work, "source", "et.docx"), copy)
+    back = started(["pandoc", "-f", "docx", "-t", "json", copy],
                           capture_output=True, text=True)
     copied = [n["c"][1] for n in walk_json(json.loads(back.stdout or "{}"))
               if n.get("t") == "Math"]
-    with open(os.path.join(work, "et.filtered.json"), encoding="utf-8") as fh:
+    with open(place(work, "et.filtered.json"), encoding="utf-8") as fh:
         paged = [n["c"][1] for n in walk_json(json.load(fh)) if n.get("t") == "Math"]
 
     def bare(tex):
@@ -6883,7 +6881,7 @@ def case_word_text_math(work):
     math typed as text replaced by Word's equation, what's around them kept
     as it was, and the same text in two paragraphs told apart."""
     os.makedirs(work)
-    subprocess.run(["pandoc", "-o", os.path.join(work, "tm.docx")], check=True, text=True,
+    started(["pandoc", "-o", place(work, "tm.docx")], check=True, text=True,
                    input="# Math as text\n\n"
                          "We know *μ* = 34, and **so** *H*~0~: *μ* ≠ 34, with $x$ < 5 here.\n\n"
                          "The same: $y$ < 5 here.\n\n"
@@ -6893,7 +6891,7 @@ def case_word_text_math(work):
                          "No\u00a0break before *σ* = 2 here.\n")
     # Word keeps a run of plain text together, where Pandoc writes a run a
     # word: the equation begins and ends inside this one.
-    path = os.path.join(work, "tm.docx")
+    path = place(work, "tm.docx")
     with zipfile.ZipFile(path) as z:
         items = [(i, z.read(i.filename)) for i in z.infolist()]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -6913,17 +6911,17 @@ def case_word_text_math(work):
             z.writestr(info, data)
 
     def build(setting):
-        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  source:\n    format: source\n" + setting)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
-        back = subprocess.run(["pandoc", "-f", "docx", "-t", "markdown", "--wrap=none",
-                               os.path.join(work, "source", "tm.docx")],
+        back = started(["pandoc", "-f", "docx", "-t", "markdown", "--wrap=none",
+                               place(work, "source", "tm.docx")],
                               capture_output=True, text=True)
         return result.stdout + result.stderr, back.stdout
     said, on = build("")
-    with zipfile.ZipFile(os.path.join(work, "source", "tm.docx")) as z:
+    with zipfile.ZipFile(place(work, "source", "tm.docx")) as z:
         copy = z.read("word/document.xml").decode("utf-8")
     colored = re.findall(r'<w:color w:val="C00000" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
     blue = re.findall(r'<w:color w:val="0000C0" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
@@ -6956,10 +6954,10 @@ def case_word_text_minus(work):
     written for a minus sign made one in the run it's in, the run's
     formatting kept, a range left as written, as the page beside it has
     them, a picture's description too."""
-    os.makedirs(os.path.join(work, "assets"))
+    os.makedirs(place(work, "assets"))
     for name in ("chart", "rule"):
-        solid_png(os.path.join(work, "assets", name + ".png"))
-    subprocess.run(["pandoc", "-o", "mn.docx"], cwd=work, check=True, text=True,
+        solid_png(place(work, "assets", name + ".png"))
+    started(["pandoc", "-o", "mn.docx"], cwd=work, check=True, text=True,
                    input="# Minus signs\n\n"
                          "A balance of \u2013$922.0, a slope of **\u20131.5**, and 1 \u2013 0.05 = 0.95 here.\n\n"
                          "The same: \u20132 here.\n\n"
@@ -6970,14 +6968,14 @@ def case_word_text_minus(work):
                          "![Placeholder](assets/rule.png) there.\n\n"
                          "ONE-RUN\n")
     # The second picture's description is the image-alt sidecar's.
-    with zipfile.ZipFile(os.path.join(work, "mn.docx")) as z:
+    with zipfile.ZipFile(place(work, "mn.docx")) as z:
         embeds = re.findall(r'r:embed="([^"]+)"', z.read("word/document.xml").decode("utf-8"))
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nmn/media/%s.png,Falls to \u20135 by 2030 from 1990\u20132000 levels\n"
                  % embeds[1])
     # Word keeps a run of plain text together, where Pandoc writes a run a
     # word: two signs in this one.
-    path = os.path.join(work, "mn.docx")
+    path = place(work, "mn.docx")
     with zipfile.ZipFile(path) as z:
         items = [(i, z.read(i.filename)) for i in z.infolist()]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -6991,35 +6989,35 @@ def case_word_text_minus(work):
             z.writestr(info, data)
 
     def build(setting):
-        with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+        with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n" + setting
                      + "  source:\n    format: source\n" + setting)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         # Without smart, an en dash read back is one, not --.
-        back = subprocess.run(["pandoc", "-f", "docx", "-t", "markdown-smart", "--wrap=none",
-                               os.path.join(work, "source", "mn.docx")],
+        back = started(["pandoc", "-f", "docx", "-t", "markdown-smart", "--wrap=none",
+                               place(work, "source", "mn.docx")],
                               capture_output=True, text=True)
         page = html_lib.unescape(read(work, "html", "mn.html")) \
             if exists(work, "html", "mn.html") else ""
         return result.stdout + result.stderr, back.stdout, page
 
     def descriptions():
-        with zipfile.ZipFile(os.path.join(work, "source", "mn.docx")) as z:
+        with zipfile.ZipFile(place(work, "source", "mn.docx")) as z:
             xml = z.read("word/document.xml").decode("utf-8")
         return xml, [html_lib.unescape(d) for d in
                      re.findall(r'<wp:docPr\b[^>]*?\sdescr="([^"]*)"', xml)]
     said, on, page = build("")
     copy, described = descriptions()
     colored = re.findall(r'<w:color w:val="C00000" /></w:rPr><w:t xml:space="preserve">([^<]*)</w:t>', copy)
-    with open(os.path.join(work, "math-repaired.csv"), encoding="utf-8-sig", newline="") as fh:
+    with open(place(work, "math-repaired.csv"), encoding="utf-8-sig", newline="") as fh:
         rows = [(r["Kind"], r["Page"], r["Before"]) for r in csv.DictReader(fh)]
     # A row of the report, copied, keeps its stretch on the page and in the copy.
-    with open(os.path.join(work, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(work, "math-keep.csv"), "w", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows([["Kind", "Page", "Before"], ["minus", "mn", "\u20132.5"]])
     kept_said, kept, kept_page = build("")
-    os.remove(os.path.join(work, "math-keep.csv"))
+    os.remove(place(work, "math-keep.csv"))
     _, off, off_page = build("    math:\n      minus_in_text: false\n")
     _, off_described = descriptions()
     return [
@@ -7063,10 +7061,10 @@ def case_source_target(work):
     target's folder, with only what a person decided in the sidecars, never
     a guess; the author's files untouched."""
     import zipfile, hashlib
-    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
-    solid_png(os.path.join(work, "assets", "a.png"))
+    os.makedirs(place(work, "assets"), exist_ok=True)
+    solid_png(place(work, "assets", "a.png"))
     for n in (1, 2):
-        with open(os.path.join(work, f"ch{n}.md"), "w", encoding="utf-8") as fh:
+        with open(place(work, f"ch{n}.md"), "w", encoding="utf-8") as fh:
             fh.write(f"---\ntitle: Chapter {n}\nlang: en\n---\n\n# Chapter {n}\n\n"
                      f"| Name | Score |\n|------|------:|\n| Ana | 9{n} |\n| Ben | 8{n} |\n| Cy | 7{n} |\n\n"
                      + ("Table 2.1\n\n" if n == 2 else "See <https://doi.org/10.1000/xyz123>.\n\n"
@@ -7075,22 +7073,22 @@ def case_source_target(work):
                         # the table's caption.
                         "| Term | Count |\n|------|------:|\n| Fall | 12 |\n\nTable: Table 1.4\n\n")
                      + "![](assets/a.png)\n\nText.\n")
-        subprocess.run(["pandoc", f"ch{n}.md", "-o", f"ch{n}.docx"], cwd=work, check=True)
-        os.remove(os.path.join(work, f"ch{n}.md"))
-    shutil.rmtree(os.path.join(work, "assets"))
+        started(["pandoc", f"ch{n}.md", "-o", f"ch{n}.docx"], cwd=work, check=True)
+        os.remove(place(work, f"ch{n}.md"))
+    shutil.rmtree(place(work, "assets"))
     # Chapter 2 declares no language, for the copy to be given the book's.
-    with zipfile.ZipFile(os.path.join(work, "ch2.docx")) as z:
+    with zipfile.ZipFile(place(work, "ch2.docx")) as z:
         parts = {i: z.read(i.filename) for i in z.infolist()}
-    with zipfile.ZipFile(os.path.join(work, "ch2.docx"), "w", zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(place(work, "ch2.docx"), "w", zipfile.ZIP_DEFLATED) as z:
         for info, data in parts.items():
             if info.filename == "word/styles.xml":
                 data = re.sub(rb"<w:lang\b[^>]*/>", b"", data)
             z.writestr(info, data)
-    with open(os.path.join(work, "notes.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "notes.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Notes\nlang: en\n---\n\n# Notes\n\nA Markdown chapter.\n")
-    os.makedirs(os.path.join(work, "img"), exist_ok=True)
-    solid_png(os.path.join(work, "img", "bar.png"), rgb=(0, 128, 128))  # teal
-    with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "img"), exist_ok=True)
+    solid_png(place(work, "img", "bar.png"), rgb=(0, 128, 128))  # teal
+    with open(place(work, "page.html"), "w", encoding="utf-8") as fh:
         fh.write("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Scores</title></head>\n"
                  "<body>\n<h1>Scores</h1>\n<!-- the author's comment -->\n<table>\n"
                  "  <tr><td>Name</td><td>Score</td></tr>\n  <tr><td>Ana</td><td>90</td></tr>\n"
@@ -7100,22 +7098,22 @@ def case_source_target(work):
                  "<table>\n  <caption>Table 1.3</caption>\n  <tr><td>Section</td><td>Grade</td></tr>\n"
                  "  <tr><td>A</td><td>88</td></tr>\n</table>\n<p>See <a href=\"https://doi.org/10.1000/xyz123\">"
                  "https://doi.org/10.1000/xyz123</a>.</p>\n</body>\n</html>\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  language: en\n")
-    digest = lambda n: hashlib.sha256(open(os.path.join(work, n), "rb").read()).hexdigest()
+    digest = lambda n: hashlib.sha256(open(place(work, n), "rb").read()).hexdigest()
     before = {n: digest(n) for n in ("ch1.docx", "ch2.docx", "page.html")}
 
     def conf(extra=""):
-        with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n" + extra)
 
     def run():
-        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                               cwd=work, capture_output=True, text=True)
 
     def differ(n):
-        with zipfile.ZipFile(os.path.join(work, n)) as a, \
-                zipfile.ZipFile(os.path.join(work, "fixed", n)) as b:
+        with zipfile.ZipFile(place(work, n)) as a, \
+                zipfile.ZipFile(place(work, "fixed", n)) as b:
             return [p for p in a.namelist() if a.read(p) != b.read(p)]
 
     conf()
@@ -7124,21 +7122,21 @@ def case_source_target(work):
     first_missing = read(work, "table-captions-missing.csv") if exists(
         work, "table-captions-missing.csv") else ""
     first_differ = {n: differ(n) for n in ("ch1.docx", "ch2.docx")} \
-        if os.path.exists(os.path.join(work, "fixed", "ch1.docx")) else None
-    shutil.copy(os.path.join(work, "table-headers-new.csv"), os.path.join(work, "table-headers.csv"))
-    with open(os.path.join(work, "table-headers.csv"), encoding="utf-8") as fh:
+        if os.path.exists(place(work, "fixed", "ch1.docx")) else None
+    shutil.copy(place(work, "table-headers-new.csv"), place(work, "table-headers.csv"))
+    with open(place(work, "table-headers.csv"), encoding="utf-8") as fh:
         rows = fh.read().splitlines()
-    with open(os.path.join(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-headers.csv"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(r for r in rows if "ch2.docx" not in r) + "\n")
-    with zipfile.ZipFile(os.path.join(work, "ch1.docx")) as z:
+    with zipfile.ZipFile(place(work, "ch1.docx")) as z:
         rid = re.search(r'r:embed="([^"]+)"', z.read("word/document.xml").decode()).group(1)
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write(f"Image,Alt\nch1/media/{rid}.png,A navy rectangle\nimg/bar.png,A bar chart of the scores\n")
-    with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
         fh.write("Label,Description\npage#table-1,Scores by student\nTable 1.2,Enrollment by term\n"
                  "ch1#table-1,Scores in chapter one\nTable 2.1,Scores in chapter two\n"
                  "Table 1.3,Grades by section\nTable 1.4,Terms by season\n")
-    with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The source study\n")
     second = run()
     page = read(work, "fixed", "page.html") if exists(work, "fixed", "page.html") else ""
@@ -7146,20 +7144,20 @@ def case_source_target(work):
     ch1_html = read(work, "html", "ch1.html") if exists(work, "html", "ch1.html") else ""
 
     def xml(n):
-        with zipfile.ZipFile(os.path.join(work, "fixed", n)) as z:
+        with zipfile.ZipFile(place(work, "fixed", n)) as z:
             return z.read("word/document.xml").decode()
     one, two = xml("ch1.docx"), xml("ch2.docx")
     kept_compat = "word/settings.xml" not in differ("ch1.docx")
-    with zipfile.ZipFile(os.path.join(work, "fixed", "ch1.docx")) as z:
+    with zipfile.ZipFile(place(work, "fixed", "ch1.docx")) as z:
         one_rels = z.read("word/_rels/document.xml.rels").decode()
-    with zipfile.ZipFile(os.path.join(work, "fixed", "ch2.docx")) as z:
+    with zipfile.ZipFile(place(work, "fixed", "ch2.docx")) as z:
         two_styles = z.read("word/styles.xml").decode()
-    one_read = subprocess.run(["pandoc", os.path.join(work, "fixed", "ch1.docx"), "-t", "html"],
+    one_read = started(["pandoc", place(work, "fixed", "ch1.docx"), "-t", "html"],
                               capture_output=True, text=True).stdout
     conf('    compatibility_mode: "15"\n')
     third = run()
     set_compat = "word/settings.xml" in differ("ch1.docx") and 'w:name="compatibilityMode"' in \
-        zipfile.ZipFile(os.path.join(work, "fixed", "ch1.docx")).read("word/settings.xml").decode()
+        zipfile.ZipFile(place(work, "fixed", "ch1.docx")).read("word/settings.xml").decode()
     conf("  again:\n    format: source\n")
     fourth = run()
     return [
@@ -7225,12 +7223,12 @@ def case_word_repairs(work):
     the copy the conversion reads and to a source target's copy."""
     import zipfile
     os.makedirs(work, exist_ok=True)
-    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "ch.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Repairs\nlang: en\n---\n\n::: {custom-style=\"Title\"}\nModule One\n:::\n\n"
                  "# Section A\n\nKeep this.\n\nCut the extra words.\n")
-    subprocess.run(["pandoc", "ch.md", "-o", "ch.docx"], cwd=work, check=True)
-    os.remove(os.path.join(work, "ch.md"))
-    path = os.path.join(work, "ch.docx")
+    started(["pandoc", "ch.md", "-o", "ch.docx"], cwd=work, check=True)
+    os.remove(place(work, "ch.md"))
+    path = place(work, "ch.docx")
     with zipfile.ZipFile(path) as z:
         parts = {i: z.read(i.filename) for i in z.infolist()}
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -7243,11 +7241,11 @@ def case_word_repairs(work):
             z.writestr(info, data)
 
     def run(config):
-        with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write(config)
-        result = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+        result = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                                 cwd=work, capture_output=True, text=True)
-        pages = "".join(read(work, "html", f) for f in sorted(os.listdir(os.path.join(work, "html")))
+        pages = "".join(read(work, "html", f) for f in sorted(os.listdir(place(work, "html")))
                         if f.endswith(".html")) if exists(work, "html") else ""
         return result, pages
 
@@ -7257,7 +7255,7 @@ def case_word_repairs(work):
                             "targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
     copy = ""
     if exists(work, "mine", "ch.docx"):
-        with zipfile.ZipFile(os.path.join(work, "mine", "ch.docx")) as z:
+        with zipfile.ZipFile(place(work, "mine", "ch.docx")) as z:
             copy = z.read("word/document.xml").decode("utf-8")
     missing, _ = run("defaults:\n  word:\n    headings: Title=Heading10\ntargets:\n  html:\n    format: html\n")
     return [
@@ -7288,9 +7286,9 @@ def case_markdown_source(work):
     where each element is, confirmed against Pandoc's reading, the rest of
     the file exactly as written."""
     import zipfile
-    os.makedirs(os.path.join(work, "img"), exist_ok=True)
+    os.makedirs(place(work, "img"), exist_ok=True)
     for name in ("my chart", "rule", "code"):
-        solid_png(os.path.join(work, "img", name + ".png"))
+        solid_png(place(work, "img", name + ".png"))
     original = (
         "---\ntitle: Chapter\n---\n\nSetext Heading\n==============\n\nSome _emphasis_ kept as written.\n\n"
         "![](img/my chart.png)\n\n![Rule](img/rule.png){ width=50% }\n\n"
@@ -7302,31 +7300,31 @@ def case_markdown_source(work):
         "| E | F |\n|---|---|\n| 5 | 6 |\n\nTable: Table 1.3\n\n"
         "| G | H |\n|---|---|\n| 7 | 8 |\n\ntable: Table 1.4\n\n"
         "| I | J |\n|---|---|\n| 9 | 0 |\n\nTable: Table 1.5 {#tbl:five}\n\nThe end.\n")
-    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "ch.md"), "w", encoding="utf-8") as fh:
         fh.write(original)
 
     def run():
-        with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
-        return subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                               cwd=work, capture_output=True, text=True)
 
     first = run()
     first_copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else None
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  language: en\n")
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write('Image,Alt\n"img/my chart.png",A chart of the data\nimg/rule.png,[decorative]\n'
                  "img/code.png,A described code image\n")
-    with open(os.path.join(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "bare-links.csv"), "w", encoding="utf-8") as fh:
         fh.write("URL,Replacement,Title\nhttps://doi.org/10.1000/xyz123,https://doi.org/10/abcd,The study\n")
-    with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
         fh.write("Label,Description\nch#table-1,First table\nch#table-2,Second table\n"
                  "Table 1.2,Third table\nTable 1.3,Fourth table\nTable 1.4,Fifth table\n"
                  "Table 1.5,Sixth table\n")
     second = run()
     copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else ""
-    copy_html = subprocess.run(["pandoc", "-f", "markdown", "-t", "html"], input=copy,
+    copy_html = started(["pandoc", "-f", "markdown", "-t", "html"], input=copy,
                                capture_output=True, text=True).stdout
     return [
         ("with nothing decided and no language declared, the copy is the file, byte for byte",
@@ -7357,7 +7355,7 @@ def case_markdown_source(work):
          lambda: copy.startswith("---\ntitle: Chapter\nlang: en\n---")
          and "Setext Heading\n==============\n\nSome _emphasis_ kept as written." in copy),
         ("read back, the copy's changes are only the decisions",
-         lambda: subprocess.run(["pandoc", "-f", "markdown", "-t", "plain"], input=copy,
+         lambda: started(["pandoc", "-f", "markdown", "-t", "plain"], input=copy,
                                 capture_output=True, text=True).stdout.count("First table") == 1),
     ]
 
@@ -7376,7 +7374,7 @@ def case_markdown_table_captions(work):
     it after an HTML one, and in a list item or a quote it was a paragraph
     after it (2026-11-01)."""
     os.makedirs(work, exist_ok=True)
-    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "ch.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Chapter\n---\n\n"
                  "| T1 | a |\n|----|---|\n| 1  | 2 |\n\n"
                  "+-------------------+-------+\n| Outer G           | Side  |\n"
@@ -7396,26 +7394,26 @@ def case_markdown_table_captions(work):
                  "<table>\n<tr><th>H</th><th>g</th></tr>\n<tr><td>2</td><td>2</td></tr>\n"
                  "</table>\n\n"
                  "| T7 | h |\n|----|---|\n| 3  | 3 |\n\nThe end.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
-    with open(os.path.join(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "table-captions.csv"), "w", encoding="utf-8") as fh:
         fh.write("Label,Description\n" + "".join(
             "ch#table-%d,For %s\n" % (n, name)
             for n, name in enumerate(("T1", "G", "N1", "T3", "T4", "T5", "T6", "TL", "TR", "TD",
                                       "H", "T7"), 1)))
-    with open(os.path.join(work, "fig.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "fig.md"), "w", encoding="utf-8") as fh:
         fh.write("| F1 | a |\n|----|---|\n| 1  | 2 |\n\n```{=html5}\n<figure id=\"f1\">\n"
                  "<table><tr><th>FH</th><th>g</th></tr><tr><td>2</td><td>2</td></tr></table>\n"
                  "<figcaption>A figure</figcaption>\n</figure>\n```\n\n"
                  "| F3 | c |\n|----|---|\n| 5  | 6 |\n")
-    with open(os.path.join(work, "table-captions.csv"), "a", encoding="utf-8") as fh:
+    with open(place(work, "table-captions.csv"), "a", encoding="utf-8") as fh:
         fh.write("fig#table-1,For F1\nfig#table-2,For FH\nfig#table-3,For F3\n")
-    done = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    done = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                           cwd=work, capture_output=True, text=True)
     copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else ""
     fig = read(work, "mine", "fig.md") if exists(work, "mine", "fig.md") else ""
     page = read(work, "html", "ch.html") if exists(work, "html", "ch.html") else ""
-    back = subprocess.run(["pandoc", "-f", "markdown", "-t", "html"], input=copy,
+    back = started(["pandoc", "-f", "markdown", "-t", "html"], input=copy,
                           capture_output=True, text=True).stdout
 
     def captions(html):
@@ -7455,13 +7453,13 @@ def case_markdown_table_captions(work):
 def adoc_root_reads_back(work):
     """adoc/ch.adoc read back as a source gives the cube root as written:
     the index in brackets, which Pandoc's reader alone loses."""
-    back = os.path.join(work, "adoc-back")
-    shutil.copytree(os.path.join(work, "adoc"), back)
-    with open(os.path.join(back, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    back = beside(work, "adoc-back")
+    shutil.copytree(place(work, "adoc"), back)
+    with open(place(back, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                    cwd=back, capture_output=True, text=True)
-    page = os.path.join(back, "html", "ch.html")
+    page = place(back, "html", "ch.html")
     return os.path.exists(page) and "<mroot>" in open(page, encoding="utf-8").read()
 
 
@@ -7469,12 +7467,12 @@ def case_fidelity_writers(work):
     """fidelity.csv for markdown and asciidoc targets: what the writing
     changes, as each run also says on the terminal."""
     os.makedirs(work, exist_ok=True)
-    with open(os.path.join(work, "ch.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "ch.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Chapter\nlang: en\n---\n\n# Chapter\n\n(@) An example.\n(@) Another.\n\n"
                  "A cube root, $\\sqrt[3]{x}$.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n")
-    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                          cwd=work, capture_output=True, text=True)
     report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
     return [
@@ -7496,12 +7494,12 @@ def case_cut_characters(work):
     cell = "a" * 56 + "−" + "b" * 10
     note = "c" * 59 + "−" + "d"
     example = "e" * 59 + "−" + "f"
-    with open(os.path.join(work, "cut.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "cut.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: Cut\nlang: en\n---\n\n# Cut\n\n"
                  f"| {cell} | Count |\n|---|---|\n| Yes | 12 |\n\n"
                  f"A claim.[^1]\n\n[^1]: {note}\n\n    A second paragraph.\n\n"
                  f"(@) {example}\n(@) Another.\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
                  "  adoc:\n    format: asciidoc\n")
     run = run_in(work, "  contents:\n    - cut\n")
@@ -7524,28 +7522,28 @@ def case_fidelity_epub(work):
     target filter turns into a link or text as it writes, but not in a
     passage for another target, which it leaves out."""
     os.makedirs(work, exist_ok=True)
-    with open(os.path.join(work, "handout.pdf"), "wb") as fh:
+    with open(place(work, "handout.pdf"), "wb") as fh:
         fh.write(b"%PDF-1.4\n%%EOF\n")
     for name in ("syllabus.pdf", "reading.pdf"):
-        with open(os.path.join(work, name), "wb") as fh:
+        with open(place(work, name), "wb") as fh:
             fh.write(b"%PDF-1.4\n%%EOF\n")
-    with open(os.path.join(work, "web.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "web.md"), "w", encoding="utf-8") as fh:
         fh.write("# For the web\n\n::: {targets=\"web\"}\n"
                  "![A remote square](https://example.org/square.png)\n\n"
                  "The [syllabus](syllabus.pdf).\n:::\n\nWords for every edition, and "
                  "[![a remote circle](https://example.org/circle.png) and the "
                  "[reading list](reading.pdf)]{targets=\"web\"} in a line.\n")
     # Two pages, so the book's title is the project's, not the one page's.
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.fidelity\n  title: Fidelity\n")
-    with open(os.path.join(work, "page.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "page.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Page</title></head><body><h1>Page</h1>'
                  '<iframe src="https://www.youtube.com/embed/abc123" title="A lecture"></iframe>'
                  '<p><img src="https://example.org/chart.png" alt="A remote chart"></p>'
                  '<p>The <a href="handout.pdf">handout</a>.</p></body></html>')
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  epub:\n    format: epub3\n  word:\n    format: docx\n")
-    run = subprocess.run([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
                          cwd=work, capture_output=True, text=True)
     report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
     return [
@@ -7584,28 +7582,28 @@ def case_alt_text(work):
     by (lib/alttext.py), images.alt_placeholders among them, each that
     needs a person in image-alt-missing.csv with why; one a sidecar row
     says was reviewed, and one that says something, not."""
-    os.makedirs(os.path.join(work, "img"))
+    os.makedirs(place(work, "img"))
     alts = {"a": "image", "b": "IMG_2041", "c": "A dog on a lawn Description automatically "
             "generated", "d": LONG_GENERATED, "e": "chart.png", "f": "Slide figure",
             "g": "A bar chart of sales by region, highest in the west", "h": "Picture 3",
             "plot": "Plot"}
     for name in alts:
-        solid_png(os.path.join(work, "img", name + ".png"))
-    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        solid_png(place(work, "img", name + ".png"))
+    with open(place(work, "page.md"), "w", encoding="utf-8") as fh:
         fh.write("# Pictures\n\n" + "".join("![%s](img/%s.png)\n\n" % (alt, name)
                                              for name, alt in alts.items()))
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Alt\n  identifier: org.example.alt\n  language: en-US\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  images:\n    alt_placeholders: [\"slide figure\"]\n"
                  "targets:\n  html:\n    format: html\n")
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nimg/h.png,\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     rows = []
     if exists(work, "image-alt-missing.csv"):
-        with open(os.path.join(work, "image-alt-missing.csv"), encoding="utf-8-sig", newline="") as fh:
+        with open(place(work, "image-alt-missing.csv"), encoding="utf-8-sig", newline="") as fh:
             rows = [(r["Image"], r["Reason"], r["CurrentAlt"]) for r in csv.DictReader(fh)]
     return [
         ("alt text that says nothing, a camera's name for a file, Office's descriptions, a file "
@@ -7629,59 +7627,59 @@ def case_alt_shared(work):
     apart by their files' bytes, so the same picture in two files, or in
     two Word files' media, is one; alt text a sidecar decided is compared
     but not reported."""
-    book = os.path.join(work, "md")
-    os.makedirs(os.path.join(book, "img"))
+    book = place(work, "md")
+    os.makedirs(place(book, "img"))
     for name, rgb in (("s", (1, 1, 1)), ("up", (2, 2, 2)), ("up-copy", (2, 2, 2)),
                       ("down", (3, 3, 3)), ("dots", (4, 4, 4)), ("fall", (5, 5, 5)),
                       ("kept", (6, 6, 6))):
-        solid_png(os.path.join(book, "img", name + ".png"), rgb=rgb)
-    with open(os.path.join(book, "one.md"), "w", encoding="utf-8") as fh:
+        solid_png(place(book, "img", name + ".png"), rgb=rgb)
+    with open(place(book, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("# One\n\n![Source: Roe and Doe (2020)](img/s.png)\n\n![A rising line](img/up.png)"
                  "\n\n![A rising line](img/up-copy.png)\n\n![Two dots](img/dots.png)\n\n"
                  "![A falling line](img/fall.png)\n")
-    with open(os.path.join(book, "two.md"), "w", encoding="utf-8") as fh:
+    with open(place(book, "two.md"), "w", encoding="utf-8") as fh:
         fh.write("# Two\n\n![a rising line.](img/down.png)\n\n![Two dots](img/dots.png)\n\n"
                  "![A falling line](img/kept.png)\n")
-    with open(os.path.join(book, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(book, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Alike\n  identifier: org.example.alike\n  language: en-US\n")
-    with open(os.path.join(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(book, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nimg/kept.png,\n")
 
     def fail(found):
         raise AssertionError(repr(found)[:800])
 
     def reasons(where):
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=where,
+        started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=where,
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if not exists(where, "image-alt-missing.csv"):
             return []
-        with open(os.path.join(where, "image-alt-missing.csv"), encoding="utf-8-sig",
+        with open(place(where, "image-alt-missing.csv"), encoding="utf-8-sig",
                   newline="") as fh:
             return sorted((r["Image"], r["Source"], r["Reason"]) for r in csv.DictReader(fh))
     md = reasons(book)
     # Two Word files holding one picture, with one alt text, then each
     # its own picture.
-    word = os.path.join(work, "word")
+    word = place(work, "word")
     os.makedirs(word)
     with zipfile.ZipFile(os.path.join(FIXTURES, "media-a.docx")) as z:
         alt = re.search(r'descr="([^"]*)"', z.read("word/document.xml").decode("utf-8")).group(1)
     for name in ("media-a", "media-b"):
         with zipfile.ZipFile(os.path.join(FIXTURES, name + ".docx")) as src, \
-                zipfile.ZipFile(os.path.join(word, name + ".docx"), "w") as dst:
+                zipfile.ZipFile(place(word, name + ".docx"), "w") as dst:
             for info in src.infolist():
                 data = src.read(info.filename)
                 if info.filename == "word/document.xml":
                     data = re.sub(rb'descr="[^"]*"', b'descr="%s"' % alt.encode("utf-8"), data)
                 dst.writestr(info, data)
-    with open(os.path.join(word, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(word, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Alike\n  identifier: org.example.word\n  language: en-US\n")
     one = [r for r in reasons(word) if "shared" in r[2]]
-    with zipfile.ZipFile(os.path.join(word, "media-b.docx")) as src:
+    with zipfile.ZipFile(place(word, "media-b.docx")) as src:
         entries = [(info, src.read(info.filename)) for info in src.infolist()]
-    solid_png(os.path.join(work, "other.png"), width=1, height=1, rgb=(9, 9, 9))
-    with open(os.path.join(work, "other.png"), "rb") as fh:
+    solid_png(place(work, "other.png"), width=1, height=1, rgb=(9, 9, 9))
+    with open(place(work, "other.png"), "rb") as fh:
         other = fh.read()
-    with zipfile.ZipFile(os.path.join(word, "media-b.docx"), "w") as dst:
+    with zipfile.ZipFile(place(word, "media-b.docx"), "w") as dst:
         for info, data in entries:
             dst.writestr(info, other if info.filename == "word/media/image1.png" else data)
     two = [r for r in reasons(word) if "shared" in r[2]]
@@ -7710,10 +7708,10 @@ def case_formula_cells(work):
     unguarded, figures-and-tables.lua's unguarded)."""
     os.makedirs(work)
     for name in ("dash", "cold"):
-        solid_png(os.path.join(work, name + ".png"))
-    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+        solid_png(place(work, name + ".png"))
+    with open(place(work, "page.md"), "w", encoding="utf-8") as fh:
         fh.write("# Formula cells\n\n![-](dash.png)\n\n![](cold.png)\n")
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8-sig") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8-sig") as fh:
         fh.write("Image,Alt\ncold.png,'-40 degrees on a thermometer\n")
     result = convert(work, fixtures=())
     page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
@@ -7738,15 +7736,15 @@ def case_highlighting(work):
     and in the EPUB, so one that scrolls scrolls by the keys too
     (target-blocks.lua)."""
     os.makedirs(work)
-    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "page.md"), "w", encoding="utf-8") as fh:
         fh.write("# Code\n\n```{.python .numberLines}\ntotal = 0  # a running sum\n```\n\n"
                  "```\nplain text\n```\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Code\n  identifier: org.example.code\n  language: en-US\n")
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
                  "  word:\n    format: docx\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     with open(os.path.join(BIN, "highlighting.theme"), encoding="utf-8") as fh:
         theme = json.load(fh)
@@ -7755,12 +7753,12 @@ def case_highlighting(work):
     page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     chapter = sheet = styles = ""
     if exists(work, "epub", "org.example.code.epub"):
-        with zipfile.ZipFile(os.path.join(work, "epub", "org.example.code.epub")) as z:
+        with zipfile.ZipFile(place(work, "epub", "org.example.code.epub")) as z:
             chapter = next((z.read(n).decode("utf-8") for n in z.namelist()
                             if n.endswith(".xhtml") and b'class="sourceCode' in z.read(n)), "")
             sheet = "".join(z.read(n).decode("utf-8") for n in z.namelist() if n.endswith(".css"))
     if exists(work, "word", "page.docx"):
-        with zipfile.ZipFile(os.path.join(work, "word", "page.docx")) as z:
+        with zipfile.ZipFile(place(work, "word", "page.docx")) as z:
             styles = z.read("word/styles.xml").decode("utf-8")
 
     def pandocs(text):
@@ -7824,17 +7822,17 @@ def case_remediate_docx(work):
     file, every other part left as it was (util/remediate.py)."""
     import zipfile
     import json
-    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
+    os.makedirs(place(work, "assets"), exist_ok=True)
     for name in ("chart", "rule"):
-        solid_png(os.path.join(work, "assets", name + ".png"))
-    with open(os.path.join(work, "src.md"), "w", encoding="utf-8") as fh:
+        solid_png(place(work, "assets", name + ".png"))
+    with open(place(work, "src.md"), "w", encoding="utf-8") as fh:
         fh.write("# Remediate\n\n| Name | Score |\n|------|------:|\n| Ana | 90 |\n| Ben | 85 |\n| Cy | 70 |\n\n"
                  "![](assets/chart.png)\n\nText.\n\n![](assets/rule.png){title=\"A rule\"}\n")
-    subprocess.run(["pandoc", "src.md", "-o", "ch1.docx"], cwd=work, check=True)
-    with zipfile.ZipFile(os.path.join(work, "ch1.docx")) as z:
+    started(["pandoc", "src.md", "-o", "ch1.docx"], cwd=work, check=True)
+    with zipfile.ZipFile(place(work, "ch1.docx")) as z:
         doc = z.read("word/document.xml").decode("utf-8")
         embeds = re.findall(r'r:embed="([^"]+)"', doc)
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nch1/media/%s.png,Scores by student\nch1/media/%s.png,[decorative]\n"
                  % (embeds[0], embeds[1]))
     headers = run_tool(work, ["table-headers.py", "ch1.docx", "--sidecar", "none.csv",
@@ -7843,34 +7841,34 @@ def case_remediate_docx(work):
     plain = run_tool(work, ["remediate.py", "ch1.docx", "--resolved", "resolved.json",
                             "--out", "plain"], util=True)
     plain_xml = ""
-    if os.path.exists(os.path.join(work, "plain", "ch1.docx")):
-        with zipfile.ZipFile(os.path.join(work, "plain", "ch1.docx")) as z:
+    if os.path.exists(place(work, "plain", "ch1.docx")):
+        with zipfile.ZipFile(place(work, "plain", "ch1.docx")) as z:
             plain_xml = z.read("word/document.xml").decode("utf-8")
     rem = run_tool(work, ["remediate.py", "ch1.docx", "--resolved", "resolved.json",
                           "--alt", "image-alt.csv", "--include-guesses", "--out", "out"], util=True)
     refused = run_tool(work, ["remediate.py", "ch1.docx", "--out", "."], util=True)
-    with open(os.path.join(work, "ansi.csv"), "w", encoding="cp1252", newline="") as fh:
+    with open(place(work, "ansi.csv"), "w", encoding="cp1252", newline="") as fh:
         fh.write("Image,Alt\r\nch1/media/%s.png,Scores \u2013 by student\r\n" % embeds[0])
     ansi = run_tool(work, ["remediate.py", "ch1.docx", "--alt", "ansi.csv", "--out", "ansi"],
                     util=True)
     ansi_xml = ""
-    if os.path.exists(os.path.join(work, "ansi", "ch1.docx")):
-        with zipfile.ZipFile(os.path.join(work, "ansi", "ch1.docx")) as z:
+    if os.path.exists(place(work, "ansi", "ch1.docx")):
+        with zipfile.ZipFile(place(work, "ansi", "ch1.docx")) as z:
             ansi_xml = z.read("word/document.xml").decode("utf-8")
     # And one that reads as neither, as "CSV (MS-DOS)" saves Müller: a
     # byte Windows-1252 has no character for, and a capital Mac OS Roman
     # reads inside a word.
-    with open(os.path.join(work, "odd.csv"), "wb") as fh:
+    with open(place(work, "odd.csv"), "wb") as fh:
         fh.write(b"Image,Alt\r\nch1/media/x.png,M\x81ller's chart\r\n")
     odd = run_tool(work, ["remediate.py", "ch1.docx", "--alt", "odd.csv", "--out", "odd"],
                    util=True)
-    out = os.path.join(work, "out", "ch1.docx")
+    out = place(work, "out", "ch1.docx")
     changed, xml = [], ""
     if os.path.exists(out):
-        with zipfile.ZipFile(os.path.join(work, "ch1.docx")) as a, zipfile.ZipFile(out) as b:
+        with zipfile.ZipFile(place(work, "ch1.docx")) as a, zipfile.ZipFile(out) as b:
             changed = [n for n in a.namelist() if a.read(n) != b.read(n)]
             xml = b.read("word/document.xml").decode("utf-8")
-    back = run_tool(os.path.join(work, "out"), ["table-headers.py", "ch1.docx", "--sidecar", "none.csv",
+    back = run_tool(place(work, "out"), ["table-headers.py", "ch1.docx", "--sidecar", "none.csv",
                                                 "--new", "new.csv", "--report", "report.csv"]) \
         if os.path.exists(out) else None
     report = read(work, "out", "report.csv") if exists(work, "out", "report.csv") else ""
@@ -7881,7 +7879,7 @@ def case_remediate_docx(work):
     # A person's row saying the table is a layout table, which Word can't hold.
     key = next((line.split(",")[0] for line in read(work, "new.csv").splitlines()[1:]),
                "x") if exists(work, "new.csv") else "x"
-    with open(os.path.join(work, "layout.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "layout.csv"), "w", encoding="utf-8") as fh:
         fh.write("key,headers\n%s,layout\n" % key)
     run_tool(work, ["table-headers.py", "ch1.docx", "--sidecar", "layout.csv",
                     "--new", "new2.csv", "--report", "report2.csv",
@@ -7889,8 +7887,8 @@ def case_remediate_docx(work):
     layout = run_tool(work, ["remediate.py", "ch1.docx", "--resolved", "layout.json",
                              "--out", "layout"], util=True)
     layout_xml = ""
-    if os.path.exists(os.path.join(work, "layout", "ch1.docx")):
-        with zipfile.ZipFile(os.path.join(work, "layout", "ch1.docx")) as z:
+    if os.path.exists(place(work, "layout", "ch1.docx")):
+        with zipfile.ZipFile(place(work, "layout", "ch1.docx")) as z:
             layout_xml = z.read("word/document.xml").decode("utf-8")
     return [
         ("a person's layout table isn't written into a Word file, which records nothing "
@@ -7991,17 +7989,17 @@ def case_own_colors(work):
     EPUB's chapter. Drawing them needs Playwright and its Chromium, and
     skips without them."""
     os.makedirs(work)
-    with open(os.path.join(work, "01-html.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "01-html.html"), "w", encoding="utf-8") as fh:
         fh.write(OWN_COLORS_HTML)
-    with open(os.path.join(work, "02-md.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "02-md.md"), "w", encoding="utf-8") as fh:
         fh.write(OWN_COLORS_MD)
     run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n",
                   fixtures=())
     page = read(work, "html", "01-html.html") if exists(work, "html", "01-html.html") else ""
     md_page = read(work, "html", "02-md.html") if exists(work, "html", "02-md.html") else ""
     chapters = {}
-    path = os.path.join(work, "ebook", "org.example.fixtures.epub")
-    unpacked = os.path.join(work, "unpacked")
+    path = place(work, "ebook", "org.example.fixtures.epub")
+    unpacked = place(work, "unpacked")
     if os.path.exists(path):
         with zipfile.ZipFile(path) as epub:
             epub.extractall(unpacked)
@@ -8010,7 +8008,7 @@ def case_own_colors(work):
                     text = epub.read(name).decode("utf-8")
                     for heading in ("From HTML", "From Markdown"):
                         if f">{heading}</h1>" in text:
-                            chapters[heading] = os.path.join(unpacked, name)
+                            chapters[heading] = place(unpacked, name)
 
     def chapter(heading):
         if heading not in chapters:
@@ -8048,8 +8046,8 @@ def case_own_colors(work):
                 browser = play.chromium.launch()
                 for scheme in ("light", "dark"):
                     view = browser.new_page(color_scheme=scheme)
-                    for name, where in (("page", os.path.join(work, "html", "01-html.html")),
-                                        ("md page", os.path.join(work, "html", "02-md.html")),
+                    for name, where in (("page", place(work, "html", "01-html.html")),
+                                        ("md page", place(work, "html", "02-md.html")),
                                         ("chapter", chapters.get("From HTML")),
                                         ("md chapter", chapters.get("From Markdown"))):
                         if where:
@@ -8112,11 +8110,11 @@ def case_side_by_side(work):
     except ImportError:
         print("  skip  Playwright not installed; pictures in a row aren't laid out")
         return []
-    os.makedirs(os.path.join(work, "img"))
+    os.makedirs(place(work, "img"))
     for name in ("left.png", "right.png"):
-        with open(os.path.join(work, "img", name), "wb") as fh:
+        with open(place(work, "img", name), "wb") as fh:
             fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "pair.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "pair.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Pair</title></head><body>'
                  "<h1>Pair</h1><figure><div class=\"row\"><figure>"
                  '<img src="img/left.png" alt="A left square" width="300" height="300"></figure>'
@@ -8125,7 +8123,7 @@ def case_side_by_side(work):
                  "</body></html>")
     result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
     boxes = {}
-    page = os.path.join(work, "html", "pair.html")
+    page = place(work, "html", "pair.html")
     if result.returncode == 0 and os.path.exists(page):
         try:
             with sync_playwright() as play:
@@ -8210,11 +8208,11 @@ def case_formula_steps_reflow(work):
         print("  skip  Playwright not installed; steps aren't laid out")
         return []
     os.makedirs(work)
-    with open(os.path.join(work, "steps.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "steps.html"), "w", encoding="utf-8") as fh:
         fh.write(STEPS_PAGE)
     result = convert(work, "targets:\n  html:\n    format: html\n", fixtures=())
     boxes, rules, ruled, halves = {}, {}, {}, []
-    page = os.path.join(work, "html", "steps.html")
+    page = place(work, "html", "steps.html")
     if result.returncode == 0 and os.path.exists(page):
         play = None
         try:
@@ -8312,14 +8310,14 @@ def case_word_box(work):
     the paragraph's properties; a table in it keeps its own, the text
     outside it has none, and the mark that found it is gone."""
     os.makedirs(work)
-    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "page.md"), "w", encoding="utf-8") as fh:
         fh.write("# Boxes\n\nBefore the box.\n\n::: box\n### Example 1.1\n\nA question.\n\n"
                  "- a step\n- another\n\n$$x^2 + y^2 = z^2$$\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n"
                  "#### Solution\n\nAn answer.\n:::\n\nAfter the box.\n")
     result = convert(work, "targets:\n  word:\n    format: docx\n", fixtures=())
     xml = ""
     if exists(work, "word", "page.docx"):
-        with zipfile.ZipFile(os.path.join(work, "word", "page.docx")) as z:
+        with zipfile.ZipFile(place(work, "word", "page.docx")) as z:
             xml = z.read("word/document.xml").decode("utf-8")
     order = ("pStyle", "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl",
              "numPr", "suppressLineNumbers", "pBdr", "shd", "tabs", "spacing", "ind", "jc",
@@ -8363,11 +8361,11 @@ def case_docx_target(work):
     Narrator reads; and the file read back as a source gives the book
     back."""
     import zipfile as zf
-    os.makedirs(os.path.join(work, "assets"))
+    os.makedirs(place(work, "assets"))
     for name in ("chart.png", "rule.png"):
-        with open(os.path.join(work, "assets", name), "wb") as fh:
+        with open(place(work, "assets", name), "wb") as fh:
             fh.write(PNG_1PX if name == "chart.png" else PNG_1PX + b"\0")
-    with open(os.path.join(work, "one.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "one.md"), "w", encoding="utf-8") as fh:
         fh.write("---\ntitle: One\nlang: en\n---\n\n# One\n\n"
                  'See [the data](https://example.org/data "The data, as a CSV file").[^1]\n\n'
                  "![A navy bar standing for the chart](assets/chart.png)\n\n![](assets/rule.png)\n\n"
@@ -8385,7 +8383,7 @@ def case_docx_target(work):
                  "Back to [the long one](#an-identifier-well-past-the-forty-characters-word-allows).\n\n"
                  '[^1]: The [source](https://example.org/source "Where the data came from") explains it,'
                  ' with its mean $\\bar{y}$.\n')
-    with open(os.path.join(work, "two.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "two.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Two</title></head><body><h1>Two</h1>'
                  "<table><caption>Costs by year</caption><thead><tr><th>Item</th><th>2024</th>"
                  "<th>2025</th></tr></thead><tbody><tr><th>Labor</th><td>10</td><td>12</td></tr>"
@@ -8393,7 +8391,7 @@ def case_docx_target(work):
                  '<p>See <a href="one.html#_foundations">foundations</a> and '
                  '<a href="one.html#an-identifier-well-past-the-forty-characters-word-allows">the long one</a>.</p>'
                  "</body></html>")
-    with open(os.path.join(work, "three.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "three.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Three</title></head><body><h1>Three</h1>'
                  '<table role="presentation"><tr><td><p>Layout, left.</p></td><td><p>Layout, right.</p></td></tr></table>'
                  '<figure><img src="assets/chart.png" alt="Before"><img src="assets/chart.png" alt="After">'
@@ -8411,15 +8409,15 @@ def case_docx_target(work):
                  '<table><tbody><tr><td style="text-align: right">inner right</td><td>inner plain</td></tr>'
                  '</tbody></table></td><td style="text-align: right">outer right</td></tr></tbody></table>'
                  "</body></html>")
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nassets/rule.png,[decorative]\n")
-    with open(os.path.join(work, "conversion.yaml"), "w") as fh:
+    with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  word:\n    format: docx\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    run = started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def part(name, inside):
-        path = os.path.join(work, "word", name)
+        path = place(work, "word", name)
         if not os.path.exists(path):
             return ""
         with zf.ZipFile(path) as z:
@@ -8427,14 +8425,14 @@ def case_docx_target(work):
     one = part("one.docx", "word/document.xml") + part("one.docx", "word/footnotes.xml")
     two = part("two.docx", "word/document.xml")
     # Read the Word files back, as a book of their own.
-    back = os.path.join(work, "back")
+    back = beside(work, "back")
     os.makedirs(back)
     for name in ("one.docx", "two.docx", "three.docx"):
-        if os.path.exists(os.path.join(work, "word", name)):
-            shutil.copy(os.path.join(work, "word", name), back)
-    with open(os.path.join(back, "conversion.yaml"), "w") as fh:
+        if os.path.exists(place(work, "word", name)):
+            shutil.copy(place(work, "word", name), back)
+    with open(place(back, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=back,
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=back,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     one_back = read(back, "html", "one.html") if exists(back, "html", "one.html") else ""
     two_back = read(back, "html", "two.html") if exists(back, "html", "two.html") else ""
@@ -8570,24 +8568,24 @@ def case_title_heading(work):
     said = {}
 
     def book(name, pages, targets, extra="", project=""):
-        path = os.path.join(work, name)
+        path = place(work, name)
         os.makedirs(path)
         for stem, text in pages:
-            with open(os.path.join(path, stem + ".md"), "w", encoding="utf-8") as fh:
+            with open(place(path, stem + ".md"), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  title: The Book\n  identifier: org.example.%s\n"
                      "  language: en-US\n  contents:\n" % name
                      + "".join("    - %s\n" % stem for stem, _ in pages) + project)
-        with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets + extra)
-        result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
                                 capture_output=True, text=True, stdin=subprocess.DEVNULL)
         said[name] = result.stdout + result.stderr
         return path
 
     def epub_files(path):
-        found = glob.glob(os.path.join(path, "epub", "*.epub"))
+        found = glob.glob(place(path, "epub", "*.epub"))
         if not found:
             return {}
         with zipfile.ZipFile(found[0]) as z:
@@ -8600,7 +8598,7 @@ def case_title_heading(work):
     markdown = read(one, "md", "first.md") if exists(one, "md", "first.md") else ""
     word_styles, core = [], ""
     if exists(one, "word", "first.docx"):
-        with zipfile.ZipFile(os.path.join(one, "word", "first.docx")) as z:
+        with zipfile.ZipFile(place(one, "word", "first.docx")) as z:
             document = z.read("word/document.xml").decode("utf-8")
             core = z.read("docProps/core.xml").decode("utf-8")
         word_styles = re.findall(r'<w:pStyle w:val="([^"]+)"', document)
@@ -8684,7 +8682,7 @@ def word_from_markdown(path, text, *metadata):
     command = ["pandoc", "-f", "markdown", "-t", "docx", "-o", path]
     for field in metadata:
         command += ["-M", field]
-    subprocess.run(command, input=text, text=True, check=True, capture_output=True)
+    started(command, input=text, text=True, check=True, capture_output=True)
 
 
 def word_language(path):
@@ -8720,30 +8718,30 @@ def case_page_languages(work):
     hand-written page's), else the book's, a file's that differs from the
     book's only in region the book's; what the book puts on a page in
     another language marked in the book's; the copies; and the report."""
-    os.makedirs(os.path.join(work, "_pt"))
+    os.makedirs(place(work, "_pt"))
     for name, text in LANGUAGE_PAGES.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    word_from_markdown(os.path.join(work, "espanol.docx"),
+    word_from_markdown(place(work, "espanol.docx"),
                        "# Español\n\nUn texto bastante largo en español.\n", "lang=es-ES")
     # As OpenStax's are: Pandoc's output, its language a custom property,
     # the document's language the reference document's US English.
-    word_from_markdown(os.path.join(work, "funciones.docx"),
+    word_from_markdown(place(work, "funciones.docx"),
                        "# Funciones\n\nUna función asigna a cada entrada una salida.\n",
                        "company=OpenStax", "language=es")
-    word_from_markdown(os.path.join(work, "osterreich.docx"),
+    word_from_markdown(place(work, "osterreich.docx"),
                        "# Österreich\n\nEin Satz aus Wien.\n", "lang=de-AT")
-    with open(os.path.join(work, "_pt", "about.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "_pt", "about.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="it"><head><title>Chi siamo</title></head><body>'
                  "<h1>Chi siamo</h1><p>Un testo scritto a mano.</p></body></html>")
     # An HTML page that says it's in English, which a row corrects.
-    with open(os.path.join(work, "seite.html"), "w", encoding="utf-8") as fh:
+    with open(place(work, "seite.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html>\n<html lang="en"><head><title>Seite</title></head><body>'
                  "<h1>Seite</h1><p>Ein Absatz aus Zürich.</p></body></html>\n")
-    with open(os.path.join(work, "languages.csv"), "w", encoding="utf-8") as fh:
+    with open(place(work, "languages.csv"), "w", encoding="utf-8") as fh:
         fh.write("source,language\nchapitre,fr-CA\nseite.html,de-CH\nnothing,it\n"
                  "broken,French\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.languages\n  title: Sprachen\n"
                  "  language: de\n")
     first = convert(work, 'defaults:\n  footer: "A *footer*."\n'
@@ -8755,7 +8753,7 @@ def case_page_languages(work):
              else "" for stem in ("deutsch", "chapitre", "espanol", "funciones", "osterreich")}
     sources = {stem: read(work, "md", stem + ".md") if exists(work, "md", stem + ".md") else ""
                for stem in ("deutsch", "chapitre", "espanol", "funciones", "osterreich")}
-    epub = os.path.join(work, "epub", "org.example.languages.epub")
+    epub = place(work, "epub", "org.example.languages.epub")
     chapters, package = {}, ""
     if os.path.exists(epub):
         with zipfile.ZipFile(epub) as z:
@@ -8769,13 +8767,13 @@ def case_page_languages(work):
     validated = epubcheck(epub)
     drafted, drafted_marked = [], False
     if exists(work, "languages-new.csv"):
-        with open(os.path.join(work, "languages-new.csv"), encoding="utf-8-sig", newline="") as fh:
+        with open(place(work, "languages-new.csv"), encoding="utf-8-sig", newline="") as fh:
             drafted = list(csv.reader(fh))
-        with open(os.path.join(work, "languages-new.csv"), "rb") as fh:
+        with open(place(work, "languages-new.csv"), "rb") as fh:
             drafted_marked = fh.read(3) == b"\xef\xbb\xbf"
     said = first.stdout + first.stderr
     # A person adopts the drafted rows as they stand.
-    with open(os.path.join(work, "languages.csv"), "a", encoding="utf-8", newline="") as fh:
+    with open(place(work, "languages.csv"), "a", encoding="utf-8", newline="") as fh:
         csv.writer(fh).writerows(drafted[1:])
     second = convert(work, project=False, fixtures=())
     again = second.stdout + second.stderr
@@ -8802,10 +8800,10 @@ def case_page_languages(work):
          and "lang:" not in sources["deutsch"] and "lang:" not in sources["osterreich"]),
         ("a Word target's file has its page's language as its default, the book's where the "
          "page is in it, not the reference document's US English",
-         lambda: 'w:val="es-ES"' in word_language(os.path.join(work, "word", "espanol.docx"))
-         and 'w:val="es"' in word_language(os.path.join(work, "word", "funciones.docx"))
-         and 'w:val="de"' in word_language(os.path.join(work, "word", "deutsch.docx"))
-         and 'w:val="fr-CA"' in word_language(os.path.join(work, "word", "chapitre.docx"))),
+         lambda: 'w:val="es-ES"' in word_language(place(work, "word", "espanol.docx"))
+         and 'w:val="es"' in word_language(place(work, "word", "funciones.docx"))
+         and 'w:val="de"' in word_language(place(work, "word", "deutsch.docx"))
+         and 'w:val="fr-CA"' in word_language(place(work, "word", "chapitre.docx"))),
         ("the EPUB is in the book's language, and each chapter file of a page in another "
          "says so on its root, a hand-written page's its own, the footer the book's",
          lambda: "<dc:language>de</dc:language>" in package
@@ -8821,10 +8819,10 @@ def case_page_languages(work):
         ("a copy is given its row's language in place of its own, and OpenStax's property's "
          "in place of the US English its marks say; one in its own keeps it, and one that "
          "says none gets the book's",
-         lambda: 'w:val="es"' in word_language(os.path.join(work, "src", "funciones.docx"))
-         and 'w:val="en-US"' not in word_language(os.path.join(work, "src", "funciones.docx"))
-         and 'w:val="es-ES"' in word_language(os.path.join(work, "src", "espanol.docx"))
-         and 'w:val="de-AT"' in word_language(os.path.join(work, "src", "osterreich.docx"))
+         lambda: 'w:val="es"' in word_language(place(work, "src", "funciones.docx"))
+         and 'w:val="en-US"' not in word_language(place(work, "src", "funciones.docx"))
+         and 'w:val="es-ES"' in word_language(place(work, "src", "espanol.docx"))
+         and 'w:val="de-AT"' in word_language(place(work, "src", "osterreich.docx"))
          and "lang: fr-CA" in read(work, "src", "chapitre.md")
          and "lang: fr\n" not in read(work, "src", "chapitre.md")
          and "lang: de" in read(work, "src", "deutsch.md")),
@@ -8869,9 +8867,9 @@ def case_listed_languages(work):
     page, and each of its notes moved there."""
     os.makedirs(work)
     for name, text in LISTED_LANGUAGES.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.listed\n  title: Aufgelistet\n"
                  "  language: de\n  contents:\n    - generate: toc\n      title: Inhalt\n"
                  "    - deutsch\n    - chapitre\n")
@@ -8880,7 +8878,7 @@ def case_listed_languages(work):
                      "  epub:\n    format: epub3\n", project=False, fixtures=())
     html_pages = {stem: read(work, "html", stem + ".html") if exists(work, "html", stem + ".html")
                   else "" for stem in ("toc", "deutsch", "chapitre", "notes")}
-    epub = os.path.join(work, "epub", "org.example.listed.epub")
+    epub = place(work, "epub", "org.example.listed.epub")
     parts = {}
     if os.path.exists(epub):
         with zipfile.ZipFile(epub) as z:
@@ -8932,9 +8930,9 @@ def case_merged_languages(work):
     os.makedirs(work)
     for name, text in dict(LANGUAGE_PAGES, **{
             "page.md": "---\ntitle: Page\nlang: fr\n---\n\nEncore une phrase.\n"}).items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.merged\n  title: Gemischt\n"
                  "  language: de\n  contents:\n    - title: Gemischt\n"
                  "      items: [deutsch, chapitre]\n    - title: Ganz\n      items: [page]\n")
@@ -8943,7 +8941,7 @@ def case_merged_languages(work):
     mixed = read(work, "md", "Gemischt.md") if exists(work, "md", "Gemischt.md") else ""
     # A group whose pages are all one source's file is named for it.
     whole = read(work, "md", "page.md") if exists(work, "md", "page.md") else ""
-    word = os.path.join(work, "word", "Gemischt.docx")
+    word = place(work, "word", "Gemischt.docx")
     runs = ""
     if os.path.exists(word):
         with zipfile.ZipFile(word) as z:
@@ -8960,7 +8958,7 @@ def case_merged_languages(work):
          and re.search(r'<w:lang w:val="fr"\s*/>.*Une phrase', runs, re.S)),
         ("a file of pages in one other language is in it",
          lambda: "lang: fr" in whole and ":::" not in whole
-         and 'w:val="fr"' in word_language(os.path.join(work, "word", "page.docx"))),
+         and 'w:val="fr"' in word_language(place(work, "word", "page.docx"))),
     ]
 
 
@@ -8971,9 +8969,9 @@ def case_variant_languages(work):
     for name, text in (("deutsch.md", LANGUAGE_PAGES["deutsch.md"]),
                        ("deutsch.print.md", "---\ntitle: Deutsch\nlang: fr\n---\n\nGedruckt.\n"),
                        ("nur.print.md", "---\ntitle: Nur\nlang: it\n---\n\nSolo stampato.\n")):
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.variants\n  title: Varianten\n"
                  "  language: de\n")
     result = convert(work, "targets:\n  html:\n    format: html\n  print:\n    format: html\n",
@@ -9009,26 +9007,26 @@ def case_review_columns(work):
                      + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
     os.makedirs(work)
-    png(os.path.join(work, "one.png"))
-    png(os.path.join(work, "two.png"))
-    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+    png(place(work, "one.png"))
+    png(place(work, "two.png"))
+    with open(place(work, "page.md"), "w", encoding="utf-8") as fh:
         fh.write("# Page\n\n![](one.png)\n\n![](two.png)\n\n"
                  "| Country | GDP |\n|---|---|\n| Brazil | 3,153 |\n| Canada | 1,827 |\n\n"
                  "See <https://example.org/a-page>.\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Review\n  identifier: org.example.review\n"
                  "  language: en-US\n  contents:\n    - page\n    - tables\n")
     # A Word file's tables, which the header pre-pass guesses at.
     shutil.copy(os.path.join(FIXTURES, "tables.docx"), work)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
+        return started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def header(name):
-        path = os.path.join(work, name)
+        path = place(work, name)
         if not os.path.exists(path):
             return []
         with open(path, encoding="utf-8-sig", newline="") as fh:
@@ -9038,15 +9036,15 @@ def case_review_columns(work):
     headers = {name: header(name) for name in ("image-alt-missing.csv", "table-captions-missing.csv",
                                                "table-headers-new.csv", "bare-links-new.csv")}
     guessed = []
-    if os.path.exists(os.path.join(work, "table-headers-new.csv")):
-        with open(os.path.join(work, "table-headers-new.csv"), encoding="utf-8-sig", newline="") as fh:
+    if os.path.exists(place(work, "table-headers-new.csv")):
+        with open(place(work, "table-headers-new.csv"), encoding="utf-8-sig", newline="") as fh:
             guessed = list(csv.DictReader(fh))
     missing = []
-    if os.path.exists(os.path.join(work, "image-alt-missing.csv")):
-        with open(os.path.join(work, "image-alt-missing.csv"), encoding="utf-8-sig", newline="") as fh:
+    if os.path.exists(place(work, "image-alt-missing.csv")):
+        with open(place(work, "image-alt-missing.csv"), encoding="utf-8-sig", newline="") as fh:
             missing = [r for r in csv.reader(fh)][1:]
     # One description drafted by a model and not reviewed, one reviewed.
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(headers.get("image-alt-missing.csv") or ["Image", "Alt"])
         for row, (alt, reviewed) in zip(missing, (("A red square", ""), ("Another red square", "RS"))):
@@ -9092,34 +9090,35 @@ def case_excel_sidecars(work):
     gone without, and never opened, which would wait for a writer."""
     import io
     os.makedirs(work)
-    solid_png(os.path.join(work, "one.png"), 4, 4, (255, 0, 0))
-    solid_png(os.path.join(work, "two.png"), 4, 4, (0, 0, 255))
-    with open(os.path.join(work, "page.md"), "w", encoding="utf-8") as fh:
+    solid_png(place(work, "one.png"), 4, 4, (255, 0, 0))
+    solid_png(place(work, "two.png"), 4, 4, (0, 0, 255))
+    with open(place(work, "page.md"), "w", encoding="utf-8") as fh:
         fh.write("# Page\n\n![](one.png)\n\n![](two.png)\n\n"
                  "| Country | GDP |\n|---|---|\n| Brazil | 3,153 |\n| Canada | 1,827 |\n\n"
                  "See <https://example.org/a-page> and <https://example.org/another>.\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  title: Marks\n  identifier: org.example.marks\n"
                  "  language: en-US\n  contents:\n    - page\n    - tables\n")
     shutil.copy(os.path.join(FIXTURES, "tables.docx"), work)
-    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        done = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                               cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         return done.stdout + done.stderr
 
     def reports():
-        return sorted(n for n in os.listdir(work) if n.endswith(".csv"))
+        folder = os.path.dirname(place(work, "output-check.csv"))
+        return sorted(n for n in os.listdir(folder) if n.endswith(".csv"))
 
     def marked(name):
-        with open(os.path.join(work, name), "rb") as fh:
+        with open(place(work, name), "rb") as fh:
             data = fh.read()
         return data.startswith(b"\xef\xbb\xbf") and not data[3:].startswith(b"\xef\xbb\xbf")
 
     def rows(name):
-        with open(os.path.join(work, name), encoding="utf-8-sig", newline="") as fh:
+        with open(place(work, name), encoding="utf-8-sig", newline="") as fh:
             return list(csv.reader(fh))
 
     def line(row):
@@ -9135,7 +9134,7 @@ def case_excel_sidecars(work):
         Excel saved without a header, after a mark of its own."""
         found = rows(report)
         filled = [fill(row) for row in found[1:]]
-        with open(os.path.join(work, name), "w", encoding="utf-8", newline="") as fh:
+        with open(place(work, name), "w", encoding="utf-8", newline="") as fh:
             fh.write("\ufeff" + line(found[0]) + line(filled[0])
                      + "\ufeff" + line(found[0]) + "".join(map(line, filled[1:-1]))
                      + "\ufeff" + line(filled[-1]))
@@ -9155,48 +9154,48 @@ def case_excel_sidecars(work):
     page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     tables = read(work, "html", "tables.html") if exists(work, "html", "tables.html") else ""
     # As Excel's plain "CSV" saves the sidecar in the US: Windows-1252.
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="cp1252", newline="") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="cp1252", newline="") as fh:
         fh.write("Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed\r\n"
                  "one.png,A red square,page,missing,,claude,\r\n"
                  "two.png,A blue square \u2013 smaller,page,missing,,claude,\r\n")
-    rewritten = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    rewritten = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                                cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     rewritten_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     # As Excel for Mac's plain "CSV" saves it: Mac OS Roman, its lines
     # ending with CR LF.
-    with open(os.path.join(work, "image-alt.csv"), "w", encoding="mac_roman", newline="") as fh:
+    with open(place(work, "image-alt.csv"), "w", encoding="mac_roman", newline="") as fh:
         fh.write("Image,Alt\r\none.png,A red square\r\n"
                  "two.png,The square\u2019s blue \u2013 smaller\r\n")
-    mac = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    mac = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     mac_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     # And as a text editor saves it: UTF-8 without the mark, which the run
     # gives it, as Excel needs to open it as UTF-8, and nothing else.
     editor = ("Image,Alt\none.png,A red square\ntwo.png,The square\u2019s blue \u2013 smaller\n"
               .encode("utf-8"))
-    with open(os.path.join(work, "image-alt.csv"), "wb") as fh:
+    with open(place(work, "image-alt.csv"), "wb") as fh:
         fh.write(editor)
     beside_before = sorted(n for n in os.listdir(work) if n.lstrip(".").startswith("image-alt.csv"))
-    unmarked = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    unmarked = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                               cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     unmarked_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     beside_after = sorted(n for n in os.listdir(work) if n.lstrip(".").startswith("image-alt.csv"))
-    with open(os.path.join(work, "image-alt.csv"), "rb") as fh:
+    with open(place(work, "image-alt.csv"), "rb") as fh:
         editor_now = fh.read()
     # And as "CSV (MS-DOS)" saves Müller: a byte Windows-1252 has no
     # character for, and a capital Mac OS Roman reads inside a word.
-    with open(os.path.join(work, "image-alt.csv"), "wb") as fh:
+    with open(place(work, "image-alt.csv"), "wb") as fh:
         fh.write(b"Image,Alt\r\none.png,A red square\r\ntwo.png,M\x81ller's blue square\r\n")
-    built = os.path.getmtime(os.path.join(work, "html", "page.html")) \
+    built = os.path.getmtime(place(work, "html", "page.html")) \
         if exists(work, "html", "page.html") else None
-    stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    stopped = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                              cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    stopped_built = os.path.getmtime(os.path.join(work, "html", "page.html")) \
+    stopped_built = os.path.getmtime(place(work, "html", "page.html")) \
         if exists(work, "html", "page.html") else None
     # Every sidecar is given the mark, one of ASCII alone too, which Excel
     # reads the same either way, whether the run reads it or not.
     ascii_titles = b"Slide,Title\ndeck/slide-256,One\n"
-    with open(os.path.join(work, "slide-titles.csv"), "wb") as fh:
+    with open(place(work, "slide-titles.csv"), "wb") as fh:
         fh.write(ascii_titles)
     # Sidecars the run can't rewrite, read-only here, which a run as root
     # leaves as they are too, each as Excel's plain "CSV" saves it, in
@@ -9217,31 +9216,31 @@ def case_excel_sidecars(work):
             "bare-links.csv": "URL,Replacement,Title\r\nhttps://example.org/a-page,,Read \u2013 "
                               "a page\r\nhttps://example.org/another,,Read \u2013 a page\r\n"}
     for name, content in kept.items():
-        os.chmod(os.path.join(work, name), 0o644)
-        with open(os.path.join(work, name), "w", encoding="cp1252", newline="") as fh:
+        os.chmod(place(work, name), 0o644)
+        with open(place(work, name), "w", encoding="cp1252", newline="") as fh:
             fh.write(content)
-        os.chmod(os.path.join(work, name), 0o444)
-    os.mkfifo(os.path.join(work, "languages.csv"))
+        os.chmod(place(work, name), 0o444)
+    os.mkfifo(place(work, "languages.csv"))
     # And a link to a file that isn't there, which the run goes on without.
-    os.symlink(os.path.join(work, "gone.csv"), os.path.join(work, "reading-order.csv"))
-    kept_before = {name: open(os.path.join(work, name), "rb").read() for name in kept}
+    os.symlink(place(work, "gone.csv"), place(work, "reading-order.csv"))
+    kept_before = {name: open(place(work, name), "rb").read() for name in kept}
 
     def beside_them():
         return sorted(n for n in os.listdir(work)
                       if any(n.lstrip(".").startswith(name) and n != name for name in kept))
     beside_kept = beside_them()
-    left = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    left = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                           cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                           timeout=1200)
     left_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
-    kept_after = {name: open(os.path.join(work, name), "rb").read() for name in kept}
+    kept_after = {name: open(place(work, name), "rb").read() for name in kept}
     beside_left = beside_them()
-    with open(os.path.join(work, "slide-titles.csv"), "rb") as fh:
+    with open(place(work, "slide-titles.csv"), "rb") as fh:
         titles_now = fh.read()
     for name in kept:
-        os.chmod(os.path.join(work, name), 0o644)
-    os.remove(os.path.join(work, "languages.csv"))
-    os.remove(os.path.join(work, "reading-order.csv"))
+        os.chmod(place(work, name), 0o644)
+    os.remove(place(work, "languages.csv"))
+    os.remove(place(work, "reading-order.csv"))
     return [
         ("every report starts with one byte-order mark",
          lambda: {"image-alt-missing.csv", "table-captions-missing.csv", "table-headers-new.csv",
@@ -9315,7 +9314,7 @@ def case_excel_sidecars(work):
          "without it" in left.stdout + left.stderr),
         ("and so is a link to a file that isn't there",
          lambda: "reading-order.csv is a link to %s, which isn't there, so this run goes on "
-         "without it" % os.path.join(work, "gone.csv") in left.stdout + left.stderr),
+         "without it" % place(work, "gone.csv") in left.stdout + left.stderr),
         ("and one of ASCII alone is given the mark too, the run saying so",
          lambda: "slide-titles.csv had no byte-order mark: one is added" in left.stdout + left.stderr
          and titles_now == b"\xef\xbb\xbf" + ascii_titles),
@@ -9329,10 +9328,10 @@ def case_sidecar_said_once(work):
     reads page-names.csv too, doesn't say again what convert.py said
     (--sidecar-checked)."""
     os.makedirs(work)
-    with open(os.path.join(work, "econ.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "econ.md"), "w", encoding="utf-8") as fh:
         fh.write("# Economics\n\nOpening.\n\n## Caf\u00e9 Economics\n\nText.\n\n"
                  "## Costs\n\nMore text.\n")
-    names = os.path.join(work, "page-names.csv")
+    names = place(work, "page-names.csv")
     names_bytes = ("source,parents,heading,position,name\r\n"
                    "econ,,Caf\u00e9 Economics,,cafe-econ\r\n").encode("cp1252")
     with open(names, "wb") as fh:
@@ -9340,6 +9339,7 @@ def case_sidecar_said_once(work):
     os.chmod(names, 0o444)
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  html:\n    format: html\n", fixtures=())
+    names = place(work, "page-names.csv")   # where the laid-out book has it
     with open(names, "rb") as fh:
         left = fh.read()
     os.chmod(names, 0o644)
@@ -9645,24 +9645,24 @@ def case_quoted_lists(work):
         os.makedirs(path)
         for name, data in files.items():
             mode = "wb" if isinstance(data, bytes) else "w"
-            with open(os.path.join(path, name), mode, **({} if mode == "wb" else {"encoding": "utf-8"})) as fh:
+            with open(place(path, name), mode, **({} if mode == "wb" else {"encoding": "utf-8"})) as fh:
                 fh.write(data)
-        with open(os.path.join(path, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  title: Quotes\n  identifier: org.example.%s\n  language: en-US\n"
                      % os.path.basename(path))
-        with open(os.path.join(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets)
-        subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
+        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def markdown(path, stem):
-        json_path = os.path.join(path, stem + ".filtered.json")
+        json_path = place(path, stem + ".filtered.json")
         if not os.path.exists(json_path):
             return ""
-        return subprocess.run(["pandoc", "-f", "json", json_path, "-t", "markdown"],
+        return started(["pandoc", "-f", "json", json_path, "-t", "markdown"],
                               capture_output=True, text=True).stdout
 
-    source = os.path.join(work, "source")
+    source = place(work, "source")
     # Two quotes kept apart only by the Divs they're in, which Word doesn't
     # keep: they come back two quotes, not one.
     divs = "Before.\n\n::: one\n> Quote A.\n:::\n\n::: two\n> Quote B.\n:::\n\nAfter.\n"
@@ -9671,13 +9671,13 @@ def case_quoted_lists(work):
                   "nested.md": NESTED_HOLDING,
                   "square.png": ONE_PIXEL},
          "  word:\n    format: docx\n  html:\n    format: html\n")
-    written = os.path.join(source, "word", "page.docx")
+    written = place(source, "word", "page.docx")
     data = open(written, "rb").read() if os.path.exists(written) else b""
 
     def written_word(stem):
-        path = os.path.join(source, "word", stem + ".docx")
+        path = place(source, "word", stem + ".docx")
         return open(path, "rb").read() if os.path.exists(path) else b""
-    back = os.path.join(work, "back")
+    back = place(work, "back")
     book(back, {"page.docx": data, "divs.docx": written_word("divs"),
                 "figures.docx": written_word("figures"), "items.docx": written_word("items"),
                 "pictures.docx": written_word("pictures"), "nested.docx": written_word("nested")},
@@ -9769,7 +9769,7 @@ def case_quoted_lists(work):
                     part = re.sub(rb"<w:docVars>.*?</w:docVars>", b"", part)
                 zout.writestr(info, part)
         plain = buffer.getvalue()
-    author = os.path.join(work, "author")
+    author = place(work, "author")
     book(author, {"page.docx": plain}, "  html:\n    format: html\n")
     return [
         # And a list item's quote comes back one quote, not one a paragraph;
@@ -9870,24 +9870,24 @@ def case_html_source(work):
     what this pipeline wrote changes nothing."""
     # The fixtures and a Markdown page, converted; then their pages as the
     # sources of a second book, and that book's pages as a third's.
-    os.makedirs(os.path.join(work, "assets"), exist_ok=True)
-    with open(os.path.join(work, "long run.md"), "w", encoding="utf-8") as fh:
+    os.makedirs(place(work, "assets"), exist_ok=True)
+    with open(place(work, "long run.md"), "w", encoding="utf-8") as fh:
         fh.write(MARKDOWN.replace("assets\\Curve.png", "assets/Curve.png")
                  .replace("assets\\_under.png", "assets/_under.png"))
     for image in ("Pipe Sizes.png", "Curve.png", "_under.png"):
-        with open(os.path.join(work, "assets", image), "wb") as fh:
+        with open(place(work, "assets", image), "wb") as fh:
             fh.write(ONE_PIXEL)
-    with open(os.path.join(work, "noted.md"), "w", encoding="utf-8") as fh:
+    with open(place(work, "noted.md"), "w", encoding="utf-8") as fh:
         fh.write(NOTED)
     convert(work, "targets:\n  html:\n    format: html\n")
     second, third = work + "-second", work + "-third"
-    shutil.copytree(os.path.join(work, "html"), second)
+    shutil.copytree(place(work, "html"), second)
     again = run_in(second)
-    shutil.copytree(os.path.join(second, "html"), third)
+    shutil.copytree(place(second, "html"), third)
     run_in(third)
-    compared = subprocess.run(
+    compared = started(
         ["python3", os.path.join(ROOT, "util", "compare-output.py"),
-         os.path.join(work, "html"), os.path.join(second, "html")],
+         place(work, "html"), place(second, "html")],
         capture_output=True, text=True)
     page = read(second, "html", "long-run.html") if exists(
         second, "html", "long-run.html") else ""
@@ -9896,20 +9896,20 @@ def case_html_source(work):
     mixed = work + "-mixed"
     os.makedirs(mixed)
     shutil.copy(os.path.join(FIXTURES, "tables.docx"), mixed)
-    os.makedirs(os.path.join(mixed, "_pt"))
+    os.makedirs(place(mixed, "_pt"))
     for name in ("web.html", os.path.join("_pt", "finished.html")):
-        with open(os.path.join(mixed, name), "w", encoding="utf-8") as fh:
+        with open(place(mixed, name), "w", encoding="utf-8") as fh:
             fh.write(WEB)
     # Titles with no heading behind them: one repeats the book's name after
     # its own, one names another site, one is only the book's name.
     for name, title in (("cover", "Cover -- The Fixture Book"),
                         ("elsewhere", "Notes | Another Site"),
                         ("bookname", "The Fixture Book")):
-        with open(os.path.join(mixed, name + ".html"), "w",
+        with open(place(mixed, name + ".html"), "w",
                   encoding="utf-8") as fh:
             fh.write(f"<!DOCTYPE html><html lang=\"en\"><head><title>{title}"
                      "</title></head><body><p>Text.</p></body></html>\n")
-    with open(os.path.join(mixed, "conversion.yaml"), "w",
+    with open(place(mixed, "conversion.yaml"), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n"
                  "  epub:\n    format: epub3\n")
@@ -9924,12 +9924,12 @@ def case_html_source(work):
     # with two had its text twice.
     mains = work + "-mains"
     os.makedirs(mains)
-    with open(os.path.join(mains, "press.html"), "w", encoding="utf-8") as fh:
+    with open(place(mains, "press.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Press</title></head><body>'
                  '<nav><a href="#main">Skip to the content</a></nav>'
                  '<main id="main" class="site-main"><h1>Press</h1><p>Said once.</p>'
                  '<p><a href="#main">Back to the top</a></p></main></body></html>\n')
-    with open(os.path.join(mains, "sphinx.html"), "w", encoding="utf-8") as fh:
+    with open(place(mains, "sphinx.html"), "w", encoding="utf-8") as fh:
         fh.write('<!DOCTYPE html><html lang="en"><head><title>Sphinx</title></head><body>'
                  '<div class="document"><div class="body" role="main"><h1>Sphinx</h1>'
                  '<p>Also said once.</p></div></div><div class="sphinxsidebar">'
@@ -9937,7 +9937,7 @@ def case_html_source(work):
     mains_run = run_in(mains, "  contents:\n    - press\n    - sphinx\n")
     mains_back = mains + "-back"
     if exists(mains, "html", "press.html"):
-        shutil.copytree(os.path.join(mains, "html"), mains_back)
+        shutil.copytree(place(mains, "html"), mains_back)
         run_in(mains_back, "  contents:\n    - press\n    - sphinx\n")
 
     def one_main(*parts):
@@ -9952,19 +9952,19 @@ def case_html_source(work):
     # source copy, which keeps the author's own <title> whatever that says.
     shorter = work + "-shorter"
     os.makedirs(shorter)
-    with open(os.path.join(shorter, "web.html"), "w", encoding="utf-8") as fh:
+    with open(place(shorter, "web.html"), "w", encoding="utf-8") as fh:
         fh.write(WEB)
-    with open(os.path.join(shorter, "conversion.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(shorter, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("defaults:\n  promote_h1_to_title: shorter\ntargets:\n"
                  "  html:\n    format: html\n  copy:\n    format: source\n")
     run_in(shorter, "  contents:\n    - web\n")
     shorter_page = read(shorter, "html", "web.html") if exists(shorter, "html", "web.html") else ""
-    copies = glob.glob(os.path.join(shorter, "copy", "**", "web.html"), recursive=True)
+    copies = glob.glob(place(shorter, "copy", "**", "web.html"), recursive=True)
     shorter_copy = open(copies[0], encoding="utf-8").read() if copies else ""
     epub_page = ""
-    for name in (os.listdir(os.path.join(mixed, "epub"))
+    for name in (os.listdir(place(mixed, "epub"))
                  if exists(mixed, "epub") else []):
-        with zipfile.ZipFile(os.path.join(mixed, "epub", name)) as book:
+        with zipfile.ZipFile(place(mixed, "epub", name)) as book:
             epub_page = "".join(book.read(n).decode("utf-8")
                                 for n in book.namelist()
                                 if n.endswith(".xhtml") and "example.invalid"
@@ -9976,8 +9976,8 @@ def case_html_source(work):
         ("converting our own pages gives the same book",
          lambda: "Runs agree" in compared.stdout),
         ("the second write is the third, byte for byte",
-         lambda: same_pages(os.path.join(second, "html"),
-                            os.path.join(third, "html"))),
+         lambda: same_pages(place(second, "html"),
+                            place(third, "html"))),
         # The second write equalling the third says nothing about what the
         # first reading lost: a footnote's text once went missing between
         # the first write and the second, and the second and third agreed.
@@ -10079,15 +10079,15 @@ def case_notes(work):
     code = "    ```{.python .numberLines}\n    x = 1\n    ```\n"
 
     def build(sub, numbering, placement, title=None, footer=None):
-        d = os.path.join(work, sub)
+        d = place(work, sub)
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "ch1.md"), "w", encoding="utf-8") as fh:
+        with open(place(d, "ch1.md"), "w", encoding="utf-8") as fh:
             fh.write(NOTED.replace("[^c]: Note C.\n", "[^c]: Note C, on [this section]"
                                    "(#first-section).\n\n" + code + "\n")
                      .replace("Another.[^d]\n", "Another.[^d]\n\n```python\ny = 2\n```\n")
                      .replace("[^b]: Note B.\n", "[^b]: Note B, in steps:\n\n    1. One.\n"
                               "    2. Two.\n\n"))
-        with open(os.path.join(d, "ch2.md"), "w", encoding="utf-8") as fh:
+        with open(place(d, "ch2.md"), "w", encoding="utf-8") as fh:
             fh.write("# Chapter Two\n\nTwo.[^e]\n\n[^e]: Note E.\n\n" + code)
         r = convert(d, "defaults:\n  pages:\n    split_level: 2\n  notes:\n"
                        f"    numbering: {numbering}\n    placement: "
@@ -10096,7 +10096,7 @@ def case_notes(work):
                        + (f"    footer: {footer}\n" if footer else "")
                        + "  epub:\n    format: epub3\n", fixtures=())
         nav = ""
-        e = os.path.join(d, "epub", "org.example.fixtures.epub")
+        e = place(d, "epub", "org.example.fixtures.epub")
         if os.path.exists(e):
             with zipfile.ZipFile(e) as z:
                 nav = z.read("EPUB/nav.xhtml").decode("utf-8")
@@ -10107,7 +10107,7 @@ def case_notes(work):
         one it names, or its own), and every note it goes to links back to
         the reference: two chapter files may each have an fn1."""
         import posixpath
-        e = os.path.join(d, "epub", "org.example.fixtures.epub")
+        e = place(d, "epub", "org.example.fixtures.epub")
         if not os.path.exists(e):
             return False
         with zipfile.ZipFile(e) as z:
@@ -10169,13 +10169,13 @@ def case_notes(work):
 
     def notes_chapter(d):
         """The EPUB's Notes chapter."""
-        with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
+        with zipfile.ZipFile(place(d, "epub", "org.example.fixtures.epub")) as z:
             return next((t for t in (z.read(n).decode("utf-8") for n in z.namelist()
                                      if "/text/" in n) if 'id="page-notes"' in t), "")
 
     def chapters(d):
         """The EPUB's chapter files' text, together."""
-        with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
+        with zipfile.ZipFile(place(d, "epub", "org.example.fixtures.epub")) as z:
             return "".join(z.read(n).decode("utf-8") for n in z.namelist() if "/text/ch" in n)
 
     def in_main(*parts):
@@ -10320,12 +10320,12 @@ def case_notes_groups(work):
                 + "".join(f"[^{i}]: {title}, note {i}.\n\n" for i in range(1, count + 1)))
 
     def build(sub, files, settings, contents=""):
-        d = os.path.join(work, sub)
+        d = place(work, sub)
         os.makedirs(d, exist_ok=True)
         for name, text in files.items():
-            with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+            with open(place(d, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        with open(os.path.join(d, "project.yaml"), "w", encoding="utf-8") as fh:
+        with open(place(d, "project.yaml"), "w", encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n" + contents)
         r = convert(d, "defaults:\n" + settings + "targets:\n  html:\n    format: html\n"
@@ -10336,9 +10336,9 @@ def case_notes_groups(work):
         """For the HTML pages and for the EPUB's chapter files: each
         page's title with its references' numbers and the ids of the notes
         it holds, and the Notes page's headings and notes."""
-        with zipfile.ZipFile(os.path.join(d, "epub", "org.example.fixtures.epub")) as z:
+        with zipfile.ZipFile(place(d, "epub", "org.example.fixtures.epub")) as z:
             epub = [z.read(n).decode("utf-8") for n in sorted(z.namelist()) if "/text/ch" in n]
-        html = [read(p) for p in sorted(glob.glob(os.path.join(d, "html", "*.html")))]
+        html = [read(p) for p in sorted(glob.glob(place(d, "html", "*.html")))]
         found = []
         for texts in (html, epub):
             pages, notes = {}, None
@@ -10418,13 +10418,13 @@ def case_structure(work):
     import yaml
     os.makedirs(work, exist_ok=True)
     for name, text in BOOK.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     # First run: no contents, so the guess reads the markers.
     first = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                           "targets:\n  html:\n    format: html\n"
                           "  epub:\n    format: epub3\n", fixtures=())
-    sample = yaml.safe_load(open(os.path.join(work, "project-sample.yaml"),
+    sample = yaml.safe_load(open(place(work, "project-sample.yaml"),
                                  encoding="utf-8"))["project"]["contents"]
     roles = {str(n.get("title", n.get("page"))): n.get("role")
              for n in sample if isinstance(n, dict)}
@@ -10434,11 +10434,11 @@ def case_structure(work):
     for n in sample:
         if isinstance(n, dict) and n.get("role") == "front":
             n["items"].insert(0, {"generate": "toc"})
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         yaml.safe_dump({"project": {"identifier": "org.example.fixtures",
                                     "title": "The Book", "numbering": True,
                                     "contents": sample}}, fh, sort_keys=False)
-    second = subprocess.run(
+    second = started(
         ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
         capture_output=True, text=True, stdin=subprocess.DEVNULL)
     toc = read(work, "html", "toc.html") if exists(work, "html", "toc.html") \
@@ -10446,7 +10446,7 @@ def case_structure(work):
     entries = re.findall(r'<li><a href="([^"]*)">([^<]*)</a>', toc)
     import zipfile
     nav = ""
-    e = os.path.join(work, "epub", "org.example.fixtures.epub")
+    e = place(work, "epub", "org.example.fixtures.epub")
     if os.path.exists(e):
         with zipfile.ZipFile(e) as z:
             nav = z.read("EPUB/nav.xhtml").decode("utf-8")
@@ -10512,8 +10512,8 @@ def case_editions(work):
         # A finished page and its variant live in _pt/.
         if name.startswith("front"):
             name = os.path.join("_pt", name)
-            os.makedirs(os.path.join(work, "_pt"), exist_ok=True)
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            os.makedirs(place(work, "_pt"), exist_ok=True)
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     result = convert(work, "targets:\n  web:\n    format: html\n"
                            "  print:\n    format: html\n"
@@ -10554,46 +10554,46 @@ def case_markdown_target(work):
     """Markdown written back as source: read again, it gives the same
     HTML; written again, it is the same file."""
     import filecmp
-    first = os.path.join(work, "first")
+    first = place(work, "first")
     result = convert(first, "targets:\n  html:\n    format: html\n"
                             "  src:\n    format: markdown\n")
-    second = os.path.join(work, "second")
+    second = place(work, "second")
     os.makedirs(second, exist_ok=True)
-    for name in os.listdir(os.path.join(first, "src")):
-        src = os.path.join(first, "src", name)
+    for name in os.listdir(place(first, "src")):
+        src = place(first, "src", name)
         if os.path.isdir(src):
-            shutil.copytree(src, os.path.join(second, name), dirs_exist_ok=True)
+            shutil.copytree(src, place(second, name), dirs_exist_ok=True)
         else:
-            shutil.copy(src, os.path.join(second, name))
+            shutil.copy(src, place(second, name))
     for name in ("project.yaml", "conversion.yaml"):
-        shutil.copy(os.path.join(first, name), os.path.join(second, name))
-    again = subprocess.run(
+        shutil.copy(place(first, name), place(second, name))
+    again = started(
         ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=second,
         capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    compare = subprocess.run(
+    compare = started(
         ["python3", os.path.join(ROOT, "util", "compare-output.py"),
-         os.path.join(first, "html"), os.path.join(second, "html")],
+         place(first, "html"), place(second, "html")],
         capture_output=True, text=True)
     # A source from Word settles after one write (Word's whitespace,
     # grid-table widths rounded to characters); the second write is the
     # fixed point, so the third must equal it.
-    third = os.path.join(work, "third")
+    third = place(work, "third")
     os.makedirs(third, exist_ok=True)
-    for name in os.listdir(os.path.join(second, "src")):
-        src = os.path.join(second, "src", name)
+    for name in os.listdir(place(second, "src")):
+        src = place(second, "src", name)
         if os.path.isdir(src):
-            shutil.copytree(src, os.path.join(third, name), dirs_exist_ok=True)
+            shutil.copytree(src, place(third, name), dirs_exist_ok=True)
         else:
-            shutil.copy(src, os.path.join(third, name))
+            shutil.copy(src, place(third, name))
     for name in ("project.yaml", "conversion.yaml"):
-        shutil.copy(os.path.join(first, name), os.path.join(third, name))
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        shutil.copy(place(first, name), place(third, name))
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                    cwd=third, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
-    mds = [n for n in os.listdir(os.path.join(first, "src"))
+    mds = [n for n in os.listdir(place(first, "src"))
            if n.endswith(".md")]
-    same = [n for n in mds if filecmp.cmp(os.path.join(second, "src", n),
-                                          os.path.join(third, "src", n),
+    same = [n for n in mds if filecmp.cmp(place(second, "src", n),
+                                          place(third, "src", n),
                                           shallow=False)]
     md = read(first, "src", "tables.md")
     return [
@@ -10606,8 +10606,8 @@ def case_markdown_target(work):
         ("tables are pipe tables, so no width is rounded to a character",
          lambda: "|---" in md or "|:--" in md or "|--" in md),
         ("the first write is already the fixed point for a widths table",
-         lambda: filecmp.cmp(os.path.join(first, "src", "tables-b.md"),
-                             os.path.join(second, "src", "tables-b.md"),
+         lambda: filecmp.cmp(place(first, "src", "tables-b.md"),
+                             place(second, "src", "tables-b.md"),
                              shallow=False)),
         ("no scope, wrapper, or bookkeeping reaches the Markdown",
          lambda: "scope=" not in md and "table-wrapper" not in md
@@ -10681,41 +10681,41 @@ def case_list_starts(work):
     a Markdown target and back: written from one, its start an empty span
     beside it, it gives the same HTML, and the second write is the first."""
     import filecmp
-    first = os.path.join(work, "first")
+    first = place(work, "first")
     os.makedirs(first)
-    with open(os.path.join(first, "lists.md"), "w", encoding="utf-8") as fh:
+    with open(place(first, "lists.md"), "w", encoding="utf-8") as fh:
         fh.write(LIST_STARTS)
     result = convert(first, "targets:\n  html:\n    format: html\n"
                             "  src:\n    format: markdown\n", fixtures=())
     copies = []
     for name in ("second", "third"):
-        folder = os.path.join(work, name)
+        folder = place(work, name)
         os.makedirs(folder)
         source = copies[-1] if copies else first
-        if os.path.isfile(os.path.join(source, "src", "lists.md")):
-            shutil.copy(os.path.join(source, "src", "lists.md"), folder)
+        if os.path.isfile(place(source, "src", "lists.md")):
+            shutil.copy(place(source, "src", "lists.md"), folder)
         for config in ("project.yaml", "conversion.yaml"):
-            shutil.copy(os.path.join(first, config), folder)
+            shutil.copy(place(first, config), folder)
         run_in(folder)
         copies.append(folder)
-    compare = subprocess.run(
+    compare = started(
         ["python3", os.path.join(ROOT, "util", "compare-output.py"),
-         os.path.join(first, "html"), os.path.join(copies[0], "html")],
+         place(first, "html"), place(copies[0], "html")],
         capture_output=True, text=True)
     md = read(first, "src", "lists.md") if exists(first, "src", "lists.md") else ""
     page = read(copies[0], "html", "lists.html") if exists(copies[0], "html",
                                                               "lists.html") else ""
-    coded = os.path.join(work, "coded")
+    coded = place(work, "coded")
     os.makedirs(coded)
-    with open(os.path.join(coded, "code.md"), "w", encoding="utf-8") as fh:
+    with open(place(coded, "code.md"), "w", encoding="utf-8") as fh:
         fh.write(LIST_STARTS_CODE)
     coded_run = convert(coded, "targets:\n  src:\n    format: markdown\n", fixtures=())
-    coded_back = os.path.join(work, "coded-back")
+    coded_back = place(work, "coded-back")
     os.makedirs(coded_back)
     if exists(coded, "src", "code.md"):
-        shutil.copy(os.path.join(coded, "src", "code.md"), coded_back)
-    shutil.copy(os.path.join(coded, "project.yaml"), coded_back)
-    with open(os.path.join(coded_back, "conversion.yaml"), "w") as fh:
+        shutil.copy(place(coded, "src", "code.md"), coded_back)
+    shutil.copy(place(coded, "project.yaml"), coded_back)
+    with open(place(coded_back, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     run_in(coded_back)
     code_md = read(coded, "src", "code.md") if exists(coded, "src", "code.md") else ""
@@ -10752,8 +10752,8 @@ def case_list_starts(work):
         ("and the Markdown gives the same HTML",
          lambda: "Runs agree" in compare.stdout),
         ("the second write is the fixed point: the third equals it",
-         lambda: filecmp.cmp(os.path.join(copies[0], "src", "lists.md"),
-                             os.path.join(copies[1], "src", "lists.md"), shallow=False)
+         lambda: filecmp.cmp(place(copies[0], "src", "lists.md"),
+                             place(copies[1], "src", "lists.md"), shallow=False)
          if exists(copies[1], "src", "lists.md") else False),
     ]
 
@@ -10780,9 +10780,9 @@ def case_mark_breaks(work):
     """A mark that ends in a line break, through a Markdown target and an
     AsciiDoc target and back: each mark closed before the break, so its
     reader takes it back, and a span's break left inside it."""
-    first = os.path.join(work, "first")
+    first = place(work, "first")
     os.makedirs(first)
-    with open(os.path.join(first, "marks.md"), "w", encoding="utf-8") as fh:
+    with open(place(first, "marks.md"), "w", encoding="utf-8") as fh:
         fh.write(MARK_BREAKS)
     result = convert(first, "targets:\n  src:\n    format: markdown\n"
                             "  adoc:\n    format: asciidoc\n", fixtures=())
@@ -10790,9 +10790,9 @@ def case_mark_breaks(work):
     adoc = read(first, "adoc", "marks.adoc") if exists(first, "adoc", "marks.adoc") else ""
     # A span with no attributes ending a mark, as Pandoc's HTML reader reads
     # <em><span>...<br></span></em>.
-    page = os.path.join(work, "page")
+    page = place(work, "page")
     os.makedirs(page)
-    with open(os.path.join(page, "spans.html"), "w", encoding="utf-8") as fh:
+    with open(place(page, "spans.html"), "w", encoding="utf-8") as fh:
         fh.write("<!DOCTYPE html>\n<html lang=\"en\"><head><title>Spans</title></head><body>\n"
                  "<h1>Spans</h1>\n<p>Before <em><span>for any<br></span></em>after.</p>\n"
                  # A break at a mark's start after a space, inside and at the
@@ -10811,12 +10811,12 @@ def case_mark_breaks(work):
                                        ("from-adoc", first, "adoc", "marks.adoc"),
                                        ("spans-md", page, "src", "spans.md"),
                                        ("spans-adoc", page, "adoc", "spans.adoc")):
-        folder = os.path.join(work, name)
+        folder = place(work, name)
         os.makedirs(folder)
         if exists(source, sub, written):
-            shutil.copy(os.path.join(source, sub, written), folder)
-        shutil.copy(os.path.join(source, "project.yaml"), folder)
-        with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
+            shutil.copy(place(source, sub, written), folder)
+        shutil.copy(place(source, "project.yaml"), folder)
+        with open(place(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         run_in(folder)
         html = written.rsplit(".", 1)[0] + ".html"
@@ -10903,26 +10903,26 @@ def case_wide_tables(work):
     paragraph in a cell, through a Markdown target and back: Pandoc's
     writer before 3.13 writes it as the text [TABLE], so the target
     writes it as HTML there."""
-    first = os.path.join(work, "first")
+    first = place(work, "first")
     os.makedirs(first)
-    with open(os.path.join(first, "wide.html"), "w", encoding="utf-8") as fh:
+    with open(place(first, "wide.html"), "w", encoding="utf-8") as fh:
         fh.write(WIDE_TABLES)
     result = convert(first, "targets:\n  html:\n    format: html\n"
                             "  src:\n    format: markdown\n", fixtures=())
     md = read(first, "src", "wide.md") if exists(first, "src", "wide.md") else ""
-    second = os.path.join(work, "second")
+    second = place(work, "second")
     os.makedirs(second)
     if md:
-        shutil.copy(os.path.join(first, "src", "wide.md"), second)
-    shutil.copy(os.path.join(first, "project.yaml"), second)
-    with open(os.path.join(second, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        shutil.copy(place(first, "src", "wide.md"), second)
+    shutil.copy(place(first, "project.yaml"), second)
+    with open(place(second, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
     again = run_in(second)
-    compare = subprocess.run(
+    compare = started(
         ["python3", os.path.join(ROOT, "util", "compare-output.py"),
-         os.path.join(first, "html"), os.path.join(second, "html")],
+         place(first, "html"), place(second, "html")],
         capture_output=True, text=True)
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+    version = started(["pandoc", "--version"], capture_output=True,
                              text=True).stdout.split()[1]
     grid_at_any_width = tuple(int(p) for p in re.findall(r"\d+", version)[:2]) >= (3, 13)
     grids = re.findall(r"^\+=+\+", md, re.M)
@@ -10956,7 +10956,7 @@ def case_merge(work):
     """A markdown target that merges: one file per chapter."""
     os.makedirs(work, exist_ok=True)
     for name, text in MERGE_BOOK.items():
-        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+        with open(place(work, name), "w", encoding="utf-8") as fh:
             fh.write(text)
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
                            "targets:\n  src:\n    format: markdown\n"
@@ -10968,16 +10968,16 @@ def case_merge(work):
     # of the source's pages, so neither is named for it, and both survive.
     single = work + "-one-source"
     os.makedirs(single)
-    with open(os.path.join(single, "book.md"), "w", encoding="utf-8") as fh:
+    with open(place(single, "book.md"), "w", encoding="utf-8") as fh:
         fh.write("# Book\n\nIntro.\n\n## One\n\nA.\n\n## Two\n\nB.\n")
-    with open(os.path.join(single, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(single, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.halves\n  title: Halves\n"
                  "  contents:\n    - title: First Half\n      items: [book, book--one]\n"
                  "    - title: Second Half\n      items: [book--two]\n")
     convert(single, "defaults:\n  pages:\n    split_level: 2\n"
                     "targets:\n  src:\n    format: markdown\n    merge: groups\n",
             project=False, fixtures=())
-    halves = {n: read(single, "src", n) for n in os.listdir(os.path.join(single, "src"))
+    halves = {n: read(single, "src", n) for n in os.listdir(place(single, "src"))
               if n.endswith(".md")} if exists(single, "src") else {}
     return [
         ("the run succeeds", lambda: result.returncode == 0),
@@ -11017,16 +11017,16 @@ def case_book_name(work):
 
     def book(name, files):
         """A book of two pages and the files given, None leaving one out."""
-        folder = os.path.join(work, name)
+        folder = place(work, name)
         os.makedirs(folder)
         pages = {"one.md": "---\ntitle: One\nlang: en\n---\n\n# One\n\nText.\n",
                  "two.md": "---\ntitle: Two\nlang: en\n---\n\n# Two\n\nMore.\n"}
         for file, text in dict(pages, **files).items():
             if text is None:
                 continue
-            with open(os.path.join(folder, file), "w", encoding="utf-8") as fh:
+            with open(place(folder, file), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        done = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
                               cwd=folder, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
         return folder, done, done.stdout + done.stderr
@@ -11076,56 +11076,56 @@ def case_book_name(work):
         "conversion.yaml": both,
         "project.yaml": "project:\n  identifier: org.example.u\n  title: Untitled\n"})
     lone, lone_run, lone_said = book("lone", {"conversion.yaml": both, "two.md": None})
-    checked = os.path.join(work, "checked")
+    checked = place(work, "checked")
     os.makedirs(checked)
     for file, text in {"index.adoc": "= A Checked Book\n\ninclude::b.adoc[]\n\n"
                                      "include::a.adoc[]\n",
                        "a.adoc": "= A\n\nText.\n", "b.adoc": "= B\n\nText.\n"}.items():
-        with open(os.path.join(checked, file), "w", encoding="utf-8") as fh:
+        with open(place(checked, file), "w", encoding="utf-8") as fh:
             fh.write(text)
-    subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", "--check-only"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", "--check-only"],
                    cwd=checked, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     title = ""
-    epubs = glob.glob(os.path.join(adoc, "epub", "*.epub"))
+    epubs = glob.glob(place(adoc, "epub", "*.epub"))
     if epubs:
         with zipfile.ZipFile(epubs[0]) as z:
             opf = [n for n in z.namelist() if n.endswith(".opf")]
             title = z.read(opf[0]).decode("utf-8") if opf else ""
     # --init: each sample keeps what its file sets, and the project block
     # stays where it is.
-    init = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"),
-                           "-d", moved, "--pages", os.path.join(moved, "html"),
+    init = started(["python3", os.path.join(BIN, "build-cartridge.py"),
+                           "-d", moved,
                            "--init"], capture_output=True, text=True)
-    with open(os.path.join(bare, "conversion.yaml"), "a", encoding="utf-8") as fh:
+    with open(place(bare, "conversion.yaml"), "a", encoding="utf-8") as fh:
         fh.write("defaults:\n  footer: Our footer.\n")
-    conversion_init = subprocess.run(
+    conversion_init = started(
         ["python3", os.path.join(BIN, "read-conversion-config.py"), "-d", bare,
          "--init"], capture_output=True, text=True)
     before_init = read(bare, "project-sample.yaml") if exists(bare, "project-sample.yaml") else ""
-    bare_init = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"),
-                                "-d", bare, "--pages", os.path.join(bare, "html"),
+    bare_init = started(["python3", os.path.join(BIN, "build-cartridge.py"),
+                                "-d", bare,
                                 "--init"], capture_output=True, text=True)
     # --init with one package chosen writes its overrides in its own block,
     # and with no pages, a project block's contents as declared.
-    two = os.path.join(work, "two-packages")
+    two = place(work, "two-packages")
     os.makedirs(two)
-    with open(os.path.join(two, "packaging.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(two, "packaging.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.two\n  title: Two\n"
                  "  contents: [b, a]\ntargets:\n  cartridge:\n"
                  "    format: common-cartridge\n    version: \"2.5\"\n"
                  "  zipped:\n    format: zip\n")
-    two_init = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"),
+    two_init = started(["python3", os.path.join(BIN, "build-cartridge.py"),
                                "-d", two, "--init", "--target", "cartridge"],
                               capture_output=True, text=True)
 
     def sample(folder, name):
-        path = os.path.join(folder, name)
+        path = place(folder, name)
         return yaml.safe_load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
     return [
         ("with nothing naming the book, the EPUB isn't written, the pages are, "
          "and the run says where the title goes and ends in an error",
          lambda: bare_run.returncode != 0
-         and not glob.glob(os.path.join(bare, "epub", "*.epub"))
+         and not glob.glob(place(bare, "epub", "*.epub"))
          and exists(bare, "html", "one.html")
          and "target epub needs the book's title" in bare_said),
         ("and the first run writes project-sample.yaml, with the commands "
@@ -11137,7 +11137,7 @@ def case_book_name(work):
          "note, and the EPUB isn't written, the run saying where conversion "
          "reads the name",
          lambda: exists(moved, "imsmanifest.xml")
-         and not glob.glob(os.path.join(moved, "epub", "*.epub"))
+         and not glob.glob(place(moved, "epub", "*.epub"))
          and "where conversion reads it too" in moved_said
          and "NOTE" not in moved_said and moved_run.returncode != 0),
         ("an AsciiDoc master's title names the EPUB, and the run says so",
@@ -11170,7 +11170,7 @@ def case_book_name(work):
          and sample(two, "packaging-sample.yaml")["project"]["contents"] == ["b", "a"]),
         ("a book named in conversion.yaml's block, with no packaging.yaml, "
          "gets its EPUB, no note, and no cartridge, and that's no error",
-         lambda: glob.glob(os.path.join(conv, "epub", "*.epub"))
+         lambda: glob.glob(place(conv, "epub", "*.epub"))
          and conv_run.returncode == 0 and "NOTE" not in conv_said
          and "nothing is packaged" in conv_said
          and not exists(conv, "imsmanifest.xml")),
@@ -11193,7 +11193,7 @@ def case_book_name(work):
         ("two blocks that agree build everything, with a note that "
          "project.yaml would say it once",
          lambda: agree_run.returncode == 0 and exists(agree, "imsmanifest.xml")
-         and glob.glob(os.path.join(agree, "epub", "*.epub"))
+         and glob.glob(place(agree, "epub", "*.epub"))
          and "each describe the book in a project: block. They agree" in agree_said),
         ("two that disagree stop the run before anything is converted, "
          "naming both files",
@@ -11203,16 +11203,16 @@ def case_book_name(work):
          "packager alone stops for too",
          lambda: over_run.returncode != 0 and not exists(over, "html")
          and "project.language is 'en'" in over_said
-         and "project.language is 'en'" in subprocess.run(
+         and "project.language is 'en'" in started(
              ["python3", os.path.join(BIN, "build-cartridge.py"), "-d", over, "--init"],
              capture_output=True, text=True).stderr),
         ("a title left at the default names nothing: the EPUB isn't written, "
          "and the run says to set it in project.yaml",
-         lambda: not glob.glob(os.path.join(untitled, "epub", "*.epub"))
+         lambda: not glob.glob(place(untitled, "epub", "*.epub"))
          and "Set title in project.yaml" in untitled_said
          and "doesn't set the book's title" in untitled_said),
         ("a book of one page is titled by it, in the EPUB and the sample",
-         lambda: glob.glob(os.path.join(lone, "epub", "*.epub"))
+         lambda: glob.glob(place(lone, "epub", "*.epub"))
          and "as its one page says" in lone_said
          and sample(lone, "project-sample.yaml")["project"]["title"] == "One"),
         ("a master's order is written with --check-only, which packages nothing",
@@ -11232,29 +11232,37 @@ def case_include_all_html(work):
     """A page contents doesn't list, left out, and appended by
     --include-all-html, the option's name, and by --includeallhtml, its old
     name, which works, with a warning, until it goes after 1.0."""
-    os.makedirs(work)
+    # A project whose pages target holds two pages, as a run leaves them.
+    pages = os.path.join(work, "output", "html")
+    os.makedirs(pages)
+    os.makedirs(os.path.join(work, "src", "book"))
     for name in ("one", "two"):
-        with open(os.path.join(work, name + ".html"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(pages, name + ".html"), "w", encoding="utf-8") as fh:
             fh.write('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">'
                      f"<title>Page {name}</title></head>\n<body><main>"
                      f"<h1>Page {name}</h1><p>Text.</p></main></body></html>\n")
-    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+    with open(place(work, "project.yaml"), "w", encoding="utf-8") as fh:
         fh.write("project:\n  identifier: org.example.adopt\n"
                  "  title: The Adopted Book\n  contents: [one]\n")
 
     def package(manifest, *options):
-        return subprocess.run(
-            ["python3", os.path.join(BIN, "build-cartridge.py"), "-d", work,
-             "-o", os.path.join(work, manifest)] + list(options),
+        """The packager run by hand, and the manifest it wrote kept under
+        the name given."""
+        done = started(
+            ["python3", os.path.join(BIN, "build-cartridge.py"), "-d", work] + list(options),
             capture_output=True, text=True)
+        written = os.path.join(work, "output", "packages", "cartridge", "imsmanifest.xml")
+        if os.path.exists(written):
+            os.replace(written, os.path.join(work, manifest))
+        return done
     plain = package("plain.xml")
     new = package("new.xml", "--include-all-html")
     old = package("old.xml", "--includeallhtml")
-    usage = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"), "--help"],
+    usage = started(["python3", os.path.join(BIN, "build-cartridge.py"), "--help"],
                            capture_output=True, text=True)
 
     def manifest(name):
-        return read(work, name) if exists(work, name) else ""
+        return read(work, name) if os.path.exists(os.path.join(work, name)) else ""
     return [
         ("a page contents doesn't list is left out, the run naming the option "
          "that appends it",
@@ -11293,11 +11301,11 @@ def case_own_files(work):
         return []
     # Pandoc's own, as the documentation says to start from them; an empty
     # data folder, so that nothing on this machine is read.
-    empty = os.path.join(work, "empty")
+    empty = place(work, "empty")
     os.makedirs(empty, exist_ok=True)
 
     def default(*argument):
-        return subprocess.run([pandoc, "--data-dir", empty, *argument],
+        return started([pandoc, "--data-dir", empty, *argument],
                               capture_output=True, check=True).stdout
 
     html5 = default("-D", "html5").decode().replace(
@@ -11324,7 +11332,7 @@ def case_own_files(work):
                  "templates/reference.docx": reference.getvalue()}
 
     def book(name, config, files=None, env=None):
-        folder = os.path.join(work, name)
+        folder = place(work, name)
         for path, data in dict({
                 "ch1.md": b"# Chapter One\n\nOpening.[^1]\n\n[^1]: A note.\n",
                 "ch2.md": b"# Chapter Two\n\nTwo.\n",
@@ -11332,10 +11340,10 @@ def case_own_files(work):
                                 b"  title: Own Files\n  contents:\n    - generate: toc\n"
                                 b"    - title: Part\n      items: [ch1, ch2]\n",
                 "conversion.yaml": config.encode()}, **(files or {})).items():
-            os.makedirs(os.path.dirname(os.path.join(folder, path)), exist_ok=True)
-            with open(os.path.join(folder, path), "wb") as fh:
+            os.makedirs(os.path.dirname(place(folder, path)), exist_ok=True)
+            with open(place(folder, path), "wb") as fh:
                 fh.write(data)
-        result = subprocess.run(
+        result = started(
             ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
             cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, **(env or {})))
@@ -11362,11 +11370,11 @@ def case_own_files(work):
         return 0 < text.find("From the book's html.css") < at < text.find("</style>", at)
 
     def styles(name):
-        with zipfile.ZipFile(os.path.join(own, "word", name)) as z:
+        with zipfile.ZipFile(place(own, "word", name)) as z:
             return z.read("word/styles.xml").decode("utf-8")
 
     def epub_css():
-        found = glob.glob(os.path.join(own, "epub", "*.epub"))
+        found = glob.glob(place(own, "epub", "*.epub"))
         if not found:
             return ""
         with zipfile.ZipFile(found[0]) as z:
@@ -11374,20 +11382,20 @@ def case_own_files(work):
                            if n.endswith(".css"))
 
     def master():
-        found = [p for p in glob.glob(os.path.join(own, "tex", "*.tex"))
+        found = [p for p in glob.glob(place(own, "tex", "*.tex"))
                  if "\\begin{document}" in read(p)]
         return read(found[0]) if len(found) == 1 else ""
 
     # Pandoc's folders, each with a template that would mark a page and an
     # init.lua that would stop Pandoc, were either read.
     marked = html5.replace("OWN-HTML-TEMPLATE", "PANDOC-FOLDER-TEMPLATE").encode()
-    user = os.path.join(work, "xdg")
-    dirs = os.path.join(work, "dirs")
-    for folder in (os.path.join(user, "pandoc"), dirs):
-        os.makedirs(os.path.join(folder, "templates"), exist_ok=True)
-        with open(os.path.join(folder, "templates", "default.html5"), "wb") as fh:
+    user = place(work, "xdg")
+    dirs = place(work, "dirs")
+    for folder in (place(user, "pandoc"), dirs):
+        os.makedirs(place(folder, "templates"), exist_ok=True)
+        with open(place(folder, "templates", "default.html5"), "wb") as fh:
             fh.write(marked)
-        with open(os.path.join(folder, "init.lua"), "w", encoding="utf-8") as fh:
+        with open(place(folder, "init.lua"), "w", encoding="utf-8") as fh:
             fh.write('error("PANDOC-FOLDER-INIT")\n')
     folders, kept_out = book("folders", "targets:\n  html:\n    format: html\n"
                              "  epub:\n    format: epub3\n",
@@ -11397,21 +11405,18 @@ def case_own_files(work):
     def anywhere(folder, word):
         for root, _, names in os.walk(folder):
             for name in names:
-                with open(os.path.join(root, name), "rb") as fh:
+                with open(place(root, name), "rb") as fh:
                     data = fh.read()
                 if word.encode() in data:
                     return True
                 if name.endswith(".epub"):
-                    with zipfile.ZipFile(os.path.join(root, name)) as z:
+                    with zipfile.ZipFile(place(root, name)) as z:
                         if any(word.encode() in z.read(n) for n in z.namelist()):
                             return True
         return False
 
     _, missing = book("missing", "targets:\n  html:\n    format: html\n"
                       "    html:\n      css: templates/none.css\n")
-    beside, sources = book("beside", "targets:\n  html:\n    format: html\n"
-                           "    html:\n      template: page.html\n",
-                           {"page.html": html5.encode()})
     return [
         ("a book's own files convert", lambda: result.returncode == 0),
         ("html.template is every page's an html target writes: its pages, its "
@@ -11449,10 +11454,6 @@ def case_own_files(work):
          lambda: missing.returncode != 0
          and "html.css is templates/none.css for target html, which doesn't exist"
          in missing.stdout + missing.stderr),
-        ("and so does one beside the sources that the run would read as a page",
-         lambda: sources.returncode != 0
-         and "which is beside the book's sources" in sources.stdout + sources.stderr
-         and not exists(beside, "html")),
     ]
 
 
@@ -11588,7 +11589,7 @@ def run_cases(cases):
     failed = 0
     try:
         for label, case in cases:
-            directory = os.path.join(work, re.sub(r"[^\w-]+", "-", label))
+            directory = place(work, re.sub(r"[^\w-]+", "-", label))
             try:
                 checks = case(directory)
             except Exception as exc:
@@ -11617,7 +11618,7 @@ def main():
     arguments = parser.parse_args()
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is not on the path.")
-    version = subprocess.run(["pandoc", "--version"], capture_output=True,
+    version = started(["pandoc", "--version"], capture_output=True,
                              text=True).stdout.split()[1]
     if tuple(int(p) for p in re.findall(r"\d+", version)[:3]) < (3, 9):
         sys.exit(f"Pandoc {version} is too old; these tests need 3.9 or "

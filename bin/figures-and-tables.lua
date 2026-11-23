@@ -933,6 +933,12 @@ end
 
 local exact_alts = nil
 local shared_stems = {}
+local REFERENCE_FOLDERS = {}
+for folder in (os.getenv('REFERENCE_FOLDERS') or ''):gmatch(
+    package.config:sub(1, 1) == '\\' and '[^;]+' or '[^:]+') do
+  REFERENCE_FOLDERS[#REFERENCE_FOLDERS + 1] = folder
+end
+if #REFERENCE_FOLDERS == 0 then REFERENCE_FOLDERS = { '.' } end
 
 -- Whether another file in src's directory has the same name but for its
 -- extension, which makes the extension-less match ambiguous.
@@ -941,11 +947,22 @@ local function stem_is_shared(src)
   local counts = shared_stems[dir]
   if counts == nil then
     counts = {}
-    local ok, files = pcall(pandoc.system.list_directory, dir)
-    if ok then
-      for _, file in ipairs(files) do
-        local stem = media_stem(file)
-        counts[stem] = (counts[stem] or 0) + 1
+    -- In each folder a page's files are read from (REFERENCE_FOLDERS, the
+    -- run's; the folder the filter runs in without it): in a project the
+    -- sources aren't that folder, and a file is counted once whichever
+    -- holds it.
+    local seen = {}
+    for _, root in ipairs(REFERENCE_FOLDERS) do
+      local ok, files = pcall(pandoc.system.list_directory,
+                              root == '.' and dir or (root .. '/' .. dir))
+      if ok then
+        for _, file in ipairs(files) do
+          if not seen[file] then
+            seen[file] = true
+            local stem = media_stem(file)
+            counts[stem] = (counts[stem] or 0) + 1
+          end
+        end
       end
     end
     shared_stems[dir] = counts

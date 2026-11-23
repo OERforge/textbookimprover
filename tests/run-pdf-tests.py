@@ -809,97 +809,11 @@ def write_book(work):
 # a book's folder, a project
 # --------------------------------------------------------------------------
 # A build writes its book into a folder file by file, and the folder is
-# laid out as a project (laidout.settle) when a tool is first run in it.
+# laid out as a project (laidout.settle) when a tool is first run in it:
+# started() is subprocess.run with that done first, and place() answers
+# where a file is, before the laying out and after.
 
-SETTINGS = ("project.yaml", "conversion.yaml", "packaging.yaml", "pdf-layout.yaml")
-REPORTS = ("output-check.csv", "fidelity.csv", "-sample.yaml", "-sample.csv", "-new.csv")
-TOOLS = ("convert.py", "build-pdf.py")
-
-
-def named_at_top(folder):
-    """The files and folders at a book's top that its conversion.yaml
-    names as a setting's value (a metadata file, a template's folder),
-    which stay there when the folder is laid out."""
-    path = os.path.join(folder, "conversion.yaml")
-    if not os.path.isfile(path):
-        return ()
-    import yaml
-    with open(path, encoding="utf-8") as fh:
-        try:
-            settings = yaml.safe_load(fh)
-        except yaml.YAMLError:
-            return ()
-    found = set()
-
-    def leaves(node):
-        if isinstance(node, dict):
-            for value in node.values():
-                leaves(value)
-        elif isinstance(node, list):
-            for value in node:
-                leaves(value)
-        elif isinstance(node, str) and node and not os.path.isabs(node):
-            first = node.replace("\\", "/").split("/")[0]
-            if first not in ("", ".", "..") and os.path.lexists(os.path.join(folder, first)):
-                found.add(first)
-    leaves(settings)
-    return tuple(sorted(found))
-
-
-def settled(folder):
-    """The folder, laid out as a project if it holds a book that isn't."""
-    if folder and os.path.isdir(folder) and not laidout.projectpaths.is_tree(folder) \
-            and any(os.path.isfile(os.path.join(folder, n)) for n in SETTINGS[:2]):
-        laidout.settle(folder, top=named_at_top(folder))
-    return folder
-
-
-def started(arguments, cwd=None, **options):
-    """subprocess.run, a book's folder laid out first where the program
-    is one of the tools: the folder it's run in, and one -d names."""
-    if any(os.path.basename(str(a)) in TOOLS for a in arguments if len(str(a)) < 400):
-        settled(cwd)
-        for at, argument in enumerate(arguments[:-1]):
-            if argument == "-d":
-                settled(arguments[at + 1])
-    return subprocess.run(arguments, cwd=cwd, **options)
-
-
-def targets(folder):
-    """The names of a project's targets, as its conversion.yaml has them."""
-    import yaml
-    path = os.path.join(folder, "conversion.yaml")
-    if not os.path.isfile(path):
-        return {"html"}
-    with open(path, encoding="utf-8") as fh:
-        try:
-            settings = yaml.safe_load(fh) or {}
-        except yaml.YAMLError:
-            return set()
-    return set((settings.get("targets") or {"html": None}))
-
-
-def place(folder, *names):
-    """Where a project keeps a file: its settings and a file a setting
-    names at its top, a report with its part's, a target's file in the
-    target's folder, and anything else among the part's sources. In a
-    folder that isn't laid out yet, or isn't a book's, the names joined
-    to it."""
-    if not laidout.projectpaths.is_tree(folder):
-        return os.path.join(folder, *names)
-    paths = laidout.projectpaths.of(folder)
-    first = names[0]
-    if first in SETTINGS or os.path.lexists(os.path.join(folder, first)) \
-            and first not in ("src", "sidecars", "output"):
-        return paths.top(*names)
-    if len(names) == 1 and first.endswith(REPORTS):
-        return os.path.join(folder, "output", "reports", "book", first)
-    if first in targets(folder) or os.path.isdir(os.path.join(folder, "output", first)) \
-            and first not in ("work", "reports", "packages"):
-        return os.path.join(folder, "output", first, *names[1:])
-    if len(names) == 1 and first.endswith(".csv"):
-        return paths.sidecar(first)
-    return paths.source(*names)
+started, place = laidout.started, laidout.place
 
 
 def beside(folder, name):

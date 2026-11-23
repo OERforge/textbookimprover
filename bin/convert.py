@@ -3772,6 +3772,10 @@ def filter_env(target, base, paths, env, reads=None):
                                          else ""),
         "TABLE_CAPTIONS": reads["table_captions"],
         "IMAGE_ALT": reads["image_alt"],
+        # Where a file a page names is: the filter lists an image's folder
+        # there, to know whether another file shares the image's stem.
+        "REFERENCE_FOLDERS": os.pathsep.join(
+            os.path.abspath(folder) for folder in P(base).reference_folders()),
         "IMAGE_ALT_NAME": paths["image_alt"],
         "BARE_LINKS": reads["bare_links"],
         "TABLE_HEADERS": paths["table_headers"],

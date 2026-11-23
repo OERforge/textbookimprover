@@ -818,6 +818,16 @@ def resolve(schema, project_schema, documents, target=None,
             if not child.default_from_target or settings.get(name) == target:
                 continue
             value = str(settings.get(name))
+            if value in (".", "./") and _laid_out(target_source or where):
+                # A project laid out with src/ has no such place: the
+                # folder it would name is output/ itself, which holds every
+                # target and the run's own files.
+                problems.append(
+                    f"{what} has {name}: {value!r}. In a project laid out with "
+                    "src/, each target is written to a folder of its own under "
+                    f"output/: take the setting out, or give it a name ({target}, "
+                    "say).")
+                continue
             if value in (".", "./"):
                 # Today's books write a target beside their sources this
                 # way, and the next release's layout can't: said now, and
@@ -944,6 +954,17 @@ def suggest_name(text):
     if not name or name in RESERVED_NAMES or name in DEVICE_NAMES:
         return ""
     return name
+
+
+def _laid_out(where):
+    """Whether the settings file named is a project's laid out with src/:
+    its folder holds a src/ of folders and no file."""
+    import projectpaths
+    path = str(where).split(":", 1)[0] if os.path.exists(str(where).split(":", 1)[0]) \
+        else str(where)
+    if not os.path.isfile(path):
+        return False
+    return projectpaths.is_tree(os.path.dirname(os.path.abspath(path)))
 
 
 def name_problem(name, what):
