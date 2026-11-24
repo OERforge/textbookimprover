@@ -1294,6 +1294,24 @@ def check_buildrecord():
     os.symlink(os.path.join(work, "planted.json"),
                os.path.join(project, *buildrecord.PACKAGES, "planted.json"))
     packages = buildrecord._packages(project)
+    # The software digest: the same whatever the moment, the paths, and
+    # the outputs, and another for another package's version or face.
+    software = {"run": {"moment": "1"}, "textbookimprover": {"version": "0.11.dev", "digest": "d",
+                                                         "commit": "a"},
+            "packages": {"PyYAML": "6.0.3"}, "tools": {"pandoc": "pandoc 3.14"},
+            "outputs": {"output/a": "1"},
+            "latex": {"pdf": {"engine": "lualatex", "latex": "2026-11-01",
+                              "packages": {"amsmath": "1"},
+                              "other files read": {"/etc/x": "2"},
+                              "fonts": {"F": {"package": "plex", "revision": "3",
+                                              "file": "texmf-dist/f.otf"}}}}}
+    moved = dict(software, run={"moment": "2"}, outputs={"output/b": "9"},
+                 textbookimprover=dict(software["textbookimprover"], commit="b"),
+                 latex={"pdf": dict(software["latex"]["pdf"], **{"other files read": {}})})
+    newer = dict(software, packages={"PyYAML": "6.0.4"})
+    face = dict(software, latex={"pdf": dict(software["latex"]["pdf"], fonts={
+        "F": {"package": "plex", "revision": "4"}})})
+    digests = [buildrecord.software_digest(m) for m in (software, moved, newer, face)]
     with open(target, encoding="utf-8") as fh:
         written = fh.read()
     return [
@@ -1308,6 +1326,10 @@ def check_buildrecord():
          and buildrecord._read_small(long_one) is None
          and buildrecord._read_small(secret) == '{"part": "x"}'
          or fail("read")),
+        ("the software digest isn't moved by the moment, a commit, the files read, or the "
+         "outputs, and is by a package's version or a face's",
+         lambda: digests[0] == digests[1] and len(set(digests)) == 3
+         or fail(repr(digests))),
         ("a package's piece is read where its stamp is there, every value a string, and not "
          "through a link",
          lambda: packages == {"cartridge": {"zip": "no"}} or fail(repr(packages))),

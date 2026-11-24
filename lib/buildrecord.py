@@ -36,7 +36,8 @@ and the outline --toc read, by its path and SHA-256, which
 build-cartridge.py leaves beside the package's stamp (write_package).
 
 And the versions of the checkers the output check ran, which change the
-reports and not the outputs.
+reports and not the outputs; and a digest of the software alone, to
+compare two runs by (software_digest).
 
 Not in it yet, of what the archive plan's record holds: a deck's PDF's
 and a drawing's LaTeX.
@@ -424,7 +425,7 @@ def values(base, argv, moment, moment_from, status, checks="full"):
     if os.environ.get("TZ"):
         environment["TZ"] = os.environ["TZ"]
     parts = _fragments(base)
-    return _strings({
+    made = _strings({
         "record": FORMAT,
         "run": {
             "moment": moment,
@@ -452,6 +453,35 @@ def values(base, argv, moment, moment_from, status, checks="full"):
         "stamps": _stamps(base),
         "outputs": _outputs(base),
     })
+    made["software digest"] = software_digest(made)
+    return made
+
+
+def software_digest(made):
+    """One number for the software a run used, to compare two runs by:
+    the SHA-256 of TextbookImprover's version and files' digest, Python,
+    its packages and the HTML parser, the programs' versions, Pandoc's
+    data folders, and each LaTeX build's engine, release, packages, and
+    faces (by package and revision, or a file's SHA-256), with no
+    moment, path, or output in it. Two runs with the same inputs, moment,
+    command line, and software digest should give the same outputs."""
+    import hashlib
+    latex = {}
+    for build, said in (made.get("latex") or {}).items():
+        if not isinstance(said, dict):
+            continue
+        fonts = said.get("fonts") if isinstance(said.get("fonts"), dict) else {}
+        latex[build] = {
+            "engine": said.get("engine"), "latex": said.get("latex"),
+            "packages": said.get("packages"),
+            "fonts": {name: [place.get("package"), place.get("revision"), place.get("sha256")]
+                      for name, place in fonts.items() if isinstance(place, dict)}}
+    me = made.get("textbookimprover") or {}
+    part = {"textbookimprover": [me.get("version"), me.get("digest")],
+            "python": made.get("python"), "packages": made.get("packages"),
+            "html parser": made.get("html parser"), "tools": made.get("tools"),
+            "pandoc data": made.get("pandoc data"), "latex": latex}
+    return hashlib.sha256(json.dumps(part, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def write(base, argv, moment, moment_from, status, checks="full"):
