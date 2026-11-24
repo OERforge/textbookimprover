@@ -1317,6 +1317,55 @@ def check_buildrecord():
     ]
 
 
+def check_record_checkers():
+    """lib/buildrecord.py's checkers: none asked after --quick; each
+    validator's version by what its --version says, a missing one said
+    to be, the Java's notice passed over; and with --wcag, axe-core's
+    version, Ace's, and whether veraPDF's WCAG modules were named."""
+    import axecheck
+    import buildrecord
+    import fakeace
+    import fakeverapdf
+    work = scratch("checkers-")
+    tools = os.path.join(work, "tools")
+    os.makedirs(tools)
+    epubcheck = os.path.join(tools, "epubcheck")
+    with open(epubcheck, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho 'Picked up JAVA_TOOL_OPTIONS: -Xmx1g'\n"
+                 "echo 'EPUBCheck v5.2.1'\n")
+    os.chmod(epubcheck, 0o755)
+    verapdf = fakeverapdf.install(os.path.join(work, "verapdf"))
+    ace = fakeace.install(os.path.join(work, "ace"))
+    names = ("PATH", "VERAPDF", "ACE", "EPUBCHECK_JAR", "VNU_JAR", "VERAPDF_WCAG")
+    saved = {n: os.environ.get(n) for n in names}
+    try:
+        for n in names[3:]:
+            os.environ.pop(n, None)
+        os.environ.update(PATH=tools + os.pathsep + "/usr/bin" + os.pathsep + "/bin",
+                          VERAPDF=verapdf, ACE=ace)
+        quick = buildrecord._checkers("quick")
+        full = buildrecord._checkers("full")
+        wcag = buildrecord._checkers("wcag")
+    finally:
+        for n, v in saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+    return [
+        ("after --quick, no checker is asked",
+         lambda: quick == {"validators": "not run (--quick)"} or fail(repr(quick))),
+        ("each validator by what its --version says, Java's notice passed over, a missing one "
+         "said to be",
+         lambda: full == {"epubcheck": "EPUBCheck v5.2.1", "vnu": "not found",
+                          "verapdf": "veraPDF 1.30.3"} or fail(repr(full))),
+        ("with --wcag, axe-core's version, Ace's, and whether veraPDF's modules were named",
+         lambda: wcag.get("axe-core") == axecheck.AXE_VERSION
+         and wcag.get("ace") == fakeace.VERSION
+         and wcag.get("verapdf wcag modules") == "not named" or fail(repr(wcag))),
+    ]
+
+
 def check_texrecord():
     """lib/texrecord.py: TeX Live's package database read, a relocated
     file's path among it; what a build read put into packages, and what's
@@ -13038,6 +13087,8 @@ GROUPS = [
     ("lib/buildrecord.py, the build record's strings, paths, and the files it reads and "
      "writes", check_buildrecord),
     ("lib/texrecord.py, what the build record says LaTeX built a PDF with", check_texrecord),
+    ("lib/buildrecord.py, the checkers' versions the build record names",
+     check_record_checkers),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),

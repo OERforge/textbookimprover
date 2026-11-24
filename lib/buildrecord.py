@@ -35,8 +35,11 @@ For each package, how the pages its contents doesn't name were placed,
 and the outline --toc read, by its path and SHA-256, which
 build-cartridge.py leaves beside the package's stamp (write_package).
 
+And the versions of the checkers the output check ran, which change the
+reports and not the outputs.
+
 Not in it yet, of what the archive plan's record holds: a deck's PDF's
-and a drawing's LaTeX, and the checkers' versions.
+and a drawing's LaTeX.
 
 Copyright 2026 Robert Szarka
 
@@ -361,12 +364,56 @@ def _other_tools():
     return found
 
 
+def _first_line(command):
+    import subprocess
+    try:
+        done = subprocess.run(command + ["--version"], capture_output=True, text=True,
+                              timeout=120, stdin=subprocess.DEVNULL, errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return "no answer"
+    lines = [line.strip() for line in (done.stdout or done.stderr).splitlines()
+             if line.strip() and not line.startswith("Picked up ")]
+    return lines[0] if lines else "no answer"
+
+
+def _checkers(checks):
+    """The versions of the checkers the output check ran (checks: "quick",
+    the validators left out, "full", or "wcag", with WCAG's checks too):
+    epubcheck, the Nu HTML checker, and veraPDF, by what each's --version
+    says, or "not found"; with --wcag, axe-core's version and Ace's, and
+    whether veraPDF's WCAG modules were named. They change the reports,
+    not the outputs."""
+    if checks == "quick":
+        return {"validators": "not run (--quick)"}
+    import outputcheck
+    import pdfcheck
+    found = {}
+    for name in ("epubcheck", "vnu", "verapdf"):
+        command = outputcheck.find_validator(name)
+        if not command:
+            found[name] = "not found"
+        elif name == "verapdf":
+            found[name] = (pdfcheck.verapdf_said(command).splitlines() or ["no answer"])[0]
+        else:
+            found[name] = _first_line(command)
+    if checks == "wcag":
+        import acecheck
+        import axecheck
+        path, problem, _note = axecheck.locate_axe()
+        found["axe-core"] = axecheck.axe_version(path) if path else f"not used: {problem}"
+        command, _why = acecheck.find()
+        found["ace"] = (acecheck.version(command) or "no answer") if command else "not found"
+        found["verapdf wcag modules"] = "named" if os.environ.get(pdfcheck.WCAG_VARIABLE) \
+            else "not named"
+    return found
+
+
 def _html_parser():
     import htmlparse
     return htmlparse.BACKEND or "none"
 
 
-def values(base, argv, moment, moment_from, status):
+def values(base, argv, moment, moment_from, status, checks="full"):
     """What the record says, every value a string."""
     import stamps
     import tiversion
@@ -393,6 +440,7 @@ def values(base, argv, moment, moment_from, status):
         "packages": dict(stamps.package_versions(),
                          **stamps.package_versions(OTHER_PACKAGES)),
         "html parser": _html_parser(),
+        "checkers": _checkers(checks),
         "tools": dict({name: stamps.tool_version(name) for name in tools}, **_other_tools()),
         "pandoc data": _pandoc_data(),
         "platform": _platform(),
@@ -406,12 +454,12 @@ def values(base, argv, moment, moment_from, status):
     })
 
 
-def write(base, argv, moment, moment_from, status):
+def write(base, argv, moment, moment_from, status, checks="full"):
     """Write output/ti-build.yaml whole, then put it in place."""
     import yaml
     path = os.path.join(projectpaths.of(base).run_output(), NAME)
     text = ("# How this run of TextbookImprover was made (lib/buildrecord.py).\n"
-            + yaml.safe_dump(values(base, argv, moment, moment_from, status),
+            + yaml.safe_dump(values(base, argv, moment, moment_from, status, checks),
                              default_style='"', sort_keys=False, allow_unicode=True,
                              width=100))
     _write_new(path, text)

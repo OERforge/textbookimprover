@@ -1763,8 +1763,10 @@ SANDBOX_READ = []
 LIMITS = limits.Limits()
 # The run's one moment and where it came from (tiversion.one_moment).
 MOMENT = (None, None)
-# The project whose build record this run writes when it ends, or None.
+# The project whose build record this run writes when it ends, or None,
+# and which of the checkers its output check ran (buildrecord._checkers).
 RECORD_BASE = None
+RECORD_CHECKS = "full"
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -8198,12 +8200,13 @@ def main():
         BESIDE_ARGS = ["--beside"]
     # The build record is the run's that holds the lock, written when it
     # ends (lib/buildrecord.py); a part's run leaves its own part.
-    global RECORD_BASE
+    global RECORD_BASE, RECORD_CHECKS
     if not (args.locked or args.check_only or args.src_status) \
             and projectpaths.builds_beside():
         import buildrecord
         buildrecord.clear_fragments(base)
         RECORD_BASE = base
+        RECORD_CHECKS = "quick" if args.quick else "wcag" if args.wcag else "full"
     wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
     if args.part:
         if args.part not in parts:
@@ -9091,7 +9094,8 @@ def write_record(code):
         return
     import buildrecord
     try:
-        path = buildrecord.write(RECORD_BASE, sys.argv[1:], MOMENT[0], MOMENT[1], code or 0)
+        path = buildrecord.write(RECORD_BASE, sys.argv[1:], MOMENT[0], MOMENT[1], code or 0,
+                                 RECORD_CHECKS)
         say(f"Build record: {projectpaths.placed(path)}.")
     except (OSError, ValueError) as exc:
         say(f"NOTE: the build record wasn't written: {exc}.")
