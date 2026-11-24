@@ -473,14 +473,14 @@ WEB = """<!DOCTYPE html><html lang="en"><head><title>A Web Page -- The Site</tit
 """
 
 
-def run_in(directory, contents=None, env=None):
+def run_in(directory, contents=None, env=None, arguments=()):
     if contents is not None:
         with open(place(directory, "project.yaml"), "w",
                   encoding="utf-8") as fh:
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n" + contents)
     return started(
-        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *arguments],
         cwd=directory, capture_output=True, text=True,
         stdin=subprocess.DEVNULL, env=env)
 
@@ -1211,6 +1211,81 @@ def case_kinds(work):
          and not os.path.exists(os.path.join(work, "outside", "dot.png"))
          and not glob.glob(os.path.join(away, "**", "dot.png"), recursive=True)
          or fail(away_said[-600:])),
+    ]
+
+def case_remote_pictures(work):
+    """A picture or a medium a page names by URL stops the run, which
+    the EPUB, Word, and PowerPoint writers would fetch as they build,
+    unless --allow-remote-pictures, which warns and is counted in the
+    targets' stamps; a file: URL is a full path, which nothing lets
+    through; a link by URL is a link."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def project(name, page, source="one.md"):
+        folder = os.path.join(work, name)
+        for path, text in (("project.yaml", "project:\n  identifier: org.example.remote\n"
+                                            "  title: Remote\n"),
+                           ("conversion.yaml", "targets:\n  html:\n    format: html\n"),
+                           ("src/book/" + source, page)):
+            os.makedirs(os.path.dirname(os.path.join(folder, path)), exist_ok=True)
+            with open(os.path.join(folder, path), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        return folder
+
+    def run(folder, *options):
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        return done, done.stdout + done.stderr
+    markdown = project("markdown", "# One\n\n![a picture](http://127.0.0.1:9/a.png)\n\n"
+                                   "[a link](https://example.org/page.html)\n")
+    md_run, md_said = run(markdown)
+    raw = project("raw", '# One\n\n<img src="//cdn.example.org/a.png" alt="x">\n\n'
+                         '<img src="https://example.org/b.png" alt="y">\n')
+    raw_run, raw_said = run(raw)
+    # What no writer fetches: an <iframe>'s page (a video's player), and a
+    # style's url().
+    framed = project("framed", '<!DOCTYPE html>\n<html lang="en"><head><title>One</title></head>'
+                               '<body><h1>One</h1><iframe src="https://www.youtube.com/embed/x" '
+                               'title="A talk"></iframe><p style="background: '
+                               'url(https://example.org/b.png)">Words.</p></body></html>\n',
+                     "one.html")
+    framed_run, framed_said = run(framed)
+    local = project("local", "# One\n\n![a picture](file:///etc/hostname)\n")
+    local_run, local_said = run(local, "--allow-remote-pictures")
+    allowed = project("allowed", "# One\n\n![a picture](http://127.0.0.1:9/a.png)\n")
+    allowed_run, allowed_said = run(allowed, "--allow-remote-pictures")
+    page = os.path.join(allowed, "output", "html", "one.html")
+    allowed_html = open(page, encoding="utf-8").read() if os.path.exists(page) else ""
+    again_run, again_said = run(allowed)
+    return [
+        ("a picture a Markdown page names by URL stops the run, naming it and both ways on, "
+         "and nothing is built; a link by URL is a link",
+         lambda: md_run.returncode != 0 and "ERROR: src/book/one.md names "
+         "http://127.0.0.1:9/a.png, a picture or a medium named by URL." in md_said
+         and "util/import-files.py --fetch" in md_said and "--allow-remote-pictures" in md_said
+         and "example.org/page.html" not in md_said
+         and not os.path.exists(os.path.join(markdown, "output", "html", "one.html"))
+         or fail(md_said[-800:])),
+        ("so does raw HTML's, by https: and by // alone",
+         lambda: raw_run.returncode != 0 and "names //cdn.example.org/a.png" in raw_said
+         and "names https://example.org/b.png" in raw_said
+         and "Stopping: 2 picture(s) or media are named by URL" in raw_said
+         or fail(raw_said[-800:])),
+        ("an <iframe>'s page and a style's url(), which no writer fetches, don't stop it",
+         lambda: framed_run.returncode == 0 and "named by URL" not in framed_said
+         or fail(framed_said[-800:])),
+        ("a file: URL is a full path, which --allow-remote-pictures doesn't let through",
+         lambda: local_run.returncode != 0 and "names file:///etc/hostname, a file: URL, which "
+         "names a file by its full path." in local_said or fail(local_said[-800:])),
+        ("--allow-remote-pictures warns and builds, the page naming the URL",
+         lambda: allowed_run.returncode == 0 and "WARNING: --allow-remote-pictures: 1 "
+         "picture(s) or media a page names by URL are left as they are" in allowed_said
+         and 'src="http://127.0.0.1:9/a.png"' in allowed_html or fail(allowed_said[-800:])),
+        ("and is counted in the stamps, so a run without it builds again, and stops",
+         lambda: again_run.returncode != 0 and "a picture or a medium named by URL" in again_said
+         or fail(again_said[-800:])),
     ]
 
 def case_latex_reads(work):
@@ -3637,7 +3712,7 @@ def case_markdown_html(work):
         fh.write(RAW_MD)
     result = convert(work, "targets:\n  html:\n    format: html\n"
                            "  md:\n    format: markdown\n"
-                           "  epub:\n    format: epub3\n", fixtures=())
+                           "  epub:\n    format: epub3\n", arguments=("--allow-remote-pictures",), fixtures=())
     page = read(work, "html", "raw.html") if exists(
         work, "html", "raw.html") else ""
     chapter, epub_text = "", ""
@@ -4677,7 +4752,7 @@ def case_scheme_case(work):
     with open(place(work, "conversion.yaml"), "w",
               encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    run = run_in(work, "  contents:\n    - caps\n")
+    run = run_in(work, "  contents:\n    - caps\n", arguments=("--allow-remote-pictures",))
     check = read(work, "output-check.csv") if exists(
         work, "output-check.csv") else ""
     return [
@@ -6763,7 +6838,7 @@ def case_alt_formulas(work):
         fh.write(ONE_PIXEL)
     run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n"
                         "  word:\n    format: docx\n  md:\n    format: markdown\n"
-                        "  adoc:\n    format: asciidoc\n", fixtures=())
+                        "  adoc:\n    format: asciidoc\n", arguments=("--allow-remote-pictures",), fixtures=())
     choice = "a choice $\\binom{n}{k}$"
     # The same page in a book whose only target is a Markdown copy, which
     # keeps the formula: nothing to say.
@@ -6773,7 +6848,7 @@ def case_alt_formulas(work):
         fh.write(ALT_FORMULAS_CHOOSE_MD)
     with open(place(alone, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
-    markdown_alone = convert(alone, "targets:\n  md:\n    format: markdown\n", fixtures=())
+    markdown_alone = convert(alone, "targets:\n  md:\n    format: markdown\n", arguments=("--allow-remote-pictures",), fixtures=())
     # A page's variant for the Markdown copy, whose formula no target that
     # writes alt text so has: nothing to say either.
     variant = beside(work, "variant")
@@ -6786,7 +6861,7 @@ def case_alt_formulas(work):
     with open(place(variant, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     varied = convert(variant, "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n",
-                     fixtures=())
+                     arguments=("--allow-remote-pictures",), fixtures=())
     alts = ["A square of side x²", "A square, in words of its own",
             "A square of side x², after a link", "A square of side x², with a note",
             "A square of side y²", "A plain square", "an icon of √x"]
@@ -6977,7 +7052,7 @@ def case_caption_notes_links(work):
     with open(place(work, "square.png"), "wb") as fh:
         fh.write(ONE_PIXEL)
     run = convert(work, "targets:\n  html:\n    format: html\n  ebook:\n    format: epub3\n",
-                  fixtures=())
+                  arguments=("--allow-remote-pictures",), fixtures=())
 
     def fail(message):
         print("        " + message[:2000])
@@ -8327,7 +8402,8 @@ def case_fidelity_epub(work):
                  '<p>The <a href="handout.pdf">handout</a>.</p></body></html>')
     with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  epub:\n    format: epub3\n  word:\n    format: docx\n")
-    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick",
+                   "--allow-remote-pictures"],
                          cwd=work, capture_output=True, text=True)
     report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
     return [
@@ -12270,6 +12346,7 @@ CASES = [
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),
     ("a file that isn't what its name says stops the run", case_kinds),
+    ("a picture named by URL stops the run", case_remote_pictures),
     ("two books in one project, each a course of its own", case_two_books),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),

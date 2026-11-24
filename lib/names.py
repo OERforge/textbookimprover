@@ -91,3 +91,29 @@ def case_match(base, path):
         found.append(part)
         current = os.path.join(current, part)
     return os.path.join(*found) if found and os.path.isfile(current) else None
+
+
+# The schemes a writer fetches a picture by, // or not.
+REMOTE_SCHEMES = ("http", "https", "ftp", "ftps", "sftp")
+
+
+def by_url(ref):
+    """Whether a page names ref by URL: "file" for a file: URL, which
+    names a file by its full path; "remote" for one a writer fetches over
+    the network (http:, https:, ftp:, and the rest with //, or // alone);
+    None for a name of the book's, a drive's path (C:/...), and a URL
+    that names no file to fetch (data:, mailto:, #...)."""
+    ref = ref.strip()
+    if re.match(r"^[a-zA-Z]:[\\/]", ref):
+        return None
+    if ref.startswith("//"):
+        return "remote"
+    scheme = re.match(r"^([a-zA-Z][\w+.-]*):", ref)
+    if not scheme:
+        return None
+    name = scheme.group(1).lower()
+    if name == "file":
+        return "file"
+    if name in REMOTE_SCHEMES or ref[len(name) + 1:].startswith("//"):
+        return "remote"
+    return None

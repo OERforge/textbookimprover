@@ -135,6 +135,7 @@ The project is a box of tools that happen to work together. Conversion turns sou
 | `migrate-config.py` | One-time: splits a v0.1 `imsmanifest.yaml` into the three v0.2 files. |
 | `move-to-src.py` | One-time: moves a book kept in one folder, as versions through 0.10 read it, into a project, each part's sources in `src/<part>/` and its sidecars in `sidecars/<part>/`. |
 | `manifest-to-yaml.py` | One-time: turns an existing `imsmanifest.xml` into `project.yaml` and `packaging.yaml`. |
+| `import-files.py` | Brings what a part's pages name into the part: the naming slips mended in the pages, a file outside copied in, a picture named by URL fetched. |
 | `untrack-deletions.py` | One-time source repair: turns Word tracked deletions into ordinary strikethrough. |
 | `compare-output.py` | Compares two runs semantically, so a pipeline change can be checked rather than trusted. |
 | `table-census.py` | Surveys table structure across a corpus of DOCX files: the command line over `lib/tablecensus.py`. |

@@ -111,7 +111,7 @@ try:
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
                               expand_split_sources, contents_from_tree, opener_types)
-    from names import safe_path, safe_stem, is_safe, output_path
+    from names import safe_path, safe_stem, is_safe, output_path, by_url
     import sidecars
     from sidecars import math_keep_rows
     import texreads
@@ -670,14 +670,16 @@ def stamp_targets(base, targets, latex_book=False):
             top=stamps.top_digest(root, PART, target_named_files(target, base, schema,
                                                                  latex_book)),
             software=stamps.software_digest(stamps.software(target.format, latex_book)),
-            # --latexmkrc changes a LaTeX book's own PDF, and --allow-read
-            # what any target's LaTeX may read; nothing else of this
+            # --latexmkrc changes a LaTeX book's own PDF, --allow-read
+            # what any target's LaTeX may read, and --allow-remote-pictures
+            # whether a page's remote pictures are fetched; nothing else of this
             # script's changes a target: the packager's options are
             # counted in a package's stamp. The folders --allow-read gave
             # are kept in the stamp's file too, for the packager to refuse.
             options=stamps.options_digest(dict(
                 {"--latexmkrc": True} if LATEXMKRC and target.format == "pdf" else {},
-                **({"--allow-read": sorted(texreads.ALLOWED)} if texreads.ALLOWED else {}))),
+                **({"--allow-read": sorted(texreads.ALLOWED)} if texreads.ALLOWED else {}),
+                **({"--allow-remote-pictures": True} if ALLOW_REMOTE else {}))),
             allowed=texreads.ALLOWED)
         target.stamp_path = P(base).stamp_file(stamps.stamp_name("target", target.name))
 
@@ -1685,6 +1687,11 @@ BESIDE_ARGS = []
 # --allow-read, passed on to build-pdf.py (texreads.ALLOWED holds the
 # folders for this run).
 ALLOW_ARGS = []
+# --allow-remote-pictures: a picture or a medium a page names by URL is
+# left for the writers and the readers to fetch, warned of once a part
+# (REMOTE_SAID), where it otherwise stops the run (check_remote).
+ALLOW_REMOTE = False
+REMOTE_SAID = []
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -3656,6 +3663,32 @@ CSS_URL = re.compile(r"""url\(\s*("[^"]*"|'[^']*'|[^)\s]*)\s*\)""", re.I)
 NAMED_KEYS = ("src", "srcset", "data", "poster")
 
 
+# The raw HTML a writer fetches what it names from: Pandoc 3.14's EPUB
+# writer fetched an <img>'s src, a <video>'s src and poster, an <audio>'s
+# src, and a <source>'s src, and not an <iframe>, <embed>, <object>,
+# <track>, srcset, or a style's url() (measured); srcset is a picture a
+# reader's browser fetches all the same.
+SHOWN_BY_URL = {"img": ("src", "srcset"), "video": ("src", "poster"), "audio": ("src",),
+                "source": ("src", "srcset")}
+SHOWN_TAG = re.compile(r"<(img|video|audio|source)\b([^>]*)>", re.I)
+
+
+def shown_by_url(text):
+    """What a piece of HTML shows that it names by URL (by_url): a
+    picture's, a medium's, or a poster's, as written."""
+    found = []
+    for tag in SHOWN_TAG.finditer(text or ""):
+        keys = SHOWN_BY_URL[tag.group(1).lower()]
+        for name, value in RAW_NAMED.findall(tag.group(2)):
+            if name.lower() not in keys:
+                continue
+            value = html_unescape(value.strip("'\""))
+            words = [c.strip().split(" ")[0] for c in value.split(",")] \
+                if name.lower() == "srcset" else [value.strip()]
+            found.extend(w for w in words if w and by_url(w))
+    return found
+
+
 def named_in_html(text):
     """Every local file a piece of HTML names, as written: what's after a
     scheme (http:, data:, mailto:) or begins // or # isn't the book's.
@@ -3686,11 +3719,13 @@ def named_in_html(text):
     return [f for f in found if f]
 
 
-def page_reads(path):
+def page_reads(path, urls=False):
     """Every local file a page as Pandoc read it names, which a run or a
     program it starts may open: each picture, each file a link names,
     and what the page's raw HTML and its elements' style, src, srcset,
-    data, and poster name. As written, %20 and the rest still escaped."""
+    data, and poster name. As written, %20 and the rest still escaped.
+    With urls, what it shows that it names by URL instead (by_url): a
+    picture, and what raw HTML shows (shown_by_url), not a link."""
     refs = []
 
     def walk(node):
@@ -3700,14 +3735,15 @@ def page_reads(path):
             try:
                 if kind == "Image":
                     refs.append(content[2][0])
-                elif kind == "Link":
+                elif kind == "Link" and not urls:
                     parts = linked_file(content[2][0])
                     if parts:
                         refs.append(parts[0])
                 elif kind in ("RawBlock", "RawInline") and \
                         str(content[0]).lower() in ("html", "html5", "html4"):
-                    refs.extend(named_in_html(content[1]))
-                if kind in ("Image", "Link", "Span", "Div", "Code", "CodeBlock",
+                    refs.extend(shown_by_url(content[1]) if urls
+                                else named_in_html(content[1]))
+                if not urls and kind in ("Image", "Link", "Span", "Div", "Code", "CodeBlock",
                             "Header", "Table", "Figure"):
                     attr = content[1] if kind == "Header" else content[0]
                     for key, value in (attr[2] if isinstance(attr, list) and len(attr) > 2
@@ -3725,8 +3761,10 @@ def page_reads(path):
                 walk(value)
     with open(path, encoding="utf-8") as fh:
         walk(json.load(fh))
+    if urls:
+        return sorted(r for r in set(refs) if by_url(r))
     return sorted(r for r in set(refs)
-                  if not re.match(r"^[a-zA-Z][\w+.-]*:(?![\\/])|^//|^#", r))
+                  if not by_url(r) and not re.match(r"^[a-zA-Z][\w+.-]*:(?![\\/])|^//|^#", r))
 
 
 def kind_problems(paths, shown):
@@ -3795,11 +3833,30 @@ def check_reads(base, pages):
     project = P(base)
     if not hasattr(project, "unreadable"):
         return
-    problems, made = [], []
+    problems, made, remote = [], [], []
+
+    def source_of(page):
+        stem = os.path.basename(page)
+        stem = stem[:-len(INTERMEDIATE)] if stem.endswith(INTERMEDIATE) else \
+            os.path.splitext(stem)[0]
+        source = PAGE_SOURCES.get(stem, (None, None))[1]
+        return f"src/{PART}/{source}" if source else f"The page {stem}"
     sources = os.path.realpath(project.sources())
     for page in pages:
         if not os.path.isfile(page):
             continue
+        # A picture or a medium named by URL: a file: URL is a full path,
+        # and one over the network is fetched as a Word, PDF, or PowerPoint
+        # target builds (measured with Pandoc 3.14; an EPUB links to it). An
+        # <iframe>'s page, a link, and a style's url() aren't fetched.
+        for ref in page_reads(page, urls=True):
+            if by_url(ref) == "file":
+                line = (f"{source_of(page)} names {ref}, a file: URL, which names a file by "
+                        "its full path.")
+                if line not in problems:
+                    problems.append(line)
+            elif (source_of(page), ref) not in remote:
+                remote.append((source_of(page), ref))
         for ref in page_reads(page):
             name = unquote(ref)
             if os.path.isabs(name) or name.startswith(("\\", "~")) \
@@ -3815,12 +3872,7 @@ def check_reads(base, pages):
                         and not real.startswith(sources + os.sep):
                     made.append(real)
             if why:
-                stem = os.path.basename(page)
-                stem = stem[:-len(INTERMEDIATE)] if stem.endswith(INTERMEDIATE) else \
-                    os.path.splitext(stem)[0]
-                source = PAGE_SOURCES.get(stem, (None, None))[1]
-                line = (f"src/{PART}/{source}" if source else f"The page {stem}") \
-                    + f" names {ref}, {why}."
+                line = f"{source_of(page)} names {ref}, {why}."
                 if line not in problems:
                     problems.append(line)
     if problems:
@@ -3828,9 +3880,39 @@ def check_reads(base, pages):
             say("ERROR: " + line)
         die(f"Stopping: {len(problems)} file(s) a page names are outside what the part "
             f"reads, its own sources (src/{PART}/). Copy each file into src/{PART}/, keeping "
-            "no link to where it was, and name it there. Nothing was converted.")
+            "no link to where it was, and name it there (util/import-files.py --from FOLDER "
+            "does both). Nothing was converted.")
+    check_remote(remote)
     top = os.path.realpath(project.top())
     say_kinds(*kind_problems(made, lambda path: os.path.relpath(path, top)))
+
+
+def check_remote(remote):
+    """Stop on the pictures and media a page names by URL ((source, URL)
+    pairs, check_reads), unless --allow-remote-pictures, which warns of
+    them once. A Word, PDF, or PowerPoint target fetches such a picture
+    as it builds, from wherever it names, a server on the person's own
+    network too, and a page's readers fetch it each time they read it;
+    an EPUB links to it."""
+    if not remote:
+        return
+    shown = [f"{source} names {url}" for source, url in remote]
+    if ALLOW_REMOTE:
+        if (PART, tuple(remote)) not in REMOTE_SAID:
+            REMOTE_SAID.append((PART, tuple(remote)))
+            say(f"WARNING: --allow-remote-pictures: {len(remote)} picture(s) or media a page "
+                "names by URL are left as they are, for a Word, PDF, or PowerPoint target to "
+                "fetch as it builds and a page's readers each time they read it: "
+                + "; ".join(shown[:5]) + (f"; and {len(shown) - 5} more" if len(shown) > 5
+                                          else "") + ".")
+        return
+    for line in shown:
+        say(f"ERROR: {line}, a picture or a medium named by URL.")
+    die(f"Stopping: {len(remote)} picture(s) or media are named by URL, which a Word, PDF, or "
+        "PowerPoint target fetches as it builds, from wherever it names, and a page's "
+        "readers each time they read it. util/import-files.py --fetch saves each into "
+        f"src/{PART}/ and names it there; or --allow-remote-pictures leaves them as they are "
+        "for this run. Nothing was converted.")
 
 
 def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
@@ -7738,6 +7820,12 @@ def main():
                              "\\input) in FOLDER, outside the project, for this run; may be "
                              "given again. Not a picture. A build made with it can't be "
                              "packed")
+    parser.add_argument("--allow-remote-pictures", action="store_true",
+                        help="leave a picture or a medium a page names by URL for a Word, "
+                             "PDF, or PowerPoint target to fetch as it builds, and the "
+                             "pages' readers as they read, where it otherwise stops the run; "
+                             "util/import-files.py --fetch saves each into the project "
+                             "instead")
     parser.add_argument("--rebuild", action="store_true",
                         help="build every target and package, whatever its stamp says "
                              "(as make -B does), keeping the caches in output/work/")
@@ -7764,8 +7852,9 @@ def main():
                              "in one (check-output.py --verbose)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
-    global LATEXMKRC, ALLOW_ARGS
+    global LATEXMKRC, ALLOW_ARGS, ALLOW_REMOTE
     LATEXMKRC = args.latexmkrc
+    ALLOW_REMOTE = args.allow_remote_pictures
     # Before the run moves to the project's folder, so a folder given
     # from where it was started is that one.
     try:

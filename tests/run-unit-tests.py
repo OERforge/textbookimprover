@@ -1145,6 +1145,259 @@ def check_figure_names():
          lambda: linked == ["shared/linked.pdf"] or fail(str(linked))),
     ]
 
+def check_named_by_url():
+    """Which names are URLs a target fetches (names.by_url), and what raw
+    HTML shows by URL (convert.py's shown_by_url): a picture's, a
+    medium's, a poster's, srcset's each, never a link, an <iframe>'s
+    page, or a style's url()."""
+    from names import by_url
+    convert = load(os.path.join(ROOT, "bin", "convert.py"), "convert_urls")
+    kinds = {ref: by_url(ref) for ref in (
+        "http://a/b.png", "HTTPS://a/b.png", "//cdn/x.png", "ftp://h/x.png", "gopher://h/x",
+        "file:///etc/passwd", "FILE:/x", "C:/x.png", "c:\\x.png", "\\\\server\\x.png",
+        "data:image/png;base64,AA", "mailto:a@b", "#top", "assets/x.png", "  http://a/x.png")}
+    raw = convert.shown_by_url(
+        '<p><img src="https://a/x.png" srcset="//b/y.png 2x, z.png 3x" alt="">'
+        '<video poster="http://c/p.png" src="assets/v.mp4"><source src="https://d/v.mp4">'
+        '</video><audio src="ftp://e/a.mp3"></audio><a href="https://f/page.png">l</a>'
+        '<iframe src="https://g/embed"></iframe><span style="background:url(https://h/b.png)">'
+        '</span><img src="file:///etc/passwd"><IMG SRC=\'https://i/caps.png\'></p>')
+    return [
+        ("a URL fetched over the network, a file: URL, and every other name told apart",
+         lambda: kinds == {"http://a/b.png": "remote", "HTTPS://a/b.png": "remote",
+                           "//cdn/x.png": "remote", "ftp://h/x.png": "remote",
+                           "gopher://h/x": "remote", "file:///etc/passwd": "file",
+                           "FILE:/x": "file", "C:/x.png": None, "c:\\x.png": None,
+                           "\\\\server\\x.png": None, "data:image/png;base64,AA": None,
+                           "mailto:a@b": None, "#top": None, "assets/x.png": None,
+                           "  http://a/x.png": "remote"} or fail(repr(kinds))),
+        ("raw HTML shows by URL its pictures, media, posters, and each of srcset's, and not "
+         "a link, an <iframe>'s page, a style's url(), or a name of the book's",
+         lambda: raw == ["https://a/x.png", "//b/y.png", "http://c/p.png", "https://d/v.mp4",
+                         "ftp://e/a.mp3", "file:///etc/passwd", "https://i/caps.png"]
+         or fail(repr(raw))),
+    ]
+
+
+def check_import_files():
+    """util/import-files.py on made-up projects: the naming slips mended
+    where a page writes them, code passed over, a file outside copied in
+    from a --from folder alone, never behind a dot name or of a kind it
+    doesn't know, a picture named by URL fetched from an address it may
+    reach alone, and what changed kept in originals/<part>/."""
+    import base64
+    import http.server
+    import threading
+    work = scratch("import-files-")
+    tool = os.path.join(ROOT, "util", "import-files.py")
+    imports = load(tool, "import_files")
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+"
+                           "M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+    def project(name, files):
+        folder = os.path.join(work, name)
+        for path, data in dict({"project.yaml": "project:\n  identifier: org.example.im\n"
+                                                "  title: Im\n",
+                                "conversion.yaml": "targets:\n  html:\n    format: html\n"},
+                               **files).items():
+            full = os.path.join(folder, path)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "wb") as fh:
+                fh.write(data if isinstance(data, bytes) else data.encode("utf-8"))
+        return folder
+
+    def run(folder, *options):
+        return subprocess.run([sys.executable, tool, "-d", folder, *options],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def read(*parts):
+        with open(os.path.join(*parts), encoding="utf-8") as fh:
+            return fh.read()
+    page = ("# One\n\n![a](assets\\Figure.png) ![b](assets/figure.PNG \"t\") "
+            "![c](assets/dot.jpg)\n\n`![x](assets\\Figure.png)`\n\n```\n"
+            "![y](assets\\Figure.png)\n```\n\n[ref]: assets\\Figure.png\n")
+    html_page = ('<p><img src="assets/DOT.jpg" srcset="assets\\Figure.png 2x, '
+                 'assets/dot.jpg 3x" alt="d"></p>\n<p style="background: url(assets\\Figure.png)">'
+                 '</p>\n<!-- <img src="assets\\Figure.png"> -->\n')
+    slips = project("slips", {"src/book/one.md": page, "src/book/two.html": html_page,
+                              "src/book/three.adoc": "= Three\n\nimage::assets\\Figure.png[]\n"
+                                                     "\n----\nimage::assets\\Figure.png[]\n----\n",
+                              "src/book/assets/Figure.png": png, "src/book/assets/dot.jpg": png,
+                              "sidecars/book/image-alt.csv": "image,alt\nassets/DOT,A dot\n"})
+    dry = run(slips, "--dry-run")
+    dry_page = read(slips, "src", "book", "one.md")
+    done = run(slips)
+    one, two, three = (read(slips, "src", "book", n) for n in ("one.md", "two.html",
+                                                               "three.adoc"))
+    with open(os.path.join(slips, "originals", "book", "import-record.csv"),
+              encoding="utf-8") as fh:
+        record = list(csv.DictReader(fh))
+    again = run(slips)
+
+    # A file outside the part: left without --from; with it, copied in,
+    # but not behind a dot name, of a kind it doesn't know, or a program
+    # under a picture's name.
+    shared = os.path.join(work, "shared")
+    for name, data in (("figs/supply demand.png", png), (".hidden/k.png", png),
+                       ("id_rsa", b"-----BEGIN KEY-----\n"),
+                       ("figs/tool.png", b"\x7fELF\x02\x01\x01" + b"\x00" * 32)):
+        os.makedirs(os.path.dirname(os.path.join(shared, name)), exist_ok=True)
+        with open(os.path.join(shared, name), "wb") as fh:
+            fh.write(data)
+    outside_page = ("# Out\n\n![d](../../../shared/figs/supply%20demand.png)\n\n"
+                    f"![e]({shared}/.hidden/k.png) ![f](file://{shared}/figs/tool.png)\n\n"
+                    "[key](../../../shared/id_rsa)\n")
+    left = project("left", {"src/book/out.md": outside_page})
+    left_run = run(left)
+    left_page = read(left, "src", "book", "out.md")
+    taken = project("taken", {"src/book/out.md": outside_page})
+    taken_run = run(taken, "--from", shared)
+    taken_page = read(taken, "src", "book", "out.md")
+    home = run(taken, "--from", os.path.expanduser("~"))
+
+    # A picture named by URL: left without --fetch, refused on this
+    # machine's own address with it, and fetched from an address the
+    # check takes.
+    served = {"/pic.png": (200, png, "image/png"),
+              "/page.png": (200, b"<!DOCTYPE html><html><body>x</body></html>", "text/html"),
+              "/moved.png": (302, b"", "text/plain"), "/big.png": (200, png * 40, "image/png"),
+              "/unsaid.png": (200, png * 40, "image/png")}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            status, body, kind = served.get(self.path, (404, b"", "text/plain"))
+            self.send_response(status)
+            if status == 302:
+                self.send_header("Location", f"http://127.0.0.2:{port}/pic.png")
+            self.send_header("Content-Type", kind)
+            if self.path != "/unsaid.png":
+                self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    remote_page = f"# R\n\n![p](http://127.0.0.1:{port}/pic.png) [a link](https://example.org/)\n"
+    remote = project("remote", {"src/book/r.md": remote_page})
+    remote_left = run(remote)
+    remote_refused = run(remote, "--fetch")
+    remote_kept = read(remote, "src", "book", "r.md")
+    loopback = (lambda address: address == "127.0.0.1")
+    saved = dict(os.environ)
+    for key in [k for k in os.environ if k.lower().endswith("_proxy")]:
+        del os.environ[key]
+    os.environ["no_proxy"] = "*"
+
+    def fetched(path, limit=imports.MAX_BYTES):
+        try:
+            return imports.fetch_url(f"http://127.0.0.1:{port}{path}", allowed=loopback,
+                                     limit=limit)
+        except imports.Stop as why:
+            return str(why)
+    try:
+        got, redirected, too_big = fetched("/pic.png"), fetched("/moved.png"), \
+            fetched("/big.png", limit=len(png) * 10)
+        unsaid = fetched("/unsaid.png", limit=len(png) * 10)
+        planned = imports.Import(remote, None, [], True,
+                                 fetcher=lambda url: imports.fetch_url(url, allowed=loopback))
+        planned.plan()
+        planned.execute()
+        not_picture = imports.Import(
+            project("not-picture", {"src/book/r.md": f"![p](http://127.0.0.1:{port}/page.png)\n"}),
+            None, [], True, fetcher=lambda url: imports.fetch_url(url, allowed=loopback))
+        not_picture.plan()
+        # The address connected to is checked too, before a byte is sent,
+        # whatever the name resolved to beforehand.
+        peer = imports.checked_connection(False, lambda address: False)("127.0.0.1", port,
+                                                                        timeout=5)
+        try:
+            peer.request("GET", "/pic.png")
+            peer_refused = ""
+        except imports.Stop as why:
+            peer_refused = str(why)
+        finally:
+            peer.close()
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+        server.shutdown()
+    fetched_page = read(remote, "src", "book", "r.md")
+    saved_as = sorted(os.listdir(os.path.join(remote, "src", "book", "remote")))
+    return [
+        ("--dry-run says what it would do and changes nothing",
+         lambda: dry.returncode == 0 and dry_page == page
+         and "assets\\Figure.png -> assets/Figure.png (for a backslash)" in dry.stdout
+         and "Nothing was changed (--dry-run)." in dry.stdout or fail(dry.stdout)),
+        ("a backslash, another case, and another kind's extension are mended where a "
+         "Markdown page writes them, a reference definition too, code passed over",
+         lambda: done.returncode == 0
+         and "![a](assets/Figure.png) ![b](assets/Figure.png \"t\") ![c](assets/dot.png)"
+         in one and "`![x](assets\\Figure.png)`" in one and "![y](assets\\Figure.png)" in one
+         and "[ref]: assets/Figure.png" in one or fail(done.stdout + one)),
+        ("and where an HTML page and an AsciiDoc page do, its srcset and style too, a "
+         "comment and a listing passed over",
+         lambda: 'src="assets/dot.png"' in two
+         and 'srcset="assets/Figure.png 2x, assets/dot.png 3x"' in two
+         and "url(assets/Figure.png)" in two and '<!-- <img src="assets\\Figure.png"> -->'
+         in two and "image::assets/Figure.png[]\n\n----\nimage::assets\\Figure.png[]" in three
+         or fail(two + three)),
+        ("the picture is renamed once, its original and each page as it was kept in "
+         "originals/<part>/, each change a row of the record",
+         lambda: os.path.isfile(os.path.join(slips, "src", "book", "assets", "dot.png"))
+         and not os.path.exists(os.path.join(slips, "src", "book", "assets", "dot.jpg"))
+         and os.path.isfile(os.path.join(slips, "originals", "book", "assets", "dot.jpg"))
+         and read(slips, "originals", "book", "one.md") == page
+         and {r["what"] for r in record} == {"a backslash", "another case",
+                                             "another kind's extension",
+                                             "another case; another kind's extension"}
+         and len(record) == 9 or fail(repr(record))),
+        ("a sidecar's row keyed by a name that changed is named; a second run finds nothing",
+         lambda: "sidecars/book/image-alt.csv has a row keyed assets/DOT, which is assets/dot "
+         "now" in done.stdout and "Nothing in src/book/ to bring in." in again.stdout
+         and again.returncode == 0 or fail(done.stdout + again.stdout)),
+        ("a file outside the part is left without --from, the page as it was",
+         lambda: left_run.returncode == 1 and left_page == outside_page
+         and "--from names a folder to copy such a file in from" in left_run.stdout
+         or fail(left_run.stdout)),
+        ("with --from it's copied into imported/, but not behind a dot name, of a kind it "
+         "doesn't know, or a program under a picture's name",
+         lambda: "![d](imported/supply%20demand.png)" in taken_page
+         and os.path.isfile(os.path.join(taken, "src", "book", "imported", "supply demand.png"))
+         and "behind a dot name (.hidden)" in taken_run.stdout
+         and "a kind of file TextbookImprover doesn't know by its name" in taken_run.stdout
+         and "tool.png is named as a PNG picture, and its first bytes are a program (ELF)"
+         in taken_run.stdout and f"![e]({shared}/.hidden/k.png)" in taken_page
+         and len(os.listdir(os.path.join(taken, "src", "book", "imported"))) == 1
+         or fail(taken_run.stdout + taken_page)),
+        ("--from the home folder is refused",
+         lambda: home.returncode == 2 and "your home folder" in home.stdout
+         or fail(home.stdout)),
+        ("a picture named by URL is left without --fetch, and refused at this machine's "
+         "own address with it; a link by URL isn't a picture",
+         lambda: "a picture named by URL; --fetch saves it" in remote_left.stdout
+         and f"its host 127.0.0.1 is at 127.0.0.1, which isn't on the public internet"
+         in remote_refused.stdout and "example.org" not in remote_left.stdout
+         and remote_kept == remote_page
+         and remote_refused.returncode == 1 or fail(remote_left.stdout + remote_refused.stdout)),
+        ("from an address the check takes it's fetched, saved under its hash and named so",
+         lambda: got == png and fetched_page.startswith("# R\n\n![p](remote/")
+         and saved_as == [hashlib.sha256(png).hexdigest()[:12] + "-pic.png"]
+         and f"remote/{saved_as[0]}" in fetched_page or fail(repr((fetched_page, saved_as)))),
+        ("a redirect to an address the check refuses, more than the limit, said or not, and "
+         "a web page for a picture are refused",
+         lambda: "127.0.0.2, which isn't on the public internet" in redirected
+         and "more than the" in too_big and unsaid == f"more than the {len(png) * 10} bytes taken"
+         and any("a web page (HTML), not a picture" in line for line in not_picture.left)
+         or fail(repr((redirected, too_big, not_picture.left)))),
+        ("and the address it connected to is checked before a byte is sent",
+         lambda: "its server is at 127.0.0.1, which isn't on the public internet"
+         in peer_refused or fail(peer_refused)),
+    ]
+
+
 def check_move_to_src():
     work = scratch("move-to-src-")
     tool = os.path.join(ROOT, "util", "move-to-src.py")
@@ -12049,6 +12302,8 @@ GROUPS = [
      check_texreads),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
+    ("what a page names by URL", check_named_by_url),
+    ("util/import-files.py, bringing what a page names into its part", check_import_files),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),
