@@ -770,14 +770,28 @@ def targets_to_build(targets, rebuild=False, together=()):
     return build, current
 
 
-def record_stamps(targets):
+def record_stamps(targets, base=None):
     """Each stamp of a target this run built and put in place, recorded
     once the part's run has succeeded, so a build that fails records
-    none and is tried again next time."""
+    none and is tried again next time; and what the part's run knows for
+    the build record (lib/buildrecord.py)."""
     import stamps
     for target in targets:
         if target.stamp is not None and target.swapped and target_present(target):
             stamps.write_stamp(target.stamp_path, target.stamp)
+    if base is not None:
+        record_part(base, targets)
+
+
+def record_part(base, targets):
+    """This part's piece of the build record (lib/buildrecord.py)."""
+    if projectpaths.builds_beside():
+        import buildrecord
+        try:
+            buildrecord.write_part(base, PART, targets, LIMITS, SANDBOX_ENV, SANDBOX_READ,
+                                   texreads.ALLOWED)
+        except OSError as exc:
+            say(f"NOTE: the build record won't say what the part {PART} built: {exc}.")
 
 
 def kept_outputs(target):
@@ -929,7 +943,7 @@ def slides_run(base, decks, targets, project, paths, reports, args, first, archi
         return code
     if not args.check_only and code == 0:
         archive_targets([t for t in targets if t.format == "source"], base)
-        record_stamps(targets)
+        record_stamps(targets, base)
         if projectpaths.builds_beside():
             write_check_record(base, args)
     elif not args.check_only and any(str(t["archive"] or "none") != "none" for t in targets):
@@ -1740,6 +1754,8 @@ SANDBOX_READ = []
 LIMITS = limits.Limits()
 # The run's one moment and where it came from (tiversion.one_moment).
 MOMENT = (None, None)
+# The project whose build record this run writes when it ends, or None.
+RECORD_BASE = None
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -8163,6 +8179,14 @@ def main():
                 "while replacing it, and this run builds it again.")
     if projectpaths.build_beside(base):
         BESIDE_ARGS = ["--beside"]
+    # The build record is the run's that holds the lock, written when it
+    # ends (lib/buildrecord.py); a part's run leaves its own part.
+    global RECORD_BASE
+    if not (args.locked or args.check_only or args.src_status) \
+            and projectpaths.builds_beside():
+        import buildrecord
+        buildrecord.clear_fragments(base)
+        RECORD_BASE = base
     wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
     if args.part:
         if args.part not in parts:
@@ -8350,6 +8374,7 @@ def main():
             together=("source",) if slides and not DECK_RUN else ())
         if not build:
             recheck_outputs(base, every, args, slides=slides)
+            record_part(base, every)
             if slides:
                 return 1 if SAVE_FAILED else 0
             return package_book(base, every, [], project, passthrough, args)
@@ -8913,10 +8938,10 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
     if not PPTX_RUN:
         archive_targets(targets, base)
-        record_stamps(targets)
+        record_stamps(targets, base)
     elif pptx_code == 0:
         archive_targets(pptx_targets, base)
-        record_stamps(pptx_targets)
+        record_stamps(pptx_targets, base)
     elif any(str(t["archive"] or "none") != "none" for t in pptx_targets):
         say("NOTE: nothing was archived, since a deck couldn't be read or a copy couldn't be "
             "read back; what was written is in each target's folder.")
@@ -9042,6 +9067,19 @@ def package_book(base, every, built, project, passthrough, args, pages_by_dir=No
     return worst or unnamed
 
 
+def write_record(code):
+    """The build record, when this run holds the project's lock and built
+    (RECORD_BASE): output/ti-build.yaml (lib/buildrecord.py)."""
+    if RECORD_BASE is None:
+        return
+    import buildrecord
+    try:
+        path = buildrecord.write(RECORD_BASE, sys.argv[1:], MOMENT[0], MOMENT[1], code or 0)
+        say(f"Build record: {projectpaths.placed(path)}.")
+    except (OSError, ValueError) as exc:
+        say(f"NOTE: the build record wasn't written: {exc}.")
+
+
 def stopped(signum, frame):
     raise Stopped(signum)
 
@@ -9060,7 +9098,13 @@ def stoppable():
         if hasattr(signal, name):
             signal.signal(getattr(signal, name), stopped)
     try:
-        return main()
+        try:
+            code = main()
+        except SystemExit as exc:
+            write_record(exc.code if isinstance(exc.code, int) else 1)
+            raise
+        write_record(code)
+        return code
     except KeyboardInterrupt as exc:
         signum = exc.args[0] if isinstance(exc, Stopped) and exc.args else signal.SIGINT
         if isinstance(exc, Stopped) and hasattr(os, "killpg") and os.getpgrp() == os.getpid():

@@ -773,6 +773,100 @@ def case_one_moment(work):
     ]
 
 
+def case_build_record(work):
+    """A run writes output/ti-build.yaml when it ends: every value a
+    string; the moment, the command, the project, this copy, each stamp,
+    and each target, built or up to date; and the SHA-256 of each output,
+    which are the files'. A link left at the record's new file isn't followed,
+    and a check-only run leaves the record alone."""
+    import hashlib
+    import yaml
+
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build(*extra):
+        env = dict(os.environ, SOURCE_DATE_EPOCH="1763251201")
+        env.pop("TEXTBOOKIMPROVER_RUN_EPOCH", None)
+        return subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet",
+             *extra], cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=env)
+
+    record_path = os.path.join(work, "output", "ti-build.yaml")
+
+    def record():
+        with open(record_path, encoding="utf-8") as fh:
+            return fh.read()
+
+    def strings(value):
+        if isinstance(value, dict):
+            return all(isinstance(k, str) and strings(v) for k, v in value.items())
+        if isinstance(value, list):
+            return all(strings(v) for v in value)
+        return isinstance(value, str)
+
+    def sha(name):
+        with open(os.path.join(work, name), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+
+    write("project.yaml", "project:\n  identifier: org.example.record\n  title: Record\n"
+          "  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n  epub:\n"
+          "    format: epub3\n")
+    write("src/book/one.md", "# One\n\nA page.\n")
+    first = build()
+    text = record() if os.path.isfile(record_path) else ""
+    made = yaml.safe_load(text) if text else {}
+    victim = os.path.join(work, "victim.txt")
+    write("victim.txt", "kept\n")
+    os.symlink(victim, record_path + ".new")
+    second = build()
+    again = yaml.safe_load(record()) if os.path.isfile(record_path) else {}
+    with open(victim, encoding="utf-8") as fh:
+        kept = fh.read()
+    before = record()
+    checked = build("--check-only")
+    targets = lambda values: {name: t.get("built") for name, t in
+                              ((values.get("parts") or {}).get("book") or {})
+                              .get("targets", {}).items()}
+    outputs = made.get("outputs") or {}
+    return [
+        ("every value is a string, and the run, the project, and this copy are named",
+         lambda: first.returncode == 0 and strings(made)
+         and made["record"] == "1" and made["run"]["moment"] == "1763251201"
+         and made["run"]["moment from"] == "SOURCE_DATE_EPOCH"
+         and made["run"]["exit status"] == "0"
+         and made["run"]["command"] == ["convert.py", "--no-sandbox", "--quick", "--quiet"]
+         and made["project"]["identifier"] == "org.example.record"
+         and made["textbookimprover"]["version"]
+         and {"target-epub.json", "target-html.json"} <= set(made["stamps"])
+         or fail(first.stderr[-600:] + text[:1500])),
+        ("each target was built, and each output's SHA-256 is the file's",
+         lambda: targets(made) == {"html": "yes", "epub": "yes"}
+         and "output/epub/org.example.record.epub" in outputs
+         and "output/html/one.html" in outputs
+         and all(sha(name) == value for name, value in outputs.items())
+         and not any(n.startswith("output/work/") or n.endswith("ti-build.yaml")
+                     for n in outputs) or fail(repr((targets(made), outputs)))),
+        ("a second run says its targets are up to date, and a link left at the record's new "
+         "file isn't followed",
+         lambda: second.returncode == 0 and targets(again) == {"html": "up to date",
+                                                               "epub": "up to date"}
+         and kept == "kept\n" and not os.path.lexists(record_path + ".new")
+         or fail(second.stderr[-600:] + repr((targets(again), kept)))),
+        ("a check-only run leaves the record alone",
+         lambda: checked.returncode == 0 and record() == before
+         or fail(checked.stderr[-600:])),
+    ]
+
+
 def case_archive_dates(work):
     """The zip and tar files a run writes itself, a target's archive and a
     package's cartridge, are the same bytes when the book is built again
@@ -12663,6 +12757,7 @@ CASES = [
     ("a target's archive and a cartridge the same bytes when built again",
      case_archive_dates),
     ("one moment for a run's programs, and a second run building nothing", case_one_moment),
+    ("the build record, of what a run built and with what", case_build_record),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

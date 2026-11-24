@@ -1251,6 +1251,56 @@ def check_tiversion():
     ]
 
 
+def check_buildrecord():
+    """lib/buildrecord.py: every value made a string; the command line's
+    paths inside the project read from its folder, and others left; a
+    part's piece passed over when it's a link or too long; and the
+    record's new file made afresh where a link was left."""
+    import buildrecord
+    work = scratch("buildrecord-")
+    project = os.path.join(work, "book")
+    os.makedirs(os.path.join(project, "src", "book"))
+    with open(os.path.join(project, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: B\n")
+    made = buildrecord._strings({"a": 1, "b": [True, None, 2.5], 3: {"c": False}})
+    command = buildrecord._command(project, ["--from", os.path.join(project, "src", "book"),
+                                             "--allow-read", "/opt/macros", project])
+    secret = os.path.join(work, "secret.json")
+    with open(secret, "w", encoding="utf-8") as fh:
+        fh.write('{"part": "x"}')
+    linked = os.path.join(work, "linked.json")
+    os.symlink(secret, linked)
+    long_one = os.path.join(work, "long.json")
+    with open(long_one, "w", encoding="utf-8") as fh:
+        fh.write(" " * (buildrecord.LONGEST + 1))
+    victim = os.path.join(work, "victim.txt")
+    with open(victim, "w", encoding="utf-8") as fh:
+        fh.write("kept")
+    target = os.path.join(work, "record.yaml")
+    os.symlink(victim, target + ".new")
+    buildrecord._write_new(target, "new")
+    with open(victim, encoding="utf-8") as fh:
+        kept = fh.read()
+    with open(target, encoding="utf-8") as fh:
+        written = fh.read()
+    return [
+        ("every value is made a string, a yes or no for a truth and nothing for none",
+         lambda: made == {"a": "1", "b": ["yes", "", "2.5"], "3": {"c": "no"}}
+         or fail(repr(made))),
+        ("the command line's paths inside the project are read from its folder",
+         lambda: command == ["convert.py", "--from", os.path.join("src", "book"),
+                             "--allow-read", "/opt/macros", "."] or fail(repr(command))),
+        ("a part's piece that's a link, or too long, is passed over",
+         lambda: buildrecord._read_small(linked) is None
+         and buildrecord._read_small(long_one) is None
+         and buildrecord._read_small(secret) == '{"part": "x"}'
+         or fail("read")),
+        ("the record's new file is made afresh where a link was left there",
+         lambda: kept == "kept" and written == "new" and not os.path.islink(target)
+         and not os.path.lexists(target + ".new") or fail(repr((kept, written)))),
+    ]
+
+
 def check_archivedates():
     """lib/archivedates.py: a zip member's date from SOURCE_DATE_EPOCH, in
     UTC, within a zip's years and to its even second; the file's own
@@ -12862,6 +12912,8 @@ GROUPS = [
      "copy", check_tiversion),
     ("lib/archivedates.py, the dates, modes, and owners in TextbookImprover's own zips and "
      "tars", check_archivedates),
+    ("lib/buildrecord.py, the build record's strings, paths, and the files it reads and "
+     "writes", check_buildrecord),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),
