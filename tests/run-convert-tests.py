@@ -938,6 +938,71 @@ def case_build_record_latex(work):
     ]
 
 
+def case_build_record_packages(work):
+    """The build record says how a package's pages were placed: with
+    --include-all-html, a page contents doesn't name put under the
+    unsorted group; with --toc, the outline by its path and SHA-256 and
+    how many pages it ordered; and a package that wasn't built this run
+    keeps what its build said."""
+    import hashlib
+    import yaml
+
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build(*extra):
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet",
+             *extra], cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        path = os.path.join(work, "output", "ti-build.yaml")
+        record = {}
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                record = yaml.safe_load(fh) or {}
+        return done, (record.get("packages built") or {}).get("cartridge") or {}
+
+    write("project.yaml", "project:\n  identifier: org.example.packages\n  title: P\n"
+          "  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n")
+    write("src/book/one.md", "# One\n\nA page.\n")
+    write("src/book/two.md", "# Two\n\nAnother.\n")
+    every, every_said = build("--include-all-html")
+    again, again_said = build("--include-all-html")
+    write("project.yaml", "project:\n  identifier: org.example.packages\n  title: P\n")
+    outline = os.path.join(work, "outline.epub")
+    write("outline.md", "# Two\n\nText.\n")
+    subprocess.run(["pandoc", "outline.md", "-o", "outline.epub", "--metadata", "title=Outline"],
+                   cwd=work, capture_output=True, stdin=subprocess.DEVNULL)
+    with open(outline, "rb") as fh:
+        outline_sha = hashlib.sha256(fh.read()).hexdigest()
+    toc, toc_said = build("--toc", "outline.epub")
+    return [
+        ("with --include-all-html, the page contents doesn't name is under the unsorted group",
+         lambda: every.returncode == 0 and every_said.get("include all html") == "yes"
+         and every_said.get("placed") == {"pages": "2", "not in contents": "1",
+                                          "added to chapters": "0", "in new chapters": "0",
+                                          "under the unsorted group": "1"}
+         and "toc" not in every_said or fail(every.stderr[-600:] + repr(every_said))),
+        ("a second run, the package up to date, keeps what its build said",
+         lambda: again.returncode == 0 and again_said == every_said
+         or fail(again.stderr[-600:] + repr(again_said))),
+        ("with --toc, the outline by its path and SHA-256, and the pages it ordered",
+         lambda: toc.returncode == 0
+         and toc_said.get("toc") == {"file": "outline.epub", "sha256": outline_sha}
+         and toc_said.get("placed") == {"pages": "2", "not in contents": "2",
+                                        "ordered from the outline": "1",
+                                        "not in the outline": "1",
+                                        "outline entries matching no page": "0"}
+         or fail(toc.stderr[-600:] + repr(toc_said))),
+    ]
+
+
 def case_archive_dates(work):
     """The zip and tar files a run writes itself, a target's archive and a
     package's cartridge, are the same bytes when the book is built again
@@ -12830,6 +12895,7 @@ CASES = [
     ("one moment for a run's programs, and a second run building nothing", case_one_moment),
     ("the build record, of what a run built and with what", case_build_record),
     ("the build record, of what LaTeX built a PDF with", case_build_record_latex),
+    ("the build record, of how a package's pages were placed", case_build_record_packages),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

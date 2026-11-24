@@ -1281,6 +1281,19 @@ def check_buildrecord():
     buildrecord._write_new(target, "new")
     with open(victim, encoding="utf-8") as fh:
         kept = fh.read()
+    # A package's piece: read where its stamp is there, not where it
+    # isn't, and not through a link.
+    buildrecord.write_package(project, {"package": "cartridge", "zip": False})
+    buildrecord.write_package(project, {"package": "gone", "zip": True})
+    stamps_folder = os.path.join(project, "output", "work", "stamps")
+    os.makedirs(stamps_folder, exist_ok=True)
+    for name in ("cartridge", "planted"):
+        open(os.path.join(stamps_folder, f"package-{name}.json"), "w").close()
+    with open(os.path.join(work, "planted.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"package": "planted"}')
+    os.symlink(os.path.join(work, "planted.json"),
+               os.path.join(project, *buildrecord.PACKAGES, "planted.json"))
+    packages = buildrecord._packages(project)
     with open(target, encoding="utf-8") as fh:
         written = fh.read()
     return [
@@ -1295,6 +1308,9 @@ def check_buildrecord():
          and buildrecord._read_small(long_one) is None
          and buildrecord._read_small(secret) == '{"part": "x"}'
          or fail("read")),
+        ("a package's piece is read where its stamp is there, every value a string, and not "
+         "through a link",
+         lambda: packages == {"cartridge": {"zip": "no"}} or fail(repr(packages))),
         ("the record's new file is made afresh where a link was left there",
          lambda: kept == "kept" and written == "new" and not os.path.islink(target)
          and not os.path.lexists(target + ".new") or fail(repr((kept, written)))),

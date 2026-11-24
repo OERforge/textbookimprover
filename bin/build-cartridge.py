@@ -1322,6 +1322,9 @@ def main():
     # ---- contents --------------------------------------------------------
     available = set(stems)
     used, problems = set(), []
+    # How the pages not in contents were placed, for the build record
+    # (lib/buildrecord.py's write_package).
+    placement = {"pages": len(stems)}
 
     guessed_contents = False
     if config.get("contents"):
@@ -1384,6 +1387,9 @@ def main():
                                               TITLES, PARTS, ROLES)}],
                     available, used, problems))
 
+            placement.update({"not in contents": len(extra), "ordered from the outline":
+                              len(placed), "not in the outline": len(leftover),
+                              "outline entries matching no page": len(unmapped)})
             print(f"Read {os.path.basename(args.toc)}: {len(placed)} of "
                   f"{len(extra)} unplaced page(s) ordered from the outline.")
             if unmapped:
@@ -1458,6 +1464,9 @@ def main():
                       "items": sorted(unplaceable, key=natural_key)}],
                     available, used, problems))
 
+            placement.update({"not in contents": len(extra), "added to chapters": joined,
+                              "in new chapters": len(created),
+                              "under the unsorted group": len(unplaceable)})
             where = f" inside \"{dest_title}\"" if dest_title else ""
             summary = []
             if joined:
@@ -1481,6 +1490,7 @@ def main():
                 print(f"  Listed under grouping.back_matter in {CONFIG_NAME}, "
                       "they sort where the list puts them.", file=sys.stderr)
         else:
+            placement.update({"not in contents": len(extra), "left out": len(extra)})
             print(f"WARNING: {len(extra)} .html file(s) are not listed in "
                   "contents and were left out:", file=sys.stderr)
             for stem in extra:
@@ -1703,7 +1713,29 @@ def main():
     P(base).put_package_in_place(package)
     if stamp is not None:
         stamps.write_stamp(package_stamp_path(base, package), stamp)
+        record_package(base, package, args, placement)
     return 0
+
+
+def record_package(base, package, args, placement):
+    """What the build record says of this package's build, beside its
+    stamp: the outline --toc read, by its path and SHA-256, and how its
+    pages were placed (lib/buildrecord.py)."""
+    import buildrecord
+    values = {"package": P(base).package_name(package), "placed": placement,
+              "include all html": bool(args.include_all_html), "zip": bool(args.zip)}
+    if args.toc:
+        given = os.path.abspath(args.toc)
+        top = os.path.realpath(P(base).top())
+        real = os.path.realpath(given)
+        values["toc"] = {
+            "file": os.path.relpath(real, top) if real.startswith(top + os.sep) else given,
+            "sha256": buildrecord.digest(given) if os.path.isfile(given) else "missing"}
+    try:
+        buildrecord.write_package(base, values)
+    except OSError as exc:
+        print(f"NOTE: the build record won't say how package {values['package']} was "
+              f"built: {exc}.", file=sys.stderr)
 
 
 def shell_quote(value):

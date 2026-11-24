@@ -31,9 +31,12 @@ For each PDF LaTeX built, what it was built with (lib/texrecord.py): the
 release, the TeX Live packages and the fonts, and the files read outside
 TeX's tree, a file under --allow-read among them.
 
+For each package, how the pages its contents doesn't name were placed,
+and the outline --toc read, by its path and SHA-256, which
+build-cartridge.py leaves beside the package's stamp (write_package).
+
 Not in it yet, of what the archive plan's record holds: a deck's PDF's
-and a drawing's LaTeX, how many pages --toc and --include-all-html
-placed, and the checkers' versions.
+and a drawing's LaTeX, and the checkers' versions.
 
 Copyright 2026 Robert Szarka
 
@@ -55,6 +58,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import stat
 import sys
 import time
@@ -64,6 +68,7 @@ import projectpaths
 NAME = "ti-build.yaml"
 FORMAT = "1"
 FRAGMENTS = ("output", "work", "record")
+PACKAGES = FRAGMENTS + ("packages",)
 # The longest a part's piece may be (bytes): longer, it's passed over.
 LONGEST = 1 << 20
 # What isn't an output of the run's, under output/: its own files, and
@@ -197,6 +202,38 @@ def write_part(base, part, targets, limits=None, sandbox_env=(), sandbox_read=()
     if isinstance(previous, dict) and isinstance(previous.get("targets"), dict):
         values["targets"] = dict(previous["targets"], **values["targets"])
     _write_new(path, json.dumps(_strings(values), indent=1, sort_keys=True))
+
+
+def write_package(base, values):
+    """What a package's build said of itself (build-cartridge.py's
+    record_package), kept until the package is built again, as its stamp
+    is."""
+    folder = projectpaths.of(base).top(*PACKAGES)
+    os.makedirs(folder, exist_ok=True)
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", values["package"])[:120]
+    _write_new(os.path.join(folder, name + ".json"),
+               json.dumps(_strings(values), indent=1, sort_keys=True))
+
+
+def _packages(base):
+    """{package: what its build said}, for each package whose stamp is
+    there, read as a sandboxed run's data."""
+    folder = projectpaths.of(base).top(*PACKAGES)
+    stamps_folder = projectpaths.of(base).top(*projectpaths.STAMPS)
+    found = {}
+    if not os.path.isdir(folder) or os.path.islink(folder):
+        return found
+    for name in sorted(os.listdir(folder)):
+        try:
+            values = json.loads(_read_small(os.path.join(folder, name)) or "null")
+        except ValueError:
+            continue
+        if not isinstance(values, dict) or not isinstance(values.get("package"), str):
+            continue
+        package = values.pop("package")
+        if os.path.isfile(os.path.join(stamps_folder, f"package-{package}.json")):
+            found[package] = _strings(values)
+    return found
 
 
 def _fragments(base):
@@ -361,6 +398,7 @@ def values(base, argv, moment, moment_from, status):
         "platform": _platform(),
         "environment": environment,
         "parts": parts,
+        "packages built": _packages(base),
         "latex": _latex(base, {t for p in parts.values() if isinstance(p, dict)
                                for t in (p.get("targets") or {})}),
         "stamps": _stamps(base),
