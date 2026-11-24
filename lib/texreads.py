@@ -163,6 +163,19 @@ def allow(folders, home=None, anyway=()):
     return list(real)
 
 
+def not_packaged(package, target, folders, part):
+    """Why a package isn't built from target's pages, built with
+    --allow-read's folders, and how to have it built: the lines to say."""
+    return (f"{package} isn't packaged: its pages are target {target}'s, whose build ran "
+            f"LaTeX with --allow-read, letting it read files outside the project "
+            f"({', '.join(folders)}). A package holds only what the project does, so that "
+            "it can be built again from the project alone, and nothing from outside it goes "
+            "with the package to whoever it's given. To package it, put the files LaTeX "
+            f"read into the project (src/{part}/), or a package or class of yours into your "
+            "own TeX tree (TEXMFHOME, which LaTeX reads without --allow-read), and run "
+            f"again without --allow-read, which builds {target} again.")
+
+
 def _allowed(path, folder):
     """Whether path is under folder with no dot name between them, a
     folder --allow-read-anyway gave too."""

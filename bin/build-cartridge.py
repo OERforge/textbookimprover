@@ -83,6 +83,7 @@ from bookcontents import (  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import projectpaths  # noqa: E402
 import stamps  # noqa: E402
+import texreads  # noqa: E402
 
 P = projectpaths.of
 try:
@@ -1124,10 +1125,9 @@ def main():
         held = stamps.read_stamp(P(base).stamp_file(stamps.stamp_name("target", found[0]))) \
             if hasattr(P(base), "stamp_file") else None
         if held is not None and held.allowed and not args.init:
-            sys.exit(f"Target {found[0]} was built with --allow-read, which let LaTeX read "
-                     f"files outside the project ({', '.join(held.allowed)}), and a package "
-                     "holds only what the project does. Build it again without "
-                     "--allow-read, then package it. Nothing was packaged.")
+            sys.exit(texreads.not_packaged(f"The package {package}" if package
+                                           else "The cartridge", found[0], held.allowed,
+                                           found[2]) + " Nothing was packaged.")
     sample_path = P(base).report(SAMPLE_NAME)
     output_path = args.output or P(base).package_file("imsmanifest.xml", package)
 

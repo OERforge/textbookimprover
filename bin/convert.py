@@ -663,6 +663,10 @@ def stamp_targets(base, targets, latex_book=False):
     for target in targets:
         extra = {"derived": target.derived, "packaging_project": packaged,
                  "environment": stamps.environment_values(target.format)}
+        # --allow-read's folders are what LaTeX may read, so they count
+        # for a target whose build runs LaTeX with the book's files: a PDF,
+        # and every target of a LaTeX book, whose drawings it sets.
+        allowed = texreads.ALLOWED if ran_latex(target, latex_book) else []
         target.stamp = stamps.Stamp(
             settings=stamps.settings_digest(schema, project_schema, target.resolved, root,
                                             target.format, extra=extra),
@@ -671,17 +675,25 @@ def stamp_targets(base, targets, latex_book=False):
                                                                  latex_book)),
             software=stamps.software_digest(stamps.software(target.format, latex_book)),
             # --latexmkrc changes a LaTeX book's own PDF, --allow-read
-            # what any target's LaTeX may read, and --allow-remote-pictures
+            # what a target's LaTeX may read, and --allow-remote-pictures
             # whether a page's remote pictures are fetched; nothing else of this
             # script's changes a target: the packager's options are
             # counted in a package's stamp. The folders --allow-read gave
             # are kept in the stamp's file too, for the packager to refuse.
             options=stamps.options_digest(dict(
                 {"--latexmkrc": True} if LATEXMKRC and target.format == "pdf" else {},
-                **({"--allow-read": sorted(texreads.ALLOWED)} if texreads.ALLOWED else {}),
+                **({"--allow-read": sorted(allowed)} if allowed else {}),
                 **({"--allow-remote-pictures": True} if ALLOW_REMOTE else {}))),
-            allowed=texreads.ALLOWED)
+            allowed=allowed)
         target.stamp_path = P(base).stamp_file(stamps.stamp_name("target", target.name))
+
+
+def ran_latex(target, latex_book=False):
+    """Whether a target's build runs LaTeX with the book's files, which
+    --allow-read lets read outside the project: a PDF's, a LaTeX
+    target's, and every target's of a LaTeX book (stamps.TEX_FORMATS)."""
+    import stamps
+    return target.format in stamps.TEX_FORMATS or bool(latex_book)
 
 
 def target_present(target):
@@ -7875,9 +7887,10 @@ def main():
     for folder in allowed:
         say(f"WARNING: --allow-read: LaTeX may read its own files (packages, classes, "
             f"bibliographies, \\input files, not pictures) in {folder}, outside the project, "
-            "for this run. What it builds can't be packed, since the project doesn't hold "
-            "what it read: nothing is packaged, and build-cartridge.py refuses the targets "
-            "until they're built again without --allow-read.")
+            "for this run. A target whose build runs LaTeX (a PDF, and every target of a "
+            "LaTeX book) can't be packaged once it's built so, since the project doesn't "
+            "hold what it read: build-cartridge.py refuses it until it's built again "
+            "without --allow-read.")
     if args.clean and (args.check_only or args.src_status):
         die(f"--clean empties output/ to build everything, and "
             f"{'--check-only' if args.check_only else '--src-status'} builds nothing. "
@@ -8730,10 +8743,6 @@ def package_book(base, every, built, project, passthrough, args, pages_by_dir=No
     # its pages from the first html target's directory; a package whose
     # includes name another html target is a roadmap item.
     unnamed = 1 if UNNAMED else 0
-    if texreads.ALLOWED:
-        say("Nothing is packaged: --allow-read let LaTeX read files outside the project, "
-            "which a package can't hold. Build again without it to package the book.")
-        return unnamed or code
     if DECK_RUN:
         # Decks are packaged beside a book, or as a course of their own,
         # once a package can hold more than one target (ROADMAP.md).
@@ -8784,10 +8793,19 @@ def package_book(base, every, built, project, passthrough, args, pages_by_dir=No
     # target its includes names (or the project's first), so this run
     # builds the packages whose pages it made; a package the command line
     # names (--package) is the one asked for.
+    # A package of pages a target's LaTeX built with --allow-read isn't
+    # built (texreads.not_packaged), the run going on.
+    allowed = {t.name: t.stamp.allowed for t in every
+               if getattr(t, "stamp", None) is not None and t.stamp.allowed}
     packages = [None]
-    if not any(a in ("--package", "--target") or a.startswith(("--package=", "--target="))
-                 for a in passthrough):
+    named = any(a in ("--package", "--target") or a.startswith(("--package=", "--target="))
+                for a in passthrough)
+    if not named:
         declared = oerconfig.declared_targets(P(base).packaging_file())
+        if not declared and html_targets[0].name in allowed:
+            say("NOTE: " + texreads.not_packaged("The cartridge", html_targets[0].name,
+                                                 allowed[html_targets[0].name], PART))
+            return unnamed or code
         if declared:
             packages, made = [], {t.name for t in html_targets}
             for name, block in declared.items():
@@ -8799,7 +8817,13 @@ def package_book(base, every, built, project, passthrough, args, pages_by_dir=No
                 except oerconfig.ConfigError as exc:
                     die(str(exc))
                 if found and found[2] == PART and found[0] in made:
+                    if found[0] in allowed:
+                        say("NOTE: " + texreads.not_packaged(
+                            f"The package {name}", found[0], allowed[found[0]], PART))
+                        continue
                     packages.append(name)
+            if not packages and any(name in allowed for name in made):
+                return unnamed or code
             if not packages:
                 say(f"No package in {PACKAGING_NAME} is made from this part's pages, so "
                     "nothing is packaged here.")

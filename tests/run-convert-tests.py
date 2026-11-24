@@ -1340,10 +1340,27 @@ def case_latex_reads(work):
     refused, refused_said = build(raw)
     refused_pdf = os.path.exists(os.path.join(raw, pdf))
     allowed, allowed_said = build(raw, "--allow-read", secret)
-    stamp = os.path.join(raw, "output", "work", "stamps", "target-html.json")
-    held = open(stamp, encoding="utf-8").read() if os.path.exists(stamp) else ""
+
+    def stamp_of(folder, target):
+        path = os.path.join(folder, "output", "work", "stamps", f"target-{target}.json")
+        return open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    held, html_held = stamp_of(raw, "pdf"), stamp_of(raw, "html")
     packed = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"), "-d", raw],
                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    # A LaTeX book whose package of its own is outside, found by TEXINPUTS:
+    # every target of a LaTeX book runs LaTeX with its preamble.
+    write("mymacros.sty", "\\newcommand{\\mymacro}{Macro words.}\n", secret)
+    latex_book = project("pkg", ("book.tex", "\\documentclass{book}\n\\usepackage{mymacros}\n"
+                                 "\\begin{document}\n\\chapter{One}\nWords.\n"
+                                 "\\end{document}\n"), targets="")
+    pkg_run = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", "--allow-read", secret],
+        cwd=latex_book, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        env=dict(os.environ, TEXINPUTS=secret + os.pathsep))
+    pkg_said = pkg_run.stdout + pkg_run.stderr
+    pkg_packed = subprocess.run(
+        ["python3", os.path.join(BIN, "build-cartridge.py"), "-d", latex_book],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     # A folder --allow-read refuses, behind a dot name, which
     # --allow-read-anyway lets LaTeX read, build-pdf.py taking it too.
@@ -1387,13 +1404,20 @@ def case_latex_reads(work):
          and f"the page one's raw LaTeX: \\input{{{outside}}}, which leads out of the project"
          in refused_said and "--allow-read FOLDER" in refused_said and not refused_pdf
          or fail(refused_said[-800:])),
-        ("--allow-read FOLDER lets it read the file, saying a build made so can't be packed, "
-         "packages nothing, and the stamps name the folder",
+        ("--allow-read FOLDER lets it read the file, warning that a target whose build runs "
+         "LaTeX can't be packaged, and the PDF's stamp names the folder, but not the pages', "
+         "whose build ran no LaTeX, so they're packaged, by the run and by hand",
          lambda: allowed.returncode == 0 and os.path.exists(os.path.join(raw, pdf))
-         and f"WARNING: --allow-read: LaTeX may read its own files" in allowed_said
-         and "Nothing is packaged: --allow-read" in allowed_said
+         and "WARNING: --allow-read: LaTeX may read its own files" in allowed_said
+         and "A target whose build runs LaTeX (a PDF, and every target of a LaTeX book) "
+         "can't be packaged once it's built so" in allowed_said
          and '"allow_read"' in held and os.path.realpath(secret) in held
-         or fail(allowed_said[-800:])),
+         and html_held and '"allow_read"' not in html_held
+         and "isn't packaged" not in allowed_said
+         and os.path.isfile(os.path.join(raw, "output", "packages", "cartridge",
+                                         "imsmanifest.xml"))
+         and packed.returncode == 0
+         or fail(allowed_said[-800:] + packed.stderr[-300:])),
         ("--allow-read refuses a folder behind a dot name, offering --allow-read-anyway, "
          "which lets LaTeX read it, warning of the rule it overrides",
          lambda: anyway_refused.returncode != 0
@@ -1403,10 +1427,18 @@ def case_latex_reads(work):
          and f"WARNING: --allow-read-anyway {os.path.realpath(kept)}: --allow-read would "
          "refuse it, since that's behind a dot name (.kept)" in anyway_said
          or fail(anyway_refused_said[-400:] + anyway_said[-800:])),
-        ("and the packager refuses a target its stamp says was built so",
-         lambda: packed.returncode != 0
-         and "Target html was built with --allow-read" in packed.stderr
-         or fail(packed.stdout[-300:] + packed.stderr[-300:])),
+        ("a LaTeX book's pages built with --allow-read aren't packaged: the run says why and "
+         "how to package them, and goes on, and the packager by hand refuses them",
+         lambda: pkg_run.returncode == 0
+         and "NOTE: The cartridge isn't packaged: its pages are target html's, whose build ran "
+         "LaTeX with --allow-read" in pkg_said
+         and "(TEXMFHOME, which LaTeX reads without --allow-read), and run again without "
+         "--allow-read, which builds html again." in pkg_said
+         and not os.path.exists(os.path.join(latex_book, "output", "packages"))
+         and pkg_packed.returncode != 0
+         and "The cartridge isn't packaged: its pages are target html's" in pkg_packed.stderr
+         and pkg_packed.stderr.rstrip().endswith("Nothing was packaged.")
+         or fail(pkg_said[-800:] + pkg_packed.stderr[-400:])),
         ("Lua reading a file outside is warned of, and LaTeX's own list of what it opened "
          "stops the PDF, naming the file",
          lambda: lua_run.returncode != 0
