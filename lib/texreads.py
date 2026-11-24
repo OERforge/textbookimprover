@@ -69,21 +69,107 @@ TEX_EXTENSIONS = (".tex", ".ltx", ".sty", ".cls", ".clo", ".def", ".cfg", ".fd",
 LARGEST = 8 << 20
 
 
-def allow(folders):
+# The system's own folders, which hold programs, libraries, devices, and
+# the system's settings and state, never a book's files: --allow-read
+# refuses each and anything under it. TeX's own trees among them
+# (/usr/share/texlive, /var/lib/texmf, /etc/texmf) are read without it.
+SYSTEM_FOLDERS = ("bin", "boot", "dev", "etc", "lib", "lib32", "lib64", "libx32", "proc",
+                  "run", "sbin", "snap", "sys", "usr", "var")
+# root's home folder, refused whoever runs the build, as the home folder
+# is: a folder under it may be named.
+ROOT_HOME = "/root"
+# A Windows drive's own folders, under WSL's /mnt/<drive>/.
+WINDOWS_FOLDERS = ("windows", "program files", "program files (x86)", "programdata")
+
+
+def refused_folder(path, home=None):
+    """Why --allow-read refuses path, a real folder, or None: the whole
+    file system; a system folder or one under it; a folder of mounts
+    (/mnt, /media) or a drive's root under it, or a Windows drive's own
+    folders; the home folder, or a folder holding it, and /root; or a folder reached
+    through a dot name (~/.ssh, ~/.config), which holds settings and
+    keys."""
+    home = os.path.realpath(home or os.path.expanduser("~"))
+    parts = [p for p in path.split(os.sep) if p]
+    if not parts:
+        return "that's the whole file system"
+    if parts[0] in SYSTEM_FOLDERS:
+        return (f"that's the system's /{parts[0]} folder, or in it, which holds programs, "
+                "libraries, devices, or the system's settings and state (TeX's own trees "
+                "there are read without --allow-read)")
+    if parts[0] in ("mnt", "media") and len(parts) <= 2:
+        return "that's a folder of drives, or a drive's top"
+    if parts[0] == "mnt" and len(parts) >= 3 and parts[2].lower() in WINDOWS_FOLDERS:
+        return "that's a Windows drive's own folder, of its programs or settings"
+    if _under(home, path):
+        return "that's your home folder, or holds it, with your settings and keys"
+    if path == ROOT_HOME:
+        return "that's root's home folder, with its settings and keys"
+    dotted = next((p for p in parts if p.startswith(".")), None)
+    if dotted:
+        return f"that's behind a dot name ({dotted}), where settings and keys are kept"
+    return None
+
+
+def refused_anyway(path, home=None):
+    """Why --allow-read-anyway still refuses path, a real folder, or None:
+    the whole file system, or the home folder or a folder holding it,
+    which the sandbox never shows (sandbox.shown), and /root."""
+    home = os.path.realpath(home or os.path.expanduser("~"))
+    if path == os.sep:
+        return "that's the whole file system"
+    if _under(home, path):
+        return "that's your home folder, or holds it, with your settings and keys"
+    if path == ROOT_HOME:
+        return "that's root's home folder, with its settings and keys"
+    return None
+
+
+# The folders --allow-read-anyway accepted that --allow-read refuses,
+# each with the reason it overrode, for the run to warn of.
+OVERRIDDEN = {}
+
+
+def allow(folders, home=None, anyway=()):
     """Accept LaTeX's own files under each of folders (--allow-read) for
-    the rest of the run. Returns the folders as real paths; one that
-    isn't a folder raises ValueError, naming it."""
+    the rest of the run, none behind a dot name below it, and under each
+    of anyway (--allow-read-anyway) too, which refused_folder's rules
+    don't hold back but refused_anyway's do. Returns the folders as real
+    paths; one that isn't a folder, or that its rules refuse, raises
+    ValueError, naming it. OVERRIDDEN says which rule each of anyway's
+    overrode."""
     real = []
-    for folder in folders or ():
-        path = os.path.realpath(os.path.expanduser(str(folder)))
-        if not os.path.isdir(path):
-            raise ValueError(f"--allow-read {folder}: there's no folder there")
-        if path == os.sep:
-            raise ValueError(f"--allow-read {folder}: that's the whole file system")
-        if path not in real:
-            real.append(path)
+    OVERRIDDEN.clear()
+    for option, given in (("--allow-read", folders), ("--allow-read-anyway", anyway)):
+        for folder in given or ():
+            path = os.path.realpath(os.path.expanduser(str(folder)))
+            if not os.path.isdir(path):
+                raise ValueError(f"{option} {folder}: there's no folder there")
+            why = refused_folder(path, home)
+            if option == "--allow-read-anyway":
+                hard = refused_anyway(path, home)
+                if hard:
+                    raise ValueError(f"{option} {folder}: {hard}, which nothing lets LaTeX "
+                                     "read. Name the folder the book's files are in")
+                if why:
+                    OVERRIDDEN[path] = why
+            elif why:
+                raise ValueError(f"{option} {folder}: {why}. Name the folder the book's "
+                                 "files are in, or, with your eyes open, give it as "
+                                 "--allow-read-anyway")
+            if path not in real:
+                real.append(path)
     ALLOWED[:] = real
     return list(real)
+
+
+def _allowed(path, folder):
+    """Whether path is under folder with no dot name between them, a
+    folder --allow-read-anyway gave too."""
+    if not _under(path, folder):
+        return False
+    below = os.path.relpath(path, folder)
+    return not any(p.startswith(".") for p in below.split(os.sep) if p != ".")
 
 
 def _under(path, folder):
@@ -164,7 +250,7 @@ def allowed_elsewhere(path, fonts=True):
         return True
     if any(_under(path, tree) for tree in tex_trees()):
         return True
-    if not is_picture(path) and any(_under(path, folder) for folder in ALLOWED):
+    if not is_picture(path) and any(_allowed(path, folder) for folder in ALLOWED):
         return True
     if fonts:
         if any(_under(path, folder) for folder in font_settings()):

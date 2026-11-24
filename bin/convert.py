@@ -7818,8 +7818,13 @@ def main():
                         help="let a LaTeX book's LaTeX, and the LaTeX a page supplies, read "
                              "LaTeX's own files (a package, a class, a bibliography, an "
                              "\\input) in FOLDER, outside the project, for this run; may be "
-                             "given again. Not a picture. A build made with it can't be "
-                             "packed")
+                             "given again. Not a picture, nor the system's folders, the home "
+                             "folder, or a dot folder. A build made with it can't be packed")
+    parser.add_argument("--allow-read-anyway", action="append", default=[], metavar="FOLDER",
+                        help="as --allow-read, for a folder it refuses (a system folder, a "
+                             "drive's, one behind a dot name), with your eyes open: never "
+                             "the whole file system, your home folder or one holding it, nor /root; "
+                             "may be given again")
     parser.add_argument("--allow-remote-pictures", action="store_true",
                         help="leave a picture or a medium a page names by URL for a Word, "
                              "PDF, or PowerPoint target to fetch as it builds, and the "
@@ -7858,10 +7863,15 @@ def main():
     # Before the run moves to the project's folder, so a folder given
     # from where it was started is that one.
     try:
-        allowed = texreads.allow(args.allow_read)
+        allowed = texreads.allow(args.allow_read, anyway=args.allow_read_anyway)
     except ValueError as exc:
         die(f"{exc}. Nothing was converted.")
-    ALLOW_ARGS = [a for folder in allowed for a in ("--allow-read", folder)]
+    ALLOW_ARGS = [a for folder in allowed
+                  for a in ("--allow-read-anyway" if folder in texreads.OVERRIDDEN
+                            else "--allow-read", folder)]
+    for folder, why in texreads.OVERRIDDEN.items():
+        say(f"WARNING: --allow-read-anyway {folder}: --allow-read would refuse it, since "
+            f"{why}. LaTeX may read its own files there for this run, as you asked.")
     for folder in allowed:
         say(f"WARNING: --allow-read: LaTeX may read its own files (packages, classes, "
             f"bibliographies, \\input files, not pictures) in {folder}, outside the project, "

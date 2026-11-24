@@ -1067,6 +1067,60 @@ def check_texreads():
         refused = ""
     except ValueError as exc:
         refused = str(exc)
+    # The folders --allow-read refuses, by what they are: a stand-in home
+    # under the scratch folder, so the check doesn't depend on whose it is.
+    home = os.path.join(work, "home", "someone")
+    for folder in (os.path.join(home, ".ssh"), os.path.join(home, "shared", ".cache", "x"),
+                   os.path.join(home, "shared", "macros")):
+        os.makedirs(folder, exist_ok=True)
+    kinds = {path: texreads.refused_folder(path, home) for path in (
+        "/", "/etc", "/usr/share/texmf", "/var/lib", "/proc/self", "/mnt", "/mnt/c",
+        "/mnt/c/Windows/Fonts", "/mnt/c/Users/someone/shared", "/media/usb/shared",
+        "/opt/shared", "/srv/books", "/root", "/root/shared", home, os.path.dirname(home),
+        os.path.join(home, ".ssh"),
+        os.path.join(home, "shared", ".cache", "x"), os.path.join(home, "shared", "macros"))}
+    taken = [os.path.join(home, "shared")]
+    with open(os.path.join(home, "shared", "macros", "m.tex"), "w") as fh:
+        fh.write("x")
+    with open(os.path.join(home, "shared", ".cache", "x", "k.tex"), "w") as fh:
+        fh.write("x")
+    texreads.allow(taken, home)
+    below = (texreads.allowed_elsewhere(os.path.join(home, "shared", "macros", "m.tex"),
+                                        fonts=False),
+             texreads.allowed_elsewhere(os.path.join(home, "shared", ".cache", "x", "k.tex"),
+                                        fonts=False))
+    texreads.ALLOWED[:] = []
+    try:
+        texreads.allow([home], home)
+        home_refused = ""
+    except ValueError as exc:
+        home_refused = str(exc)
+    # --allow-read-anyway: what --allow-read refuses, but for the whole
+    # file system and the home folder, which it refuses too.
+    dotted = os.path.join(work, "elsewhere", ".kept")
+    for folder in (os.path.join(dotted, "macros"), os.path.join(dotted, "macros", ".cache")):
+        os.makedirs(folder, exist_ok=True)
+    for name in ("m.tex", os.path.join(".cache", "k.tex")):
+        with open(os.path.join(dotted, "macros", name), "w") as fh:
+            fh.write("x")
+
+    def refusal(folders=(), anyway=()):
+        try:
+            texreads.allow(folders, home, anyway=anyway)
+            return ""
+        except ValueError as exc:
+            return str(exc)
+    plain_says = refusal([dotted])
+    anyway_taken = texreads.allow([], home, anyway=["/usr/share", dotted])
+    overridden = dict(texreads.OVERRIDDEN)
+    anyway_below = (texreads.allowed_elsewhere(os.path.join(dotted, "macros", "m.tex"),
+                                               fonts=False),
+                    texreads.allowed_elsewhere(os.path.join(dotted, "macros", ".cache",
+                                                            "k.tex"), fonts=False))
+    anyway_refused = (refusal(anyway=["/"]), refusal(anyway=[home]),
+                      refusal(anyway=[os.path.dirname(home)]), refusal(anyway=["/root"]))
+    texreads.ALLOWED[:] = []
+    texreads.OVERRIDDEN.clear()
     return [
         ("a name written out that leads outside stops, by each command that reads a file: "
          "a package, \\input with and without braces, a picture, expl3's file input, "
@@ -1110,6 +1164,36 @@ def check_texreads():
          and "allow_read" not in plain.as_dict() or fail(str(back and back.allowed))),
         ("--allow-read of a folder that isn't there is refused, naming it",
          lambda: "--allow-read" in refused and "nowhere" in refused or fail(refused)),
+        ("--allow-read refuses the system's folders and what's in them, a folder of drives "
+         "and a drive's top, a Windows drive's own folders, the home folder and what holds "
+         "it, /root, and a folder behind a dot name; a folder of the person's elsewhere, "
+         "under the home folder or /root too, is taken",
+         lambda: [p for p, why in kinds.items() if why is None] == [
+             "/mnt/c/Users/someone/shared", "/media/usb/shared", "/opt/shared", "/srv/books",
+             "/root/shared", os.path.join(home, "shared", "macros")]
+         and "root's home folder" in kinds["/root"]
+         and "system's /etc folder" in kinds["/etc"] and "system's /usr" in
+         kinds["/usr/share/texmf"] and "drive's top" in kinds["/mnt/c"]
+         and "Windows drive's own" in kinds["/mnt/c/Windows/Fonts"]
+         and "home folder" in kinds[home] and "home folder" in kinds[os.path.dirname(home)]
+         and "dot name (.ssh)" in kinds[os.path.join(home, ".ssh")]
+         and "home folder" in home_refused and "Name the folder" in home_refused
+         or fail(repr(kinds) + home_refused)),
+        ("under a folder it takes, a file behind a dot name isn't read",
+         lambda: below == (True, False) or fail(repr(below))),
+        ("a folder it refuses is offered as --allow-read-anyway's",
+         lambda: "give it as --allow-read-anyway" in plain_says or fail(plain_says)),
+        ("--allow-read-anyway takes a folder --allow-read refuses, recording which rule it "
+         "overrode; a file behind a dot name below it still isn't read",
+         lambda: anyway_taken == ["/usr/share", os.path.realpath(dotted)]
+         and "system's /usr" in overridden.get("/usr/share", "")
+         and "dot name (.kept)" in overridden.get(os.path.realpath(dotted), "")
+         and anyway_below == (True, False) or fail(f"{anyway_taken} {overridden} {anyway_below}")),
+        ("but not the whole file system, the home folder, what holds it, or /root",
+         lambda: "whole file system" in anyway_refused[0]
+         and all("home folder" in r and "nothing lets LaTeX read" in r
+                 for r in anyway_refused[1:]) and "root's" in anyway_refused[3]
+         or fail(repr(anyway_refused))),
     ]
 
 def check_figure_names():

@@ -2430,8 +2430,13 @@ def main():
     parser.add_argument("--allow-read", action="append", default=[], metavar="FOLDER",
                         help="let LaTeX read the book's own LaTeX files (a package, a "
                         "class, a bibliography, an \\input) in FOLDER, outside the "
-                        "project, for this run; may be given again. Not a picture. A "
-                        "build made with it can't be packed")
+                        "project, for this run; may be given again. Not a picture, nor "
+                        "the system's folders, the home folder, or a dot folder. A build "
+                        "made with it can't be packed")
+    parser.add_argument("--allow-read-anyway", action="append", default=[], metavar="FOLDER",
+                        help="as --allow-read, for a folder it refuses (a system folder, a "
+                        "drive's, one behind a dot name), with your eyes open: never the "
+                        "whole file system, the home folder or one holding it, nor /root")
     args = parser.parse_args()
     why = projectpaths.not_a_project(args.dir)
     if why:
@@ -2445,7 +2450,7 @@ def main():
     projectpaths.set_part(args.part, args.dir)
     projectpaths.build_beside(args.dir, args.beside)
     try:
-        texreads.allow(args.allow_read)
+        texreads.allow(args.allow_read, anyway=args.allow_read_anyway)
     except ValueError as exc:
         sys.exit(f"{exc}. Nothing was built.")
 

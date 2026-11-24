@@ -1345,6 +1345,14 @@ def case_latex_reads(work):
     packed = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"), "-d", raw],
                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
+    # A folder --allow-read refuses, behind a dot name, which
+    # --allow-read-anyway lets LaTeX read, build-pdf.py taking it too.
+    kept = os.path.join(secret, ".kept")
+    write("kept.tex", "The kept words.\n", kept)
+    anyway = project("anyway", ("one.md", "# One\n\nWords.\n\n```{=latex}\n"
+                                f"\\input{{{os.path.join(kept, 'kept.tex')}}}\n```\n"))
+    anyway_refused, anyway_refused_said = build(anyway, "--allow-read", kept)
+    anyway_run, anyway_said = build(anyway, "--allow-read-anyway", kept)
     lua = project("lua", ("one.md", "# One\n\nWords.\n\n```{=latex}\n\\directlua{"
                           f'local f = io.open("{outside}") '
                           "if f then tex.print(f:read()) f:close() end}\n```\n"))
@@ -1386,6 +1394,15 @@ def case_latex_reads(work):
          and "Nothing is packaged: --allow-read" in allowed_said
          and '"allow_read"' in held and os.path.realpath(secret) in held
          or fail(allowed_said[-800:])),
+        ("--allow-read refuses a folder behind a dot name, offering --allow-read-anyway, "
+         "which lets LaTeX read it, warning of the rule it overrides",
+         lambda: anyway_refused.returncode != 0
+         and "that's behind a dot name (.kept)" in anyway_refused_said
+         and "give it as --allow-read-anyway" in anyway_refused_said
+         and anyway_run.returncode == 0 and os.path.exists(os.path.join(anyway, pdf))
+         and f"WARNING: --allow-read-anyway {os.path.realpath(kept)}: --allow-read would "
+         "refuse it, since that's behind a dot name (.kept)" in anyway_said
+         or fail(anyway_refused_said[-400:] + anyway_said[-800:])),
         ("and the packager refuses a target its stamp says was built so",
          lambda: packed.returncode != 0
          and "Target html was built with --allow-read" in packed.stderr
