@@ -307,7 +307,10 @@ def settings_values(schema, project_schema, resolved, root, fmt, epoch=None, ext
     settings = {k: v for k, v in resolved.settings.items()
                 if k not in FORMAT_SECTIONS or k in keep}
     if epoch is None:
-        epoch = os.environ.get("SOURCE_DATE_EPOCH", "")
+        # The person's, not one a run set itself for its programs, which
+        # differs every run (tiversion.one_moment).
+        import tiversion
+        epoch = tiversion.given_epoch()
     return {
         "project": _paths_relative(project_schema.root, resolved.project, root),
         "settings": _paths_relative(schema.root, settings, root),

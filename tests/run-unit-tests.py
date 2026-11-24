@@ -1209,6 +1209,48 @@ def check_sandbox():
     ]
 
 
+def check_tiversion():
+    """lib/tiversion.py: the run's one moment, the person's
+    SOURCE_DATE_EPOCH where it's set and the run's start, set and marked,
+    where it isn't; the person's alone given to a stamp; and what a build
+    record says of this copy, a checkout's commit or none for a copy that
+    isn't one."""
+    import tiversion
+    given = {"SOURCE_DATE_EPOCH": "1763251201"}
+    given_moment = tiversion.one_moment(given)
+    unset = {}
+    before = int(time.time())
+    own_moment = tiversion.one_moment(unset)
+    again = tiversion.one_moment(dict(unset))
+    work = scratch("tiversion-")
+    copy = os.path.join(work, "copy")
+    for folder in ("bin", "lib"):
+        os.makedirs(os.path.join(copy, folder))
+    here = tiversion.describe()
+    elsewhere = tiversion.describe(copy)
+    return [
+        ("the person's SOURCE_DATE_EPOCH is the run's moment, untouched",
+         lambda: given_moment == (1763251201, "SOURCE_DATE_EPOCH")
+         and given == {"SOURCE_DATE_EPOCH": "1763251201"} or fail(repr((given_moment, given)))),
+        ("without it, the run's start, set and marked for the programs it starts, who take "
+         "it as the run's",
+         lambda: own_moment[1] == "the run's start" and before <= own_moment[0] <= time.time()
+         and unset == {"SOURCE_DATE_EPOCH": str(own_moment[0]),
+                       tiversion.RUN_EPOCH: str(own_moment[0])}
+         and again == own_moment or fail(repr((own_moment, unset, again)))),
+        ("a stamp is given the person's moment, and none where the run set its own",
+         lambda: tiversion.given_epoch(given) == "1763251201"
+         and tiversion.given_epoch(unset) == "" and tiversion.given_epoch({}) == ""
+         or fail(repr((tiversion.given_epoch(given), tiversion.given_epoch(unset))))),
+        ("a checkout's record names its commit, and a copy that isn't one names none",
+         lambda: here["version"] == tiversion.VERSION
+         and (re.fullmatch(r"[0-9a-f]{40}", here["commit"]) and here["changed"] in ("yes", "no")
+              or not os.path.exists(os.path.join(ROOT, ".git")))
+         and elsewhere["commit"] == "none" and elsewhere["changed"] == "unknown"
+         and elsewhere["digest"] != here["digest"] or fail(repr((here, elsewhere)))),
+    ]
+
+
 def check_archivedates():
     """lib/archivedates.py: a zip member's date from SOURCE_DATE_EPOCH, in
     UTC, within a zip's years and to its even second; the file's own
@@ -2705,13 +2747,14 @@ def check_consistency():
     builtin = re.findall(
         r'"([^"]+)"',
         re.search(r"BACK_MATTER_ORDER = \[(.*?)\]", source, re.S).group(1))
-    # The newest release, as the changelog's first dated section, the
-    # audit's version, and the installation page's download example
-    # name it; the release commit changes all three.
+    # The newest release, as the changelog's first dated section,
+    # TextbookImprover's version (lib/tiversion.py, which the audit and
+    # the build record read), and the installation page's download
+    # example name it; the release commit changes all three.
     changelog = open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
     released = re.search(r"^## \[(\d+\.\d+)\] - ", changelog, re.M).group(1)
-    audit = re.search(r'^VERSION = "([^"]+)"', open(
-        os.path.join(ROOT, "bin", "audit.py"), encoding="utf-8").read(), re.M).group(1)
+    version = re.search(r'^VERSION = "([^"]+)"', open(
+        os.path.join(ROOT, "lib", "tiversion.py"), encoding="utf-8").read(), re.M).group(1)
     installation = open(os.path.join(ROOT, "docs", "installation.md"),
                         encoding="utf-8").read()
     named = set(re.findall(r"textbookimprover-(\d+\.\d+)", installation)
@@ -2750,8 +2793,8 @@ def check_consistency():
     return [
         ("the schema's back-matter default matches the built-in order",
          lambda: list(declared) == builtin),
-        ("the newest release is the one the audit reports and the installation page "
-         "downloads", lambda: audit == released and named == {released}),
+        ("the newest release is TextbookImprover's version, and the one the installation page "
+         "downloads", lambda: version == released and named == {released}),
         ("the oldest Pandoc is the same everywhere it's checked, and every suite that runs "
          "convert.py checks it", lambda: len(pandoc_minimums) == 1
          and {"run-convert-tests.py", "run-latex-tests.py", "run-pdf-tests.py",
@@ -12815,6 +12858,8 @@ GROUPS = [
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
     ("what a page names by URL", check_named_by_url),
     ("util/import-files.py, bringing what a page names into its part", check_import_files),
+    ("lib/tiversion.py, the version, the run's one moment, and what a record says of this "
+     "copy", check_tiversion),
     ("lib/archivedates.py, the dates, modes, and owners in TextbookImprover's own zips and "
      "tars", check_archivedates),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),

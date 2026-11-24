@@ -2345,8 +2345,16 @@ def write_latex(base, name, resolved, project, document, out_dir):
         # PDF target's is.
         template = latexbuild.book_template(work, source=own_template(base, resolved))
         record_path = os.path.join(work, "pdf-record.json")
+        # Under SOURCE_DATE_EPOCH, Pandoc's template names the PDF's ID,
+        # in conditionals Pandoc's LaTeX reader stops on in this master
+        # (though not in a short file of Pandoc's own): the LaTeX names it
+        # only under yours, not the moment a run gives itself
+        # (tiversion.one_moment), as before the run had one.
+        import tiversion
+        steady = [] if tiversion.given_epoch() else ["-V", "pdf-trailer-id="]
         done = subprocess.run([*pandocrun.PANDOC, "-f", "json", "-t", "latex", "-s", book_json]
-                              + filters + (["--template", template] if template else []),
+                              + filters + steady
+                              + (["--template", template] if template else []),
                               cwd=P(base).run_dir(), env=dict(environment, OER_PDF_RECORD=record_path),
                               capture_output=True, text=True)
         said, note = bookmark_said(done.stderr, record_path,

@@ -711,6 +711,68 @@ def case_tree_layout(work):
     ]
 
 
+def case_one_moment(work):
+    """A run with no SOURCE_DATE_EPOCH gives every program it starts one
+    moment, the run's start, so its EPUB and its Word file are dated alike;
+    and a second run, at another moment, builds nothing, since a target's
+    stamp takes the moment only where the person set it."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build():
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("SOURCE_DATE_EPOCH", "TEXTBOOKIMPROVER_RUN_EPOCH")}
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
+            cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
+        said = done.stdout + done.stderr
+        return done, set(re.findall(r"^(\w[\w-]*): built, since", said, re.M))
+
+    def dates():
+        found = {}
+        epub = os.path.join(work, "output", "epub", "org.example.moment.epub")
+        word = os.path.join(work, "output", "word", "one.docx")
+        if os.path.isfile(epub):
+            with zipfile.ZipFile(epub) as archive:
+                opf = next(n for n in archive.namelist() if n.endswith(".opf"))
+                found["epub"] = re.search(r'dcterms:modified">([^<]+)<',
+                                          archive.read(opf).decode("utf-8"))
+        if os.path.isfile(word):
+            with zipfile.ZipFile(word) as archive:
+                found["word"] = re.search(r"<dcterms:modified[^>]*>([^<]+)<",
+                                          archive.read("docProps/core.xml").decode("utf-8"))
+        return {k: v.group(1) if v else None for k, v in found.items()}
+
+    write("project.yaml", "project:\n  identifier: org.example.moment\n  title: Moment\n"
+          "  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  epub:\n    format: epub3\n  word:\n"
+          "    format: docx\n")
+    write("src/book/one.md", "# One\n\nA page.\n")
+    began = time.time()
+    first, first_built = build()
+    stamped = dates()
+    time.sleep(1.5)
+    second, second_built = build()
+    moment = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(began)))
+    later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(began) + 1))
+    return [
+        ("the EPUB and the Word file are dated by one moment, the run's start",
+         lambda: first.returncode == 0 and first_built == {"epub", "word"}
+         and stamped.get("epub") and stamped.get("epub") == stamped.get("word")
+         and stamped["epub"] in (moment, later)
+         or fail(first.stderr[-600:] + repr((stamped, moment)))),
+        ("and a second run, at another moment, builds nothing",
+         lambda: second.returncode == 0 and second_built == set()
+         or fail(second.stderr[-600:] + repr(second_built))),
+    ]
+
+
 def case_archive_dates(work):
     """The zip and tar files a run writes itself, a target's archive and a
     package's cartridge, are the same bytes when the book is built again
@@ -12600,6 +12662,7 @@ CASES = [
     ("a target built beside its folder and swapped in", case_built_beside),
     ("a target's archive and a cartridge the same bytes when built again",
      case_archive_dates),
+    ("one moment for a run's programs, and a second run building nothing", case_one_moment),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

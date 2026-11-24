@@ -91,6 +91,7 @@ P = projectpaths.of
 try:
     import alttext
     import archivedates
+    import tiversion
     import decksave
     import docxrepair
     import docxremediate
@@ -1737,6 +1738,8 @@ SANDBOX_READ = []
 # What each program the run starts may use, and how many run side by side
 # (--max-memory, --max-time, --jobs; lib/limits.py).
 LIMITS = limits.Limits()
+# The run's one moment and where it came from (tiversion.one_moment).
+MOMENT = (None, None)
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -8032,6 +8035,11 @@ def main():
                              "in one (check-output.py --verbose)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
+    # One moment for the whole run, given to every program it starts as
+    # SOURCE_DATE_EPOCH: the person's, or the run's start, so its outputs
+    # are dated alike (lib/tiversion.py).
+    global MOMENT
+    MOMENT = tiversion.one_moment()
     global LATEXMKRC, ALLOW_ARGS, ALLOW_REMOTE
     LATEXMKRC = args.latexmkrc
     ALLOW_REMOTE = args.allow_remote_pictures
