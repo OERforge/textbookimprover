@@ -48,8 +48,12 @@ import csv
 import json
 import re
 import shutil
+import signal
+import socket
 import struct
 import tempfile
+import textwrap
+import time
 import sys
 import warnings
 import zipfile
@@ -863,6 +867,168 @@ def check_reads():
          "too, and one in a dot folder, which isn't read, isn't",
          lambda: links == ["sidecars/book/table-headers.csv", "src/book/assets/out.png",
                            "src/book/folder", "src/book/notes.png"] or fail(str(links))),
+    ]
+
+
+def check_sandbox():
+    """lib/sandbox.py: a program run in each sandbox this machine has,
+    bubblewrap's and Landlock's, reads the project and what it's shown,
+    writes output/ alone, and can't read a file elsewhere, reach a port on
+    this machine, or see a variable the run didn't keep; what's shown is
+    never the whole file system, the home folder, or a folder holding it;
+    and a run that says it's inside when it isn't is refused."""
+    import sandbox
+    work = scratch("sandbox-")
+    base = os.path.join(work, "project")
+    os.makedirs(os.path.join(base, "output"))
+    outside = os.path.join(work, "outside.txt")
+    with open(outside, "w", encoding="utf-8") as fh:
+        fh.write("outside\n")
+    shown_dir = os.path.join(work, "shown")
+    os.makedirs(shown_dir)
+    with open(os.path.join(shown_dir, "shown.txt"), "w", encoding="utf-8") as fh:
+        fh.write("shown\n")
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    probe = os.path.join(work, "probe.py")
+    with open(probe, "w", encoding="utf-8") as fh:
+        fh.write(textwrap.dedent("""\
+            import json, os, socket, sys
+            def tried(action):
+                try:
+                    action()
+                    return "yes"
+                except OSError as exc:
+                    return type(exc).__name__
+            found = {
+                "outside": tried(lambda: open(sys.argv[1]).read()),
+                "shown": tried(lambda: open(sys.argv[2]).read()),
+                "top": tried(lambda: open("written.txt", "w").write("x")),
+                "port": tried(lambda: socket.create_connection(("127.0.0.1", int(sys.argv[3])),
+                                                              timeout=5).close()),
+                "kept": os.environ.get("UNIT_SANDBOX_KEPT", ""),
+                "dropped": os.environ.get("UNIT_SANDBOX_DROPPED", ""),
+            }
+            with open(os.path.join("output", "found.json"), "w") as out:
+                json.dump(found, out)
+            """))
+    shutil.copy(probe, os.path.join(shown_dir, "probe.py"))
+    results = {}
+    kinds = []
+    if sandbox.bwrap_works() is None:
+        kinds.append("bwrap")
+    if sandbox.landlock_version():
+        kinds.append("landlock")
+    saved = dict(os.environ)
+    os.environ.update(UNIT_SANDBOX_KEPT="kept", UNIT_SANDBOX_DROPPED="dropped")
+    try:
+        for kind in kinds:
+            inside = sandbox.environment(base, kind, ["UNIT_SANDBOX_KEPT"])
+            paths, _left = sandbox.shown(base, inside, also=[shown_dir])
+            # Run in its own process, as convert.py's child is: Landlock
+            # restricts the process it's applied in, and what it starts.
+            code = sandbox.run(kind, [sys.executable, "-I", os.path.join(shown_dir, "probe.py"),
+                                      outside, os.path.join(shown_dir, "shown.txt"), str(port)],
+                               base, inside, paths)
+            found_path = os.path.join(base, "output", "found.json")
+            with open(found_path, encoding="utf-8") as fh:
+                results[kind] = (code, json.load(fh), os.path.exists(
+                    os.path.join(base, "written.txt")))
+            os.remove(found_path)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+        listener.close()
+    # A run told to end while it waits on the sandbox (convert.py's
+    # stoppable takes SIGTERM as KeyboardInterrupt) ends what's inside,
+    # which is in a session of its own, a program it started included.
+    launcher = os.path.join(shown_dir, "launch.py")
+    with open(launcher, "w", encoding="utf-8") as fh:
+        fh.write(textwrap.dedent("""\
+            import os, signal, sys
+            sys.path.insert(0, sys.argv[1])
+            import sandbox
+            def ended(signum, frame):
+                raise KeyboardInterrupt
+            signal.signal(signal.SIGTERM, ended)
+            kind, base, shown = sys.argv[2], sys.argv[3], sys.argv[4]
+            inside = sandbox.environment(base, kind)
+            paths, _ = sandbox.shown(base, inside, also=[shown])
+            try:
+                sandbox.run(kind, [sys.executable, "-c",
+                                   "import subprocess, time; subprocess.Popen(['sleep', '97.5']); "
+                                   "time.sleep(99)"], base, inside, paths)
+            except KeyboardInterrupt:
+                sys.exit(143)
+            """))
+
+    def sleepers():
+        found = []
+        for name in os.listdir("/proc"):
+            try:
+                with open(f"/proc/{name}/cmdline", "rb") as fh:
+                    if fh.read() == b"sleep\x0097.5\x00":
+                        found.append(name)
+            except OSError:
+                pass
+        return found
+    ended = {}
+    for kind in kinds:
+        started = subprocess.Popen([sys.executable, launcher, os.path.join(ROOT, "lib"), kind,
+                                    base, shown_dir])
+        for _ in range(100):
+            if sleepers():
+                break
+            time.sleep(0.1)
+        seen = bool(sleepers())
+        started.send_signal(signal.SIGTERM)
+        code = started.wait(timeout=60)
+        for _ in range(50):
+            if not sleepers():
+                break
+            time.sleep(0.1)
+        ended[kind] = (seen, code, sleepers())
+        for pid in sleepers():
+            os.kill(int(pid), signal.SIGKILL)
+    home = os.path.realpath(os.path.expanduser("~"))
+    env = {"PATH": os.pathsep.join([os.sep, home, os.path.dirname(home), "/usr/bin"])}
+    paths, left = sandbox.shown(base, env, also=[os.sep, home, os.path.dirname(home)])
+    saved_inside = os.environ.pop(sandbox.INSIDE, None)
+    os.environ[sandbox.INSIDE] = "bwrap"
+    try:
+        sandbox.inside()
+        claimed = ""
+    except sandbox.Unavailable as exc:
+        claimed = str(exc)
+    finally:
+        os.environ.pop(sandbox.INSIDE, None)
+        if saved_inside is not None:
+            os.environ[sandbox.INSIDE] = saved_inside
+
+    def each(kind):
+        code, found, wrote = results[kind]
+        return code == 0 and found["outside"] != "yes" and found["shown"] == "yes" \
+            and found["top"] != "yes" and not wrote and found["port"] != "yes" \
+            and found["kept"] == "kept" and found["dropped"] == ""
+    checks = [(f"in {kind}'s sandbox, a program reads what it's shown and writes output/, but "
+               "not a file elsewhere, the project's top, a port on this machine, or a "
+               "variable the run didn't keep",
+               lambda kind=kind: each(kind) or fail(repr(results[kind]))) for kind in kinds] + [
+        (f"a run told to end while it waits on {kind}'s sandbox ends what's inside, a program "
+         "it started too",
+         lambda kind=kind: ended[kind][0] and ended[kind][1] == 143 and not ended[kind][2]
+         or fail(repr(ended[kind]))) for kind in kinds]
+    if not kinds:
+        print("  skip  neither bubblewrap nor Landlock works here; no sandbox is run")
+    return checks + [
+        ("what's shown is never the whole file system, the home folder, or a folder holding "
+         "it, each left out said so",
+         lambda: not {os.sep, home, os.path.dirname(home)} & set(paths)
+         and {os.sep, home, os.path.dirname(home)} <= set(left) or fail(f"{paths} {left}")),
+        ("a run that says it's in a sandbox it isn't in is refused",
+         lambda: "says the run is inside bwrap, and it isn't" in claimed or fail(claimed)),
     ]
 
 
@@ -5663,7 +5829,7 @@ def check_suites_lay_out_only_books():
     saved = laidout.subprocess.run
     laidout.subprocess.run = lambda arguments, cwd=None, **options: asked.append(cwd)
     try:
-        laidout.started(["python3", os.path.join(ROOT, "bin", "convert.py"), "-d", book],
+        laidout.started(["python3", os.path.join(ROOT, "bin", "convert.py"), "--no-sandbox", "-d", book],
                         cwd=above)
     finally:
         laidout.subprocess.run = saved
@@ -12384,6 +12550,7 @@ GROUPS = [
     ("a book's PDF figure reached by two names", check_figure_names),
     ("the LaTeX a book supplies, scanned, and LaTeX's own list of what it opened",
      check_texreads),
+    ("lib/sandbox.py, the sandbox a run converts in", check_sandbox),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
     ("what a page names by URL", check_named_by_url),

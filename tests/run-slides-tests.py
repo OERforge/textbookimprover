@@ -3532,7 +3532,7 @@ def place(folder, *names):
 
 def convert(where, *flags):
     assert laidout.projectpaths.is_tree(where), where + " isn't laid out as a project"
-    return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
+    return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quiet", *flags],
                           cwd=where, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
 
@@ -3809,7 +3809,7 @@ def case_no_pandoc(work):
     put_python(tools)
 
     def bare_run(where):
-        return subprocess.run([place(tools, "python3"), os.path.join(BIN, "convert.py"),
+        return subprocess.run([place(tools, "python3"), os.path.join(BIN, "convert.py"), "--no-sandbox",
                                "--quiet"], cwd=where, env=dict(os.environ, PATH=tools),
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
     decks = place(work, "decks")
@@ -5311,9 +5311,9 @@ def case_saved_title(work):
 
 def case_other_formats(work):
     """Decks in other formats, an ODP or a PowerPoint 97-2003 deck, saved as
-    PowerPoint beside them through LibreOffice before a slides run reads
-    them (decksave.py), with a stand-in for LibreOffice that answers with a
-    deck of the suite's, so it runs without one."""
+    PowerPoint into the part's work folder through LibreOffice before a
+    slides run reads them (decksave.py), with a stand-in for LibreOffice
+    that answers with a deck of the suite's, so it runs without one."""
     import decksave
     import time
     tools = place(work, "tools")
@@ -5329,9 +5329,13 @@ def case_other_formats(work):
     missing = place(tools, "missing")
 
     def run(where, *flags, **extra):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quiet", *flags],
                               cwd=where, env=dict(env, **extra), capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
+
+    def kept(folder, name):
+        """Where a run keeps a deck it saved as PowerPoint."""
+        return os.path.join(folder, "output", "work", "parts", "slides", name)
 
     def calls():
         if not os.path.exists(log):
@@ -5358,10 +5362,14 @@ def case_other_formats(work):
     with open(odp, "rb") as fh:
         before = fh.read()
     result = run(folder)
-    yield "a deck in ODP is saved as PowerPoint beside it, and the run reads that as the deck", \
-        result.returncode == 0 and os.path.exists(place(folder, "talk.pptx")) \
-        and "Saved 1 deck(s) as PowerPoint through LibreOffice, each beside its original " \
-        "(talk.odp as talk.pptx): from now on each PowerPoint file is the deck" in result.stderr \
+    yield "a deck in ODP is saved as PowerPoint into the part's work folder, not among the " \
+        "sources, and the run reads that in its place", \
+        result.returncode == 0 and os.path.isfile(kept(folder, "talk.pptx")) \
+        and not os.path.exists(place(folder, "talk.pptx")) \
+        and "Saved 1 deck(s) as PowerPoint through LibreOffice, into output/work/parts/slides/ " \
+        "(talk.odp as talk.pptx): the run reads each PowerPoint file in its original's place, " \
+        "and the sidecars' rows name it. Correct the original, or the sidecars; a run saves a " \
+        "deck again once its original changes." in result.stderr \
         and os.path.exists(place(folder, "remediated", "talk.pptx")), result.stderr[-700:]
     with open(odp, "rb") as fh:
         yield "the original is left as it is", fh.read() == before, ""
@@ -5377,26 +5385,52 @@ def case_other_formats(work):
         os.path.dirname(asked[0][asked[0].index("--outdir") + 1])), asked
     result = run(folder)
     yield "a later run reads the PowerPoint file, and doesn't save the original again", \
-        result.returncode == 0 and len(calls()) == 1 and "1 deck(s) here aren't read, each " \
-        "one's PowerPoint file beside it being the deck in its place, saved from it or its " \
-        "other export (talk.pptx for talk.odp)" in result.stderr \
-        and "newer" not in result.stderr, result.stderr[-700:]
-    later = os.path.getmtime(place(folder, "talk.pptx")) + 60
+        result.returncode == 0 and len(calls()) == 1 and "NOTE: 1 deck(s) here are read as " \
+        "the PowerPoint file a run saved from each, kept in output/work/parts/slides/ " \
+        "(talk.odp as talk.pptx), the original being as it was then" in result.stderr \
+        and os.path.exists(place(folder, "remediated", "talk.pptx")), result.stderr[-700:]
+    later = os.path.getmtime(kept(folder, "talk.pptx")) + 60
     os.utime(odp, (later, later))
     result = run(folder)
-    yield "an original newer than its PowerPoint file is warned of", \
-        "WARNING: talk.odp is newer than talk.pptx, which is read in its place: if talk.odp " \
-        "has changes talk.pptx hasn't, delete talk.pptx and run again" in result.stderr, \
-        result.stderr[-500:]
+    yield "an original touched, but no different, isn't saved again", \
+        result.returncode == 0 and len(calls()) == 1, result.stderr[-500:]
+    with zipfile.ZipFile(odp, "a") as zf:
+        zf.writestr("changed.txt", "a change")
+    result = run(folder)
+    yield "one that has changed is saved again, said so", \
+        result.returncode == 0 and len(calls()) == 2 and "a run saves a deck again once its " \
+        "original changes, as talk.odp had." in result.stderr, result.stderr[-500:]
+    os.remove(os.path.join(os.path.dirname(kept(folder, "talk.pptx")), "saved-decks.json"))
+    result = run(folder)
+    yield "and so is one whose record of what it was saved from is gone", \
+        result.returncode == 0 and len(calls()) == 3, result.stderr[-500:]
+    export = place(folder, "export.odp")
+    odp_file(export)
+    clean_deck(place(folder, "export.pptx"))
+    later = os.path.getmtime(place(folder, "export.pptx")) + 60
+    os.utime(export, (later, later))
+    result = run(folder)
+    yield "a deck whose PowerPoint file is beside it among the sources isn't saved, the file " \
+        "read in its place", result.returncode == 0 and len(calls()) == 3 \
+        and "NOTE: 1 deck(s) here aren't read, each one's PowerPoint file beside it being the " \
+        "deck in its place, saved from it or its other export (export.pptx for export.odp)" \
+        in result.stderr and not os.path.exists(kept(folder, "export.pptx")), \
+        result.stderr[-700:]
+    yield "and an original newer than that file is warned of", \
+        "WARNING: export.odp is newer than export.pptx, which is read in its place: if " \
+        "export.odp has changes export.pptx hasn't, delete export.pptx and run again" \
+        in result.stderr, result.stderr[-500:]
+    os.remove(export)
+    os.remove(place(folder, "export.pptx"))
     old = place(folder, "older.ppt")
     with open(old, "wb") as fh:
         fh.write(deckrun.OLE + b"\0" * 504)
     result = run(folder, "--check-only")
     yield "--check-only says what it would save, and saves nothing", \
-        result.returncode == 0 and not os.path.exists(place(folder, "older.pptx")) \
-        and len(calls()) == 1 and "1 deck(s) here would be saved as PowerPoint through " \
-        "LibreOffice, each beside its original (older.ppt as older.pptx), and then checked; " \
-        "a --check-only run saves nothing." in result.stderr, result.stderr[-500:]
+        result.returncode == 0 and not os.path.exists(kept(folder, "older.pptx")) \
+        and len(calls()) == 3 and "1 deck(s) here would be saved as PowerPoint through " \
+        "LibreOffice, into output/work/parts/slides/ (older.ppt as older.pptx), and then " \
+        "checked; a --check-only run saves nothing." in result.stderr, result.stderr[-500:]
     result = run(folder, "--check-only", LIBREOFFICE=missing)
     yield "and without LibreOffice, how to save one by hand", \
         result.returncode == 0 and "LibreOffice is needed for that, and LIBREOFFICE names " \
@@ -5410,18 +5444,22 @@ def case_other_formats(work):
         "loaded; a deck saved with a password can't be, and LibreOffice needs its Impress " \
         "(libreoffice-impress) for any)." in result.stderr \
         and "Slides: 1 PowerPoint deck(s)" in result.stderr \
-        and not os.path.exists(place(folder, "older.pptx")), result.stderr[-600:]
+        and not os.path.exists(kept(folder, "older.pptx")), result.stderr[-600:]
     result = run(folder, FAKE_SOFFICE_MODE="nothing")
     yield "and so is one LibreOffice writes nothing for, though it says nothing either", \
         result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
         "LibreOffice wrote no PowerPoint file." in result.stderr \
-        and not os.path.exists(place(folder, "older.pptx")), result.stderr[-500:]
+        and not os.path.exists(kept(folder, "older.pptx")), result.stderr[-500:]
     result = run(folder, FAKE_SOFFICE_MODE="garbage")
     yield "and one whose PowerPoint file isn't one", \
         result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
         "LibreOffice wrote no PowerPoint file." in result.stderr \
-        and not os.path.exists(place(folder, "older.pptx")), result.stderr[-500:]
+        and not os.path.exists(kept(folder, "older.pptx")), result.stderr[-500:]
     os.remove(old)
+    os.remove(odp)
+    result = run(folder, "--check-only")
+    yield "a deck saved earlier whose original is gone isn't read", \
+        result.returncode != 0 and "talk.pptx" not in result.stderr, result.stderr[-500:]
 
     bad = folder_of("bad", "clean.pptx")
     with open(place(bad, "empty.odp"), "wb"):
@@ -5445,7 +5483,8 @@ def case_other_formats(work):
                 "ERROR: misnamed.odp couldn't be saved as PowerPoint: it isn't an OpenDocument "
                 "presentation (it's a PowerPoint file: renamed .pptx, it can be read).")) \
         and os.path.exists(place(bad, "remediated", "clean.pptx")) \
-        and not any(n.endswith(".pptx") and n != "clean.pptx" for n in os.listdir(bad)), \
+        and not any(n.endswith(".pptx") and n != "clean.pptx" for n in os.listdir(bad)) \
+        and not any(n.endswith(".pptx") for n in os.listdir(os.path.dirname(kept(bad, "x")))), \
         result.stderr[-900:]
 
     alone = folder_of("alone", "talk.odp")
@@ -5456,7 +5495,7 @@ def case_other_formats(work):
         "here" % missing in result.stderr \
         and "File > Save As, PowerPoint 2007-365" in result.stderr \
         and "Nothing was converted." in result.stderr and "left out" not in result.stderr \
-        and not os.path.exists(place(alone, "talk.pptx")), result.stderr[-500:]
+        and not os.path.exists(kept(alone, "talk.pptx")), result.stderr[-500:]
     clean_deck(place(alone, "clean.pptx"))
     result = run(alone, LIBREOFFICE=missing)
     yield "beside a PowerPoint deck, it's left out with a warning, and the deck is read", \
@@ -5467,13 +5506,13 @@ def case_other_formats(work):
     os.remove(place(alone, "clean.pptx"))
     result = run(alone, LIBREOFFICE="soffice", PATH=tools + os.pathsep + os.environ["PATH"])
     yield "LIBREOFFICE can name a command on the path", result.returncode == 0 \
-        and os.path.exists(place(alone, "talk.pptx")), result.stderr[-400:]
+        and os.path.exists(kept(alone, "talk.pptx")), result.stderr[-400:]
 
     clash = folder_of("clash", "a.odp", "a.ppt", "clean.pptx")
     result = run(clash)
     yield "two decks that would each be saved under one name are neither saved", \
         result.returncode == 0 and "WARNING: a.odp and a.ppt would each be saved as a.pptx, " \
-        "so none is" in result.stderr and not os.path.exists(place(clash, "a.pptx")), \
+        "so none is" in result.stderr and not os.path.exists(kept(clash, "a.pptx")), \
         result.stderr[-500:]
     os.remove(place(clash, "clean.pptx"))
     result = run(clash)
@@ -5503,7 +5542,7 @@ def case_other_formats(work):
         "name from being saved among the sources", \
         result.returncode == 0 and "template.odp as template.pptx" in result.stderr \
         and "NOTE: template.odp isn't read" not in result.stderr \
-        and os.path.isfile(place(looked, "template.pptx")), \
+        and os.path.isfile(kept(looked, "template.pptx")), \
         result.stderr[:500]
 
     archive = place(work, "archived")
@@ -5515,9 +5554,9 @@ def case_other_formats(work):
     result = run(archive)
     yield "an archive's decks in other formats are unpacked, then saved as PowerPoint", \
         result.returncode == 0 and "upstream/decks.zip unpacked into" in result.stderr \
-        and "Saved 1 deck(s) as PowerPoint through LibreOffice, each beside its original " \
+        and "Saved 1 deck(s) as PowerPoint through LibreOffice, into output/work/parts/slides/ " \
         "(one.odp as one.pptx)" in result.stderr \
-        and os.path.exists(place(archive, "one.pptx")), result.stderr[-600:]
+        and os.path.exists(kept(archive, "one.pptx")), result.stderr[-600:]
 
     decksave_timeout, decksave.TIMEOUT = decksave.TIMEOUT, 1
     hung = folder_of("hung", "slow.odp")
@@ -5634,10 +5673,15 @@ def case_other_formats_libreoffice(work):
         "--convert-to", "odp", "--outdir", laidout.projectpaths.of(folder).sources(),
         os.path.join(made, "talk.pptx")],
         capture_output=True, check=True)
-    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=folder,
+    # In the sandbox where there's one here, as a run has it.
+    import sandbox
+    inside = sandbox.available()[0] is not None
+    result = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quiet"]
+                            + ([] if inside else ["--no-sandbox"]), cwd=folder,
                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    saved = place(folder, "talk.pptx")
-    yield "LibreOffice saves the ODP as PowerPoint beside it, and the run reads and copies it", \
+    saved = os.path.join(folder, "output", "work", "parts", "slides", "talk.pptx")
+    yield "LibreOffice saves the ODP as PowerPoint into the part's work folder%s, and the run " \
+        "reads and copies it" % (", in the sandbox" if inside else ""), \
         result.returncode == 0 and os.path.exists(saved) \
         and os.path.exists(place(folder, "remediated", "talk.pptx")), result.stderr[-600:]
     doc, record = pptxsource.read(saved, work, work)
@@ -6198,7 +6242,7 @@ def case_minus_signs(work):
     put_python(tools)
     bare = project(place(work, "bare"))
     minus_deck(place(bare, "Minus.pptx"))
-    run_bare = subprocess.run([place(tools, "python3"), os.path.join(BIN, "convert.py"),
+    run_bare = subprocess.run([place(tools, "python3"), os.path.join(BIN, "convert.py"), "--no-sandbox",
                                "--quiet"], cwd=bare, env=dict(os.environ, PATH=tools),
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
     bare_copy = place(bare, "remediated", "Minus.pptx")

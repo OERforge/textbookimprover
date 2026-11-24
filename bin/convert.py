@@ -67,6 +67,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import csv
@@ -115,6 +116,7 @@ try:
     import sidecars
     from sidecars import math_keep_rows
     import texreads
+    import sandbox
     import filekinds
     import wcag
 except ImportError:
@@ -410,17 +412,19 @@ SAVE_FAILED = 0
 
 def save_other_decks(base, alone, looks=(), check_only=False):
     """Each deck here in another format, an OpenDocument presentation
-    (.odp) or a PowerPoint 97-2003 deck (.ppt), saved as PowerPoint beside
-    it through LibreOffice, once (decksave.py): from then on the PowerPoint
-    file is the deck, as an archive's files are the book once it's
-    unpacked, and a later run reads it in the original's place. A deck
-    that can't be saved is named with the reason, and the rest go on, as
-    a deck that can't be read is. alone says the folder has no PowerPoint
-    deck besides, so a run left with nothing to read stops; looks are the
-    decks' reference documents. Returns how many decks a --check-only run
-    would have saved, having saved none."""
+    (.odp) or a PowerPoint 97-2003 deck (.ppt), saved as PowerPoint through
+    LibreOffice into the part's work folder, not among the sources, which
+    the run doesn't write (decksave.py): the run reads the PowerPoint file
+    in the original's place, and a later run reads it again, saving the
+    original anew only once it has changed. A deck that can't be saved is
+    named with the reason, and the rest go on, as a deck that can't be
+    read is. alone says the folder has no PowerPoint deck besides, so a
+    run left with nothing to read stops; looks are the decks' reference
+    documents. Returns how many decks a --check-only run would have
+    saved, having saved none."""
     global SAVE_FAILED
     found = decksave.plan(base, looks)
+    kept = os.path.relpath(P(base).run_dir(), P(base).top()).replace(os.sep, "/") + "/"
 
     def listing(pairs):
         return ", ".join(f"{a} as {b}" for a, b in pairs[:4]) + (", ..." if len(pairs) > 4 else "")
@@ -436,6 +440,10 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             if os.path.getmtime(original) > os.path.getmtime(saved):
                 say(f"WARNING: {name} is newer than {pptx}, which is read in its place: if {name} "
                     f"has changes {pptx} hasn't, delete {pptx} and run again, which saves it anew.")
+    if found.saved:
+        say(f"NOTE: {len(found.saved)} deck(s) here are read as the PowerPoint file a run saved "
+            f"from each, kept in {kept} ({listing(found.saved)}), the original being as it was "
+            "then: a run saves one again once its original changes.")
     for name, look in found.looks:
         say(f"NOTE: {name} isn't read: {look}, the name it would be saved as, is the decks' "
             "reference document (slides.reference_doc), which isn't a deck.")
@@ -455,7 +463,7 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             to_save.append((name, target))
     nothing = "No deck here can be read, as the lines above say. Nothing was converted."
     if not to_save:
-        if alone:
+        if alone and not found.saved:
             die(nothing)
         return 0
     program = decksave.libreoffice()
@@ -467,42 +475,46 @@ def save_other_decks(base, alone, looks=(), check_only=False):
                "Save As, PowerPoint Presentation; from Google Slides, File > Download, Microsoft "
                "PowerPoint.")
     if check_only:
-        say(f"{len(to_save)} deck(s) here would be saved as PowerPoint through LibreOffice, each "
-            f"beside its original ({listing(to_save)}), and then checked; a --check-only run "
-            "saves nothing." + ("" if program else f" LibreOffice is needed for that, and "
+        say(f"{len(to_save)} deck(s) here would be saved as PowerPoint through LibreOffice, into "
+            f"{kept} ({listing(to_save)}), and then checked; a --check-only run saves nothing." + ("" if program else f" LibreOffice is needed for that, and "
                                 f"{missing}: {by_hand}"))
         return len(to_save)
     if program is None:
         why = (f"{len(to_save)} deck(s) here are read once they're saved as PowerPoint ("
                + ", ".join(name for name, _ in to_save[:4]) + (", ..." if len(to_save) > 4 else "")
                + f"), which LibreOffice does, and {missing}: {by_hand}")
-        if alone:
+        if alone and not found.saved:
             die(why + " Nothing was converted.")
         say("WARNING: " + why + " They're left out.")
         return 0
     saved = []
     for name, target in to_save:
         try:
-            decksave.save(program, P(base).source(name), P(base).source(target))
-        except decksave.SaveError as exc:
+            decksave.save(program, P(base).source(name), decksave.saved_path(base, target))
+            decksave.remember(base, name, target)
+        except (decksave.SaveError, OSError) as exc:
             say(f"ERROR: {name} couldn't be saved as PowerPoint: {exc}.")
             SAVE_FAILED += 1
             continue
         saved.append((name, target))
     if saved:
-        say(f"Saved {len(saved)} deck(s) as PowerPoint through LibreOffice, each beside its "
-            f"original ({listing(saved)}): from now on each PowerPoint file is the deck, and its "
-            "original isn't read again. Correct the PowerPoint file, or the sidecars, not the "
-            "original; to save one again, delete its PowerPoint file.")
+        again = [name for name, _ in saved if name in found.again]
+        say(f"Saved {len(saved)} deck(s) as PowerPoint through LibreOffice, into {kept} "
+            f"({listing(saved)}): the run reads each PowerPoint file in its original's place, "
+            "and the sidecars' rows name it. Correct the original, or the sidecars; a run "
+            "saves a deck again once its original changes"
+            + (f", as {', '.join(again[:4])}{', ...' if len(again) > 4 else ''} had." if again
+               else "."))
     for name, target in saved:
-        objects = decksave.objects_without_pictures(P(base).source(target))
+        objects = decksave.objects_without_pictures(decksave.saved_path(base, target))
         if objects:
             say(f"NOTE: LibreOffice gave {objects} embedded object(s) in {target} no picture, "
                 "so they're left out, as the run says of each"
                 + (": a PowerPoint 97-2003 deck's equations are such objects. PowerPoint's own "
-                   f"Save As keeps their pictures: {name} saved as PowerPoint there, in place of "
-                   f"{target}, keeps them." if name.lower().endswith(".ppt") else "."))
-    if alone and not saved:
+                   f"Save As keeps their pictures: {name} saved as PowerPoint there, and put "
+                   f"beside it as {target}, is read in place of this one, and keeps them."
+                   if name.lower().endswith(".ppt") else "."))
+    if alone and not saved and not found.saved:
         die(nothing)
     return 0
 
@@ -683,7 +695,13 @@ def stamp_targets(base, targets, latex_book=False):
             options=stamps.options_digest(dict(
                 {"--latexmkrc": True} if LATEXMKRC and target.format == "pdf" else {},
                 **({"--allow-read": sorted(allowed)} if allowed else {}),
-                **({"--allow-remote-pictures": True} if ALLOW_REMOTE else {}))),
+                **({"--allow-remote-pictures": True} if ALLOW_REMOTE else {}),
+                # What the sandbox was given besides its own: a variable by
+                # its name and a hash of its value, a path by its name.
+                **({"--sandbox-env": {name: hashlib.sha256(
+                    os.environ.get(name, "").encode("utf-8")).hexdigest()[:16]
+                    for name in sorted(SANDBOX_ENV)}} if SANDBOX_ENV else {}),
+                **({"--sandbox-read": sorted(SANDBOX_READ)} if SANDBOX_READ else {}))),
             allowed=allowed)
         target.stamp_path = P(base).stamp_file(stamps.stamp_name("target", target.name))
 
@@ -1642,7 +1660,9 @@ def check_sidecar(path, setting, default, base):
         said, why = sidecars.rewrite_as_utf8(path)
         if why:
             die("ERROR: " + why)
-        for line in said:
+        # In the sandbox, where sidecars/ is read-only, the run before it
+        # said what it did and couldn't do (make_sidecars_utf8).
+        for line in [] if os.environ.get(sandbox.INSIDE) else said:
             say(line)
         return
     if not named:
@@ -1704,6 +1724,11 @@ ALLOW_ARGS = []
 # (REMOTE_SAID), where it otherwise stops the run (check_remote).
 ALLOW_REMOTE = False
 REMOTE_SAID = []
+# --sandbox-env NAME and --sandbox-read PATH: a variable the sandbox's
+# environment keeps, and a path it shows read-only, besides its own
+# (enter_sandbox); each counted in the targets' stamps.
+SANDBOX_ENV = []
+SANDBOX_READ = []
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -3199,6 +3224,7 @@ def read_pptx_to_json(base, decks, env, work, paths):
     decorative mark, a table's headers, a slide's title, its reading
     order. A deck that can't be read was named by its checks; it's left
     out here too. Returns the decks' page names."""
+    import deckrun
     import pptxremediate
     import pptxsource
     alts = pptxremediate.alt_rows(paths.get("image_alt"))
@@ -3210,7 +3236,7 @@ def read_pptx_to_json(base, decks, env, work, paths):
     for name in decks:
         stem = safe_stem(name[:-5])
         try:
-            doc, record = pptxsource.read(P(base).source(name), base, work, alts, tables,
+            doc, record = pptxsource.read(deckrun.deck_path(base, name), base, work, alts, tables,
                                           titles, orders, api_version=version, env=env)
         except Exception:               # its checks said why
             continue
@@ -3897,6 +3923,103 @@ def check_reads(base, pages):
     check_remote(remote)
     top = os.path.realpath(project.top())
     say_kinds(*kind_problems(made, lambda path: os.path.relpath(path, top)))
+
+
+def sandbox_names(names):
+    """--sandbox-env's names, each a variable's name, or the run stops."""
+    for name in names:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            die(f"--sandbox-env {name}: that isn't a variable's name. Nothing was converted.")
+    return sorted(set(names))
+
+
+def sandbox_paths(paths):
+    """--sandbox-read's paths as real paths: each there, and none the whole
+    file system, the home folder, or a folder holding it, whose showing
+    would undo the sandbox's empty home folder; or the run stops."""
+    home = os.path.realpath(os.path.expanduser("~"))
+    real = []
+    for path in paths:
+        found = os.path.realpath(os.path.expanduser(path))
+        if not os.path.exists(found):
+            die(f"--sandbox-read {path}: there's nothing there. Nothing was converted.")
+        if found == os.sep or home == found or home.startswith(found.rstrip(os.sep) + os.sep):
+            die(f"--sandbox-read {path}: that's the whole file system, your home folder, or "
+                "holds it, which the sandbox keeps out; name the file or folder the program "
+                "needs. Nothing was converted.")
+        if found not in real:
+            real.append(found)
+    return real
+
+
+def make_sidecars_utf8(base):
+    """Every sidecar of the part made UTF-8 with the byte-order mark now,
+    outside the sandbox, where sidecars/ is read-only (check_sidecar does
+    it again inside, finding nothing to do)."""
+    for default in ("table-captions.csv", "image-alt.csv", "bare-links.csv",
+                    "table-headers.csv", "page-names.csv", "math-keep.csv",
+                    "slide-titles.csv", "reading-order.csv", "languages.csv"):
+        path = P(base).sidecar(default)
+        # As check_sidecar has it: a pipe, or a link to nothing, said to be
+        # gone without; a folder left for it to stop on.
+        if os.path.lexists(path) and not os.path.isdir(path):
+            said, why = sidecars.rewrite_as_utf8(path)
+            if why:
+                die("ERROR: " + why)
+            for line in said:
+                say(line)
+
+
+def enter_sandbox(base, args):
+    """Start this run again inside the sandbox, and wait: its exit code; or
+    None to go on here, inside it already or with --no-sandbox. bubblewrap
+    where it works, else Landlock, with a warning of what's weaker; with
+    neither the run stops (sandbox.py says what each shows)."""
+    try:
+        here = sandbox.inside()
+    except sandbox.Unavailable as exc:
+        die(f"{exc}. Nothing was converted.")
+    if here:
+        return None
+    if args.no_sandbox:
+        say("WARNING: --no-sandbox: this run isn't sandboxed, so a book's LaTeX, Lua, and "
+            "pictures can make the programs it starts read any file you can, and fetch from "
+            "the network. Use it only for a book you trust.")
+        return None
+    kind, why = sandbox.available()
+    if kind is None:
+        die(f"No sandbox can be had here: {why}, and the kernel has no Landlock. A run "
+            "converts in a sandbox, so that a book can't make the programs it starts read "
+            "your files or reach the network. Install bubblewrap (sudo apt install "
+            "bubblewrap; on Ubuntu 24.04, AppArmor's bwrap-userns-restrict profile from "
+            "apparmor-profiles too), or run with --no-sandbox, for a book you trust. Nothing "
+            "was converted.")
+    if kind == "landlock":
+        version = sandbox.landlock_version()
+        say(f"WARNING: {why}, so this run is sandboxed with Landlock (version {version}), "
+            "which is weaker: a file outside what it shows can't be read, but its name and "
+            "size can be seen"
+            + (", and the network isn't refused here, Landlock refusing TCP only from its "
+               "version 4 (Linux 6.7)" if version < 4 else "")
+            + ". bubblewrap does better (sudo apt install bubblewrap).")
+    else:
+        say("Converting in a sandbox (bubblewrap): the programs the run starts see the "
+            "project, the system's programs and fonts, and nothing else of yours, write only "
+            "output/, and have no network.")
+    for name in SANDBOX_ENV:
+        say(f"WARNING: --sandbox-env {name}: kept inside the sandbox"
+            + ("" if name in os.environ else ", though it isn't set") + ".")
+    for path in SANDBOX_READ:
+        say(f"WARNING: --sandbox-read {path}: shown inside the sandbox, read-only.")
+    make_sidecars_utf8(base)
+    inside = sandbox.environment(base, kind, SANDBOX_ENV)
+    paths, left = sandbox.shown(base, inside, also=texreads.ALLOWED + SANDBOX_READ)
+    for path in left:
+        say(f"NOTE: {path} isn't shown inside the sandbox: it's the whole file system, your "
+            "home folder, or holds it.")
+    command = [sys.executable, os.path.abspath(__file__), "--part", PART, "--locked"] \
+        + without_dir(sys.argv[1:])
+    return sandbox.run(kind, command, base, inside, paths)
 
 
 def check_remote(remote):
@@ -7843,6 +7966,18 @@ def main():
                              "pages' readers as they read, where it otherwise stops the run; "
                              "util/import-files.py --fetch saves each into the project "
                              "instead")
+    parser.add_argument("--no-sandbox", action="store_true",
+                        help="convert without the sandbox (bubblewrap, or Landlock) that "
+                             "keeps a run to the project, its programs, and output/, with no "
+                             "network; for a book you trust, on a machine where neither "
+                             "works")
+    parser.add_argument("--sandbox-env", action="append", default=[], metavar="NAME",
+                        help="keep the environment variable NAME inside the sandbox, which "
+                             "keeps only TextbookImprover's own list; may be given again")
+    parser.add_argument("--sandbox-read", action="append", default=[], metavar="PATH",
+                        help="show the file or folder PATH inside the sandbox, read-only, "
+                             "for a program that needs it; may be given again. The read "
+                             "checks still take only what a part may read, and --allow-read")
     parser.add_argument("--rebuild", action="store_true",
                         help="build every target and package, whatever its stamp says "
                              "(as make -B does), keeping the caches in output/work/")
@@ -7872,6 +8007,8 @@ def main():
     global LATEXMKRC, ALLOW_ARGS, ALLOW_REMOTE
     LATEXMKRC = args.latexmkrc
     ALLOW_REMOTE = args.allow_remote_pictures
+    SANDBOX_ENV[:] = sandbox_names(args.sandbox_env)
+    SANDBOX_READ[:] = sandbox_paths(args.sandbox_read)
     # Before the run moves to the project's folder, so a folder given
     # from where it was started is that one.
     try:
@@ -7881,10 +8018,13 @@ def main():
     ALLOW_ARGS = [a for folder in allowed
                   for a in ("--allow-read-anyway" if folder in texreads.OVERRIDDEN
                             else "--allow-read", folder)]
-    for folder, why in texreads.OVERRIDDEN.items():
+    # A run in the sandbox is this one started again (enter_sandbox): what
+    # it said before it got there isn't said twice.
+    again = bool(os.environ.get(sandbox.INSIDE))
+    for folder, why in [] if again else texreads.OVERRIDDEN.items():
         say(f"WARNING: --allow-read-anyway {folder}: --allow-read would refuse it, since "
             f"{why}. LaTeX may read its own files there for this run, as you asked.")
-    for folder in allowed:
+    for folder in [] if again else allowed:
         say(f"WARNING: --allow-read: LaTeX may read its own files (packages, classes, "
             f"bibliographies, \\input files, not pictures) in {folder}, outside the project, "
             "for this run. A target whose build runs LaTeX (a PDF, and every target of a "
@@ -7895,10 +8035,10 @@ def main():
         die(f"--clean empties output/ to build everything, and "
             f"{'--check-only' if args.check_only else '--src-status'} builds nothing. "
             "Nothing was converted.")
-    if args.verbose and not args.wcag:
+    if args.verbose and not args.wcag and not again:
         import pdfcheck
         say(pdfcheck.WCAG_ALONE)
-    if wcag.choices_given(args) and not args.wcag:
+    if wcag.choices_given(args) and not args.wcag and not again:
         say(wcag.CHOICES_ALONE)
     if args.dir is not None:
         try:
@@ -7994,7 +8134,7 @@ def main():
     else:
         PART = wanted[0] if wanted else DEFAULT_PART
     PART_KIND = parts.get(PART)
-    if PART != DEFAULT_PART and PART_KIND not in ("slides", None) \
+    if PART != DEFAULT_PART and PART_KIND not in ("slides", None) and not again \
             and not part_setting(base, PART, "identifier"):
         say(f"WARNING: the part {PART} has no identifier of its own (project.parts."
             f"{PART}.identifier), so what's packaged from it carries the project's: an "
@@ -8004,10 +8144,12 @@ def main():
     projectpaths.set_part(PART, base)
 
     # What of Pandoc's data folders a run leaves alone (lib/pandocrun.py).
-    for line in pandocrun.notices():
+    for line in [] if again else pandocrun.notices():
         say(line)
 
-    unpack_upstream(base, PART, check_only=args.check_only, status=args.src_status)
+    # Unpacked before the sandbox, which shows the sources read-only.
+    if not again:
+        unpack_upstream(base, PART, check_only=args.check_only, status=args.src_status)
     if args.src_status:
         return 0
     # A part reads only its own folders: a link among its sources or its
@@ -8022,12 +8164,17 @@ def main():
             f"them, and a part reads only its own folders (src/{PART}/, sidecars/{PART}/). "
             "Put a copy of each file in the link's place. Nothing was converted.")
     check_kinds(base)
+    # What's left is read and built inside the sandbox: this run starts
+    # itself again there, and waits.
+    code = enter_sandbox(base, args)
+    if code is not None:
+        return code
     import deckrun
     # A deck's reference document beside the decks is their look, not a
     # deck (slides.reference_doc).
     looks = {os.path.normcase(os.path.abspath(resolve_path(base, name)))
              for name in oerconfig.reference_docs(P(base).config_file())}
-    decks = [name for name in deckrun.deck_sources(base)
+    decks = [name for name in deckrun.deck_sources(base, saved=False)
              if os.path.normcase(os.path.abspath(P(base).source(name))) not in looks]
     # Decks in another format, saved as PowerPoint before they're read
     # (save_other_decks), are PowerPoint decks for what the folder is,
@@ -8073,11 +8220,12 @@ def main():
             f"{PROJECT_NAME} under project.parts with kind: slides: a slides run reads "
             "one kind of deck for now. Nothing was converted.")
     if slides and others:
-        if save_other_decks(base, alone=not decks, looks=looks,
-                            check_only=args.check_only) and not decks:
-            sys.exit(0)
+        would = save_other_decks(base, alone=not decks, looks=looks,
+                                 check_only=args.check_only)
         decks = [name for name in deckrun.deck_sources(base)
                  if os.path.normcase(os.path.abspath(P(base).source(name))) not in looks]
+        if would and not decks:
+            sys.exit(0)
     # Pandoc 3.9 introduced the options this script relies on. Earlier
     # versions accept most of the command line and quietly do something
     # else: 3.6 and older write grid tables without cell spans, so a table
@@ -8141,7 +8289,7 @@ def main():
                          ("languages", "languages.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
     # What's built, once a deck in another format is saved as PowerPoint
-    # beside it and the sidecars are UTF-8: a target whose stamp matches
+    # into the work folder and the sidecars are UTF-8: a target whose stamp matches
     # its last build's isn't, and a part whose targets are all up to date
     # isn't read, though its package is still asked whether it is.
     # A part with a target to build is read for all of them, so that its

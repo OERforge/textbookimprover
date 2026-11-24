@@ -1672,7 +1672,7 @@ def case_check_only():
     shutil.copy(os.path.join(FIXTURES, "tables.docx"), paths.sources())
     with open(paths.project_file(), "w") as fh:
         fh.write("project:\n  identifier: org.example.c\n  title: C\n")
-    result = run([os.path.join(BIN, "convert.py"), "--quiet", "--check-only"],
+    result = run([os.path.join(BIN, "convert.py"), "--no-sandbox", "--quiet", "--check-only"],
                  d)
     return [
         ("convert.py --check-only writes the reports and stops",

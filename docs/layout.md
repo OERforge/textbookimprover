@@ -129,7 +129,31 @@ LaTeX opens whatever file it's told to, and LuaTeX's Lua whatever file you can. 
 
 **`--allow-read FOLDER`,** given to `convert.py` (or `build-pdf.py`) for one run, and again for each folder, lets both checks accept LaTeX's own files in `FOLDER`: a package, a class, or a bibliography you keep outside the project, or a file a page's raw LaTeX inputs. It never lets in a picture, nor a LaTeX book's `\input` files as the pages' text, which the conversion reads from the part alone, nor a file behind a dot name inside `FOLDER`. Some folders are refused outright, since a book's files don't belong in them: the whole file system; the system's own folders and anything in them (`/bin`, `/boot`, `/dev`, `/etc`, `/lib` and its kin, `/proc`, `/run`, `/sbin`, `/snap`, `/sys`, `/usr`, `/var`), whose TeX trees are read without it (`/usr/share/texlive`, `/usr/local/share/texmf`, `/var/lib/texmf`); `/mnt` and `/media` and a drive's top in them (`/mnt/c`), and a Windows drive's `Windows`, `Program Files`, and `ProgramData`; your home folder and any folder holding it, and `/root`, whoever runs the build; and a folder reached through a dot name (`~/.ssh`, `~/.config`). Name the folder the files are in, `~/shared/macros` or `/mnt/c/Users/you/shared` say: a folder under your home folder or `/root` is taken. Where a book's files really are in one of those folders, `--allow-read-anyway FOLDER` takes it, for that run, and the run warns of the rule it overrides; it still refuses the whole file system, your home folder or one holding it, and `/root`, and a file behind a dot name inside `FOLDER`. It's for your own files on your own machine: a project built with it doesn't hold what it read, so the run warns, and a target whose build runs LaTeX (a PDF, a `latex` target, and every target of a LaTeX book, whose drawings LaTeX sets with the book's preamble) can't be packaged until it's built again without it. A package made from such a target's pages isn't built, the run saying why and going on, and `build-cartridge.py` refuses it. The pages of a book in Markdown or Word, whose build runs no LaTeX, are packaged as ever. To package the rest, put what LaTeX read into the project, or a package or class of yours into your own TeX tree (`TEXMFHOME`), which LaTeX reads without `--allow-read`, and run again without it. The same holds after `--allow-read-anyway`. No setting can give either.
 
-Neither check reaches everything Lua can do, so until TextbookImprover runs LaTeX in a sandbox, don't build a book you don't trust: a LaTeX book, or one whose pages carry raw LaTeX.
+Neither check reaches everything Lua can do: Lua's `io.lines` opens a file without LaTeX's list showing it. What stops that is the sandbox, below.
+
+### The sandbox
+
+`convert.py` converts in a sandbox. Once it has unpacked the part and checked it, it starts itself again inside one and waits, so everything the run starts from there runs inside: Pandoc and its filters, LaTeX and its Lua, LibreOffice, `rsvg-convert`, the checks. What they see:
+
+- **The project, read-only, and `output/`, which they write.** Nothing else of the project's can be changed, so the sidecars are made UTF-8 before the sandbox ([Sidecars](sidecars.md)), and a deck in another format is saved as PowerPoint into `output/work/` ([Slides](slides.md#decks-in-other-formats)).
+- **The system's programs and libraries** (`/usr` and its links), what of `/etc` they read (fonts, TeX's and Java's settings, certificates, time zones, and a few more), TeX's trees, the fonts fontconfig knows, Python's folders, the tools a variable names (`VNU_JAR`, `EPUBCHECK_JAR`, `LIBREOFFICE`, and the rest), and TextbookImprover's own, read-only. `/etc/passwd` and `/etc/hosts` are written for the sandbox, with you alone in one and `localhost` alone in the other.
+- **An empty home folder in place of yours,** with your fonts and fontconfig's settings in it, read-only, and nothing else. `/tmp` is empty too, and the run's temporary files are in `output/work/tmp/`, TeX's variable tree (`TEXMFVAR`) and caches in `output/work/`.
+- **No network,** neither the internet nor a server on your own machine.
+- **Only the environment variables the tools read,** such as `PATH`, the locale, and TeX's, Pandoc's, and TextbookImprover's own. A token or a password in another variable isn't there.
+
+Measured with LuaTeX 1.24 (TeX Live 2026) and bubblewrap 0.9: a page's Lua that read a file outside the project with `io.lines` printed its text into the PDF with `--no-sandbox`, and couldn't open it in the sandbox. LuaTeX itself refused to write a file by a full path or delete one (`os.remove`) either way, as TeX Live's default `openout_any = p` and its restricted shell escape have it.
+
+What's inside runs in a session of its own, so a program a book starts can't type into your terminal; a run stopped with Ctrl-C, or told to end, ends what's inside it first.
+
+**bubblewrap is the sandbox** where it works (`sudo apt install bubblewrap`), and the run says so. Where it doesn't, the run uses Landlock, the kernel's own (Linux 5.13 on), and warns that it's weaker: a file outside what it shows can't be opened, but its name and size can be seen, and the network is refused only from Landlock's version 4 (Linux 6.7). With neither, the run stops, saying how to install bubblewrap ([Installation](installation.md#requirements)).
+
+Three options change what's shown, each on the command line alone, for one run, and each warned of:
+
+- **`--sandbox-env NAME`** keeps a variable of yours inside, for a tool that needs one the run doesn't keep; give it again for each.
+- **`--sandbox-read PATH`** shows a file or a folder inside, read-only, for a program that reads it. It refuses the whole file system, your home folder, and a folder holding it.
+- **`--no-sandbox`** converts without one. Give it only for a book you trust, since a book's LaTeX, Lua, and pictures can then make the programs the run starts read any file you can, and fetch from the network.
+
+A folder `--allow-read` or `--allow-read-anyway` takes is shown too. The other scripts don't sandbox themselves yet, so a script other than `convert.py` that builds a book (`build-pdf.py` run by hand, say) is as safe as the book it's given.
 
 ## Where a run is started
 

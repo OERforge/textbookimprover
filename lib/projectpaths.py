@@ -106,6 +106,16 @@ class Project:
         a configuration from an earlier version, say."""
         return self._in(*names)
 
+    def run_output(self):
+        """The folder a run writes, output/, which the sandbox shows
+        writable and nothing else of the project (lib/sandbox.py)."""
+        return self._in("output")
+
+    def run_work(self, *names):
+        """A folder of the run's own under output/work/ that no person
+        reads: the sandbox's files, TeX's variable tree, the caches."""
+        return self._in("output", "work", *names)
+
     def named(self, value, part=None, setting=None):
         """The file or folder a setting names: from the project's folder,
         or as written when it's a full path."""
@@ -175,8 +185,8 @@ class Project:
         """What a run extracts or renders for a part beside its
         intermediates, by the path a page names it by: a Word file's
         pictures, a LaTeX book's rendered drawings. (A deck saved as
-        PowerPoint isn't one: it's the deck from then on, a source beside
-        its original.)"""
+        PowerPoint is kept in run_dir too, under its own name, as the deck
+        a run reads in its original's place: decksave.saved_path.)"""
         return os.path.join(self.run_dir(part), *names)
 
     def work_file(self, name, part=None):

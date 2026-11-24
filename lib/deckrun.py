@@ -96,13 +96,29 @@ DECIDE = ("pptx-object-no-alt", "pptx-shape-no-alt", "pptx-alt-is-file-name",
           "pptx-master-image-no-alt")
 
 
-def deck_sources(base):
+def deck_sources(base, saved=True):
     """The PowerPoint decks at the top of a folder, in name order, all but
     the lock files PowerPoint keeps beside a deck it has open (~$...). One
-    that can't be read is still a deck, for the run to name."""
-    return [name for name in sorted(os.listdir(P(base).sources()))
+    that can't be read is still a deck, for the run to name. saved: with
+    the decks in other formats saved as PowerPoint in the work folder from
+    what they are now (decksave.py), by their PowerPoint names."""
+    here = [name for name in sorted(os.listdir(P(base).sources()))
             if name.lower().endswith(".pptx") and not name.startswith("~$")
             and os.path.isfile(P(base).source(name))]
+    if saved:
+        import decksave
+        here = sorted(here + [target for _, target in decksave.plan(base).saved])
+    return here
+
+
+def deck_path(base, name):
+    """Where the deck deck_sources names is: among the sources, or saved
+    as PowerPoint in the work folder (decksave.py)."""
+    path = P(base).source(name)
+    if os.path.isfile(path):
+        return path
+    import decksave
+    return decksave.saved_path(base, name)
 
 
 # An OLE compound file's first bytes: what Office writes a deck saved with
@@ -596,7 +612,7 @@ def run(base, decks, targets, paths, reports, language=None, alt_max_chars=120,
     image_found = {}  # image digest: [(name, deck, slide, shape, check, detail)] to decide
     failed = 0
     for name in decks:
-        path = P(base).source(name)
+        path = deck_path(base, name)
         try:
             deck = pptxparse.read(path)
         except Exception as exc:

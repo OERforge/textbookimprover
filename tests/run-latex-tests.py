@@ -77,6 +77,12 @@ sys.path.insert(0, HERE)
 import laidout  # noqa: E402
 import parallel  # noqa: E402
 
+# What every run of the suite's says, since each is given --no-sandbox:
+# a check that a run warns of nothing leaves it out.
+NO_SANDBOX_WARNING = ("WARNING: --no-sandbox: this run isn't sandboxed, so a book's LaTeX, Lua, "
+                      "and pictures can make the programs it starts read any file you can, and "
+                      "fetch from the network. Use it only for a book you trust.")
+
 MASTER = r"""\documentclass{book}
 \usepackage[english]{babel}
 \usepackage{ifthen}
@@ -518,7 +524,7 @@ def convert(work, env=None, any_layout=False, top=(), options=()):
         laidout.settle(work, top=top)
     began = time.monotonic()
     done = subprocess.run(
-        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options], cwd=work,
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", *options], cwd=work,
         capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
     RUNS.append((os.path.basename(work), done.returncode, time.monotonic() - began,
                  (done.stdout + done.stderr).splitlines()[-RUN_TAIL:]))
@@ -3523,7 +3529,7 @@ def case_page_languages(work):
              "\\TIQfilelanguage{student/answers.tex}{en-US}\n" in editions_master
          and "2 page(s) tagged in their own language as LaTeX reads them (answers es, "
              "week1.5 fr)" in editions_said
-         and "WARNING" not in editions_said),
+         and "WARNING" not in editions_said.replace(NO_SANDBOX_WARNING, "")),
         ("and in its PDF, the index after the answers in the book's, set back as their file "
          "ends",
          lambda: pdf_check("editions", "org.example.languages.pdf", [
@@ -8183,7 +8189,7 @@ def case_documents(work):
         raise AssertionError(text[-900:])
     held_before_rerun = sorted(os.listdir(os.path.dirname(
         place(work, "org.example.course.imscc"))))
-    rerun = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
+    rerun = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet",
                             "--check-only"], cwd=work, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL)
     rerun_said = rerun.stdout + rerun.stderr

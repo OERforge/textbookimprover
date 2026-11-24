@@ -2435,7 +2435,7 @@ def case_step_tables(work):
     if version is not None and version >= (3, 9):
         write(place(out, "conversion.yaml"), read(out, "conversion.yaml")
               + "targets:\n  html:\n    format: html\n")
-        run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+        run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
                               "--quiet"], cwd=out, capture_output=True, text=True,
                              stdin=subprocess.DEVNULL)
         page_out = place(out, "html", "1-1-ratios.html")
@@ -2995,7 +2995,7 @@ def case_formula_steps(work):
     if version is not None and version >= (3, 9) and result.returncode == 0:
         write(place(out, "conversion.yaml"), read(out, "conversion.yaml")
               + "targets:\n  html:\n    format: html\n")
-        run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+        run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
                               "--quiet"], cwd=out, capture_output=True, text=True,
                              stdin=subprocess.DEVNULL)
         page_out = place(out, "html", "1-1-simplifying.html")
@@ -3842,7 +3842,7 @@ def case_convert(work):
     write(place(out, "conversion.yaml"),
           read(out, "conversion.yaml") + "targets:\n  html:\n    format: html\n"
           "  tex:\n    format: latex\n")
-    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"),
+    run = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
                           "--quick", "--quiet"], cwd=out, capture_output=True,
                          text=True, stdin=subprocess.DEVNULL)
     page = place(out, "html", "1-1-why-trade-happens.html")

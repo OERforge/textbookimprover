@@ -125,6 +125,7 @@ Put that `export` line in `~/.bashrc` (see [below](#optional-the-full-validators
 |---|---|---|
 | `pandoc` | Everything but a PowerPoint deck's checks and copy ([Slides](slides.md)). **Version 3.9 or later**; see below, because Ubuntu's own package is older. | from Pandoc's release page |
 | `python3` | Required, 3.9 or later. Runs the driver and every script. | present on Ubuntu |
+| bubblewrap | Required, or Landlock in its place. `convert.py` converts in its sandbox, so that a book can't make the programs it starts read your files or reach the network ([The sandbox](layout.md#the-sandbox)); without it the run uses the kernel's Landlock, which is weaker, and warns, and with neither it stops | `sudo apt install bubblewrap`; on Ubuntu 24.04, AppArmor's profile for it too ([below](#bubblewrap-on-ubuntu-2404)) |
 | PyYAML | Reading configuration | `sudo apt install python3-yaml` |
 | `file` | Detecting real image types | present on Ubuntu |
 | `html5lib` | Recommended. Parsing pages saved from the web (`unpack-site.py`), the way a browser does; without it `lxml` is used, and without either `unpack-site.py` stops | `sudo apt install python3-html5lib` |
@@ -153,6 +154,18 @@ pandoc --version | head -1
 Pandoc 3.9 is a hard requirement for a book, checked before the book is read; a folder of PowerPoint decks needs none unless a target converts them, a deck's PowerPoint file (a `pptx` target) needs 3.10.1, whose PowerPoint writer keeps a table and the text around it on one slide, and a deck's reveal.js presentation (a `revealjs` target) needs 3.12, whose template loads reveal.js 6's plugins. Each Pandoc is asked for MathML in the form it takes: 3.9 and 3.10 with `--mathml`, and 3.11 and later, which replaced that option with `--math-method` and made MathML the default, with `--math-method=mathml`. The project is developed with 3.14, which is the release to install, and its suites pass with 3.13 and 3.12.1 too; an older release than those is supported only as far as this paragraph says, and not everything described in these pages works with one. For a book unpacked from OpenStax's CNXML ([A CNXML book as the source](cnx-input.md)), Pandoc 3.9 isn't officially supported, and the latest release is recommended. Support for Pandoc 3.9 was checked by reading 3.9's source, and by running every test suite with a stand-in for it: a script that runs a newer Pandoc (3.12.1, for this check) but accepts only 3.9's options, writes math as text unless MathML is asked for, as 3.9 does, and gives Lua filters only 3.9's functions (`tests/pandoc39/`, [Testing](testing.md#running-as-pandoc-39-would)). It hasn't been run with 3.9 itself, whose output can differ in ways no test has seen. Some differences are known: 3.9 reads a row of a Word table whose repeat-as-header setting is turned off (`w:tblHeader w:val="0"`) as a header row, which 3.10 fixed; and it drops the language of a block of code whose `<pre>` has an attribute of its own (`<pre id="x"><code class="python">`), so the block isn't highlighted. Versions above 3.9 still differ in ways that show up here — newer releases read Word caption paragraphs into table captions, older ones don't, 3.13 writes a list item's later paragraphs in a Word file another way ([Word output](formats.md#word-output)) and reads YAML as YAML 1.2 ([The PDF's page](configuration.md#the-pdfs-page)), and 3.14 writes a note in a table's cell or a caption with commands of its own in a book's LaTeX, which a `latex` target's files then hold — so the same document can produce different reports on machines with different Pandocs. Neither report is wrong, and a sidecar's rows apply under either.
 
 **Python packages come from `apt`, not `pip`.** Ubuntu 24.04 manages its Python installation, so `pip3 install pypdf` stops with `error: externally-managed-environment` (and on a fresh WSL install `pip3` isn't there to begin with). The `python3-*` packages in the table are the ones to use. Ubuntu 22.04 doesn't stop pip, and its one gap, pypdf, comes from pip there, as [above](#which-ubuntu-you-have). If you need a version newer than Ubuntu ships, or a package it doesn't ship at all, make a virtual environment that sees Ubuntu's packages as well (`python3 -m venv --system-site-packages ~/venv && ~/venv/bin/pip install pypdf`) and run the tools with that interpreter. The one package anything here takes from pip is Playwright, which `--wcag` on pages and the suites' checks in a browser use, and nothing needs ([below](#optional-playwright-and-its-chromium)).
+
+### bubblewrap on Ubuntu 24.04
+
+Ubuntu 24.04 lets a program make a user namespace, which bubblewrap needs, only when an AppArmor profile allows it, and its `bubblewrap` package has none, so the run says bubblewrap doesn't work and falls back to Landlock. The profile comes with AppArmor's extra profiles:
+
+```bash
+sudo apt install apparmor-profiles
+sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+```
+
+Ubuntu 25.04 and later have it already. WSL doesn't run AppArmor, so bubblewrap works there as it's installed. (These steps follow Ubuntu's own notes; the sandbox was measured on another system.)
 
 ## Optional: the full validators
 

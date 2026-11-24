@@ -4,15 +4,19 @@ LibreOffice, for a slides run to read.
 
 A slides run reads PowerPoint decks (.pptx). An OpenDocument presentation
 (.odp), which LibreOffice Impress saves and Google Slides exports, and a
-PowerPoint 97-2003 deck (.ppt) are saved as PowerPoint once, by
-LibreOffice, each beside its original, which is left as it is. From then
-on the PowerPoint file is the deck, as an archive's files are the book
-once it's unpacked (convert.py's unpack_upstream): it's what the run
-reads, what the sidecars' rows name, and where a person corrects the
-deck, and a later run doesn't save the original again. A deck whose
-PowerPoint file is beside it already (Google Slides' other export, or
-the file an earlier run saved) isn't read, and the run says so, warning
-when the original is the newer of the two.
+PowerPoint 97-2003 deck (.ppt) are saved as PowerPoint by LibreOffice
+into the part's work folder (output/work/parts/<part>/), and the
+original is left as it is: a run doesn't write among the sources, which
+the sandbox shows it read-only (sandbox.py). The PowerPoint file is
+what the run reads in the original's place and what the sidecars' rows
+name, by its own name (talk.pptx for talk.odp). It's kept, with the
+original's SHA-256 in saved-decks.json beside it, and a later run reads
+it without saving the original again, unless the original has changed
+since, which has it saved anew: a person corrects the original, or the
+sidecars, and not the PowerPoint file, which is the run's. A deck whose
+PowerPoint file is beside it among the sources already (Google Slides'
+other export, or one an earlier version saved there) isn't read, and
+the run says so, warning when the original is the newer of the two.
 
 LibreOffice is found as LIBREOFFICE names it, a path or a command on the
 path, or as soffice or libreoffice on the path. Each deck is saved with
@@ -58,6 +62,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import hashlib
+import json
 import os
 import pathlib
 import re
@@ -79,6 +85,9 @@ ODP_TYPE = b"application/vnd.oasis.opendocument.presentation"
 # How long one deck may take: LibreOffice saved each of 13 real decks,
 # up to 9 MB, in about two seconds.
 TIMEOUT = 300
+# What each deck saved as PowerPoint was saved from, in the part's work
+# folder: {its PowerPoint name: {"from": the deck, "sha256": its digest}}.
+RECORD = "saved-decks.json"
 
 
 class SaveError(Exception):
@@ -99,10 +108,62 @@ def powerpoint_name(name):
     return os.path.splitext(name)[0] + ".pptx"
 
 
+def saved_path(base, target):
+    """Where a deck saved as PowerPoint is kept: the part's work folder,
+    under its PowerPoint name."""
+    return os.path.join(projectpaths.of(base).run_dir(), target)
+
+
+def digest(path):
+    """A file's SHA-256, in hex."""
+    found = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            found.update(block)
+    return found.hexdigest()
+
+
+def record(base):
+    """What the decks kept in the work folder were saved from (RECORD);
+    empty when there's no record, or none that can be read."""
+    try:
+        with open(os.path.join(projectpaths.of(base).run_dir(), RECORD),
+                  encoding="utf-8") as fh:
+            found = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def remember(base, name, target):
+    """That the deck kept as target was saved from name as it is now."""
+    found = record(base)
+    found[target] = {"from": name, "sha256": digest(projectpaths.of(base).source(name))}
+    path = os.path.join(projectpaths.of(base).run_dir(), RECORD)
+    with open(path + ".new", "w", encoding="utf-8") as fh:
+        json.dump(found, fh, indent=1, sort_keys=True)
+    os.replace(path + ".new", path)
+
+
+def current(base, name, target, known=None):
+    """Whether the work folder keeps a PowerPoint file saved from the deck
+    name as it is now."""
+    entry = (record(base) if known is None else known).get(target)
+    if not isinstance(entry, dict) or entry.get("from") != name \
+            or not os.path.isfile(saved_path(base, target)):
+        return False
+    try:
+        return entry.get("sha256") == digest(projectpaths.of(base).source(name))
+    except OSError:
+        return False
+
+
 class Plan:
     """What a run does with each deck in another format, each list in name
-    order: to_save, (deck, the name its PowerPoint file will have);
-    in_place, (deck, its PowerPoint file beside it already, as the folder
+    order: to_save, (deck, the name its PowerPoint file will have), again
+    naming those of them saved before from what the deck was then; saved,
+    (deck, its PowerPoint file in the work folder, saved from the deck as
+    it is now, which is read without saving it again); in_place, (deck, its PowerPoint file beside it already, as the folder
     spells it); looks, (deck, the decks' reference document its PowerPoint
     name is); blocked, (deck, something at its PowerPoint name that isn't
     a file, a folder or a link to nothing); clashes, {name: decks} that
@@ -110,8 +171,8 @@ class Plan:
     is."""
 
     def __init__(self):
-        self.to_save, self.in_place, self.looks, self.blocked = [], [], [], []
-        self.clashes = {}
+        self.to_save, self.saved, self.in_place, self.looks, self.blocked = [], [], [], [], []
+        self.again, self.clashes = set(), {}
 
 
 def plan(base, looks=()):
@@ -120,6 +181,7 @@ def plan(base, looks=()):
     decks, so an original whose PowerPoint name is one isn't read."""
     here = {name.lower(): name for name in os.listdir(projectpaths.of(base).sources())}
     looks = {os.path.normcase(os.path.abspath(path)) for path in looks}
+    known = record(base)
     result = Plan()
     wanted = {}
     for name in other_decks(base):
@@ -135,7 +197,17 @@ def plan(base, looks=()):
             result.in_place.append((name, existing))
         else:
             result.blocked.append((name, existing))
-    result.to_save = sorted(pairs[0] for pairs in wanted.values() if len(pairs) == 1)
+    for pairs in wanted.values():
+        if len(pairs) == 1:
+            name, target = pairs[0]
+            if current(base, name, target, known):
+                result.saved.append((name, target))
+            else:
+                result.to_save.append((name, target))
+                if os.path.lexists(saved_path(base, target)):
+                    result.again.add(name)
+    result.saved.sort()
+    result.to_save.sort()
     result.clashes = {pairs[0][1]: [name for name, _ in pairs]
                       for pairs in wanted.values() if len(pairs) > 1}
     return result
@@ -240,7 +312,13 @@ def save(program, path, target):
                                                            for line in said) else "")
             raise SaveError("LibreOffice wrote no PowerPoint file"
                             + (" (" + "; ".join(why) + hint + ")" if why else ""))
-        shutil.move(written, target)
+        # Into the work folder in one step: a copy beside its place, then
+        # renamed over what an earlier run saved there.
+        if os.path.isdir(target) and not os.path.islink(target):
+            raise SaveError(f"{os.path.basename(target)} is a folder in the work folder "
+                            f"({os.path.dirname(target)}), where it's saved")
+        shutil.copyfile(written, target + ".new")
+        os.replace(target + ".new", target)
 
 
 def objects_without_pictures(path):

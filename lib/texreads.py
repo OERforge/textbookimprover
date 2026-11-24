@@ -841,8 +841,13 @@ def note_lines(notes, most=3):
                            for w, n, t in these[:most])
         more = f"; and {len(these) - most} more" if len(these) > most else ""
         lines.append(f"  It {NOTES[kind]} ({len(these)}): {places}{more}.")
-    lines.append("  Until TextbookImprover runs LaTeX in a sandbox, build only a book you "
-                 "trust (docs/layout.md, The LaTeX a book supplies).")
+    # sandbox.INSIDE, which imports this module.
+    if os.environ.get("TEXTBOOKIMPROVER_SANDBOX"):
+        lines.append("  The run's sandbox keeps it from what's outside the project "
+                     "(docs/layout.md, The sandbox).")
+    else:
+        lines.append("  This run isn't sandboxed (--no-sandbox), so build only a book you trust "
+                     "(docs/layout.md, The sandbox).")
     return lines
 
 

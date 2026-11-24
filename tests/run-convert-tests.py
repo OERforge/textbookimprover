@@ -104,7 +104,7 @@ def convert(work, config=None, project=True, arguments=(), fixtures=NEEDED):
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n")
     return started(
-        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"]
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"]
         + list(arguments), cwd=work, capture_output=True, text=True,
         stdin=subprocess.DEVNULL)
 
@@ -480,7 +480,7 @@ def run_in(directory, contents=None, env=None, arguments=()):
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n" + contents)
     return started(
-        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *arguments],
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", *arguments],
         cwd=directory, capture_output=True, text=True,
         stdin=subprocess.DEVNULL, env=env)
 
@@ -582,7 +582,7 @@ def case_tree_layout(work):
 
     def build(folder):
         return subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=folder,
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"], cwd=folder,
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
 
@@ -727,7 +727,7 @@ def case_built_beside(work):
 
     def build(*options, env=None):
         return subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", *options],
             cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC", **(env or {})))
 
@@ -800,7 +800,7 @@ def case_built_beside(work):
         if os.path.exists(waiting):
             os.remove(waiting)
         run = subprocess.Popen(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
             cwd=work, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             stdin=subprocess.DEVNULL, start_new_session=True,
             # The keyboard's signal as a terminal's programs have it: a
@@ -907,7 +907,7 @@ def case_stamps(work):
 
     def build(*options, folder=None, env=None):
         done = subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", *options],
             cwd=folder or work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC", **(env or {})))
         said = done.stdout + done.stderr
@@ -1119,7 +1119,7 @@ def case_kinds(work):
             with open(full, "wb") as fh:
                 fh.write(data)
         done = subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
             cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         return folder, done, done.stdout + done.stderr
 
@@ -1235,7 +1235,7 @@ def case_remote_pictures(work):
 
     def run(folder, *options):
         done = subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", *options],
             cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         return done, done.stdout + done.stderr
     markdown = project("markdown", "# One\n\n![a picture](http://127.0.0.1:9/a.png)\n\n"
@@ -1312,7 +1312,7 @@ def case_latex_reads(work):
 
     def build(folder, *options):
         done = subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", *options],
             cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
         return done, done.stdout + done.stderr
@@ -1466,6 +1466,102 @@ def case_latex_reads(work):
          or fail(drawing_said[-600:] + own_said[-600:])),
     ]
 
+def case_sandbox(work):
+    """A run converts in a sandbox (lib/sandbox.py): a page's Lua reading a
+    file outside the project with io.lines, which LaTeX's list of what it
+    opened doesn't hold, reads it with --no-sandbox and can't inside; --sandbox-env keeps a variable inside and
+    --sandbox-read shows a folder; the sidecars are made UTF-8 before it,
+    where they're read-only; and a run that says it's inside when it isn't
+    is refused. Skips without a sandbox here, LuaLaTeX, or pdftotext."""
+    import sandbox
+
+    def fail(message):
+        raise AssertionError(message)
+    kind, why = sandbox.available()
+    if kind is None:
+        print(f"  skip  no sandbox here ({why}); a run's sandbox isn't checked")
+        return []
+    if shutil.which("lualatex") is None or shutil.which("pdftotext") is None:
+        print("  skip  lualatex or pdftotext not installed; the sandbox isn't checked")
+        return []
+    secret = os.path.join(os.path.dirname(work), os.path.basename(work) + "-kept")
+    os.makedirs(secret)
+    with open(os.path.join(secret, "words.txt"), "w", encoding="utf-8") as fh:
+        fh.write("SECRETWORDS\n")
+    folder = os.path.join(work, "book")
+    sources = os.path.join(folder, "src", "book")
+    os.makedirs(sources)
+    os.makedirs(os.path.join(folder, "sidecars", "book"))
+    with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.sandbox\n  title: Sandbox\n")
+    with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  pdf:\n    format: pdf\n")
+    lua = ("local ok = pcall(function() for l in io.lines(\"%s\") do tex.print(\"LEAK\" .. l) "
+           "end end) if not ok then tex.print(\"NOLEAK\") end "
+           "tex.print(\"ENV\" .. (os.getenv(\"TI_SANDBOX_PROBE\") or \"NONE\"))"
+           % os.path.join(os.path.realpath(secret), "words.txt"))
+    with open(os.path.join(sources, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# One\n\nWords.\n\n```{=latex}\n\\directlua{" + lua + "}\n```\n")
+    alt = os.path.join(folder, "sidecars", "book", "image-alt.csv")
+    with open(alt, "w", encoding="utf-8") as fh:
+        fh.write("Image,Alt\n")
+    pdf = os.path.join(folder, "output", "pdf", "org.example.sandbox.pdf")
+
+    def build(*options, **env):
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--rebuild", "--quiet", *options],
+            cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC",
+                     TI_SANDBOX_PROBE="probe-value", **env))
+        text = subprocess.run(["pdftotext", pdf, "-"], capture_output=True,
+                              text=True).stdout if os.path.exists(pdf) else ""
+        return done, done.stdout + done.stderr, text.replace("\n", " ")
+
+    open_run, open_said, open_text = build("--no-sandbox")
+    run, said, text = build()
+    with open(alt, "rb") as fh:
+        alt_bom = fh.read(3) == b"\xef\xbb\xbf"
+    env_run, env_said, env_text = build("--sandbox-env", "TI_SANDBOX_PROBE")
+    shown_run, shown_said, shown_text = build("--sandbox-read", secret)
+    claimed = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=folder,
+        capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        env=dict(os.environ, TEXTBOOKIMPROVER_SANDBOX=kind))
+    home = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--quiet", "--sandbox-read",
+         os.path.expanduser("~")], cwd=folder, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL)
+    named = "bubblewrap" if kind == "bwrap" else "Landlock"
+    return [
+        ("with --no-sandbox, a page's Lua reads a file outside with io.lines, which LaTeX's "
+         "list of what it opened misses: what the sandbox is for",
+         lambda: open_run.returncode == 0 and "LEAKSECRETWORDS" in open_text
+         and "WARNING: --no-sandbox: this run isn't sandboxed" in open_said
+         or fail(open_said[-600:] + open_text)),
+        (f"in the sandbox ({named}) it can't, and a variable of the run's isn't kept",
+         lambda: run.returncode == 0 and "NOLEAK" in text and "LEAK" not in text.replace(
+             "NOLEAK", "") and "ENVNONE" in text
+         and (kind != "bwrap" or "Converting in a sandbox (bubblewrap)" in said)
+         or fail(said[-800:] + text)),
+        ("the sidecars are made UTF-8 with the byte-order mark before the sandbox, which "
+         "shows them read-only",
+         lambda: alt_bom or fail(said[-400:])),
+        ("--sandbox-env keeps a variable inside, warned of",
+         lambda: env_run.returncode == 0 and "ENVprobe-value" in env_text
+         and "WARNING: --sandbox-env TI_SANDBOX_PROBE: kept inside the sandbox." in env_said
+         or fail(env_said[-600:] + env_text)),
+        ("--sandbox-read shows a folder inside, read-only, warned of",
+         lambda: shown_run.returncode == 0 and "LEAKSECRETWORDS" in shown_text
+         and f"WARNING: --sandbox-read {os.path.realpath(secret)}: shown inside the sandbox, "
+         "read-only." in shown_said or fail(shown_said[-600:] + shown_text)),
+        ("but not the home folder, nor a run that says it's in the sandbox when it isn't",
+         lambda: home.returncode != 0 and "your home folder" in home.stderr
+         and claimed.returncode != 0
+         and f"TEXTBOOKIMPROVER_SANDBOX says the run is inside {kind}, and it isn't"
+         in claimed.stderr or fail(home.stderr[-300:] + claimed.stderr[-300:])),
+    ]
+
+
 def case_reads(work):
     """A part reads only its own sources: a page naming a picture, a
     linked file, raw HTML's src, srcset, or a stylesheet's url() outside
@@ -1486,7 +1582,7 @@ def case_reads(work):
 
     def build(folder, *options):
         done = subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", *options],
             cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
         return done, done.stdout + done.stderr
@@ -1639,7 +1735,7 @@ def case_two_parts(work):
 
     def build(*options, folder=None, home=None):
         return subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", *options],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", *options],
             cwd=folder or work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC",
                      **({"HOME": home} if home else {})))
@@ -1731,7 +1827,7 @@ def case_two_parts(work):
     os.makedirs(os.path.join(kept_tmp, "convert-left-behind"))
     spy = os.path.join(os.path.dirname(work), os.path.basename(work) + "-shared-tmp")
     os.makedirs(spy)
-    cleared = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    cleared = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                              cwd=work, capture_output=True, text=True,
                              stdin=subprocess.DEVNULL, env=dict(os.environ, TMPDIR=spy))
     tmp_cleared = sorted(os.listdir(kept_tmp))
@@ -1879,7 +1975,7 @@ def case_two_books(work):
 
     def build():
         return subprocess.run(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=work,
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
 
@@ -2143,7 +2239,7 @@ def case_downsample(work):
             fh.write("project:\n  identifier: org.example.fixtures\n"
                      "  title: The Fixture Book\n")
         return where, original, started(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=where,
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"], cwd=where,
             capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
 
     every = ("  html:\n    format: html\n  epub:\n    format: epub3\n"
@@ -2634,7 +2730,7 @@ def case_adopt_part(work):
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def build(folder):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                               cwd=folder, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
 
@@ -2731,7 +2827,7 @@ def case_packages(work):
     write("conversion.yaml", conversion)
     write("packaging.yaml", "targets:\n  course:\n    format: common-cartridge\n"
           "    includes: [pieces]\n  plain:\n    format: zip\n")
-    built = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
+    built = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet",
                             "--zip"], cwd=work, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL)
     packages = listed("output", "packages")
@@ -2797,7 +2893,7 @@ def case_samples_moved(work):
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def convert(folder=None):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                               cwd=folder or work, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
 
@@ -3612,7 +3708,7 @@ def case_page_footer(work):
         shutil.copy(place(first, "project.yaml"), again)
         with open(place(again, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write(footer + "targets:\n  html:\n    format: html\n")
-        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                        cwd=again, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         return {name: read(again, "html", name) for name in ("ch1.html", "ch2.html")
                 if exists(again, "html", name)}
@@ -4878,7 +4974,7 @@ def case_warc_direct(work):
                      "      from: upstream/crawl.warc.gz\n")
 
     def run(where, *flags):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
                                "--quiet", *flags], cwd=where,
                               capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
@@ -5015,7 +5111,7 @@ def case_cartridge(work):
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n" + targets)
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
                                "--quiet"], cwd=folder, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
     book = os.path.join(work, "book")
@@ -5045,7 +5141,7 @@ def case_cartridge(work):
     linked_a = read(linked, "html", "a.html") if exists(linked, "html", "a.html") else ""
     linked_checked = read(linked, "output-check.csv") if exists(
         linked, "output-check.csv") else ""
-    asked = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet",
+    asked = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet",
                             "--check-only", "--linked-documents"], cwd=linked,
                            capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
@@ -5137,7 +5233,7 @@ def case_zip(work):
         return folder, zipfile.ZipFile(os.path.join(folder, "upstream", archive), "w")
 
     def run(where):
-        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--quick",
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
                                "--quiet"], cwd=where, capture_output=True,
                               text=True, stdin=subprocess.DEVNULL)
     book, z = project("book", "My Book.zip")
@@ -5308,7 +5404,7 @@ def case_mathjax2(work):
         fh.write(MATHJAX2)
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
-    run = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    run = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True,
                          stdin=subprocess.DEVNULL)
     page = read(work, "html", "growth.html") if exists(work, "html", "growth.html") else ""
@@ -5318,7 +5414,7 @@ def case_mathjax2(work):
         with open(place(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
         try:
-            started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                            cwd=back, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL, timeout=120)
         except subprocess.TimeoutExpired:
@@ -5369,7 +5465,7 @@ def case_math_words(work):
             fh.write(markup)
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "value.html") if exists(work, "html", "value.html") else ""
     moles = read(work, "html", "moles.html") if exists(work, "html", "moles.html") else ""
@@ -5410,7 +5506,7 @@ def case_empty_rows(work):
         fh.write(EMPTY_ROWS)
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     md = read(work, "md", "bars.md") if exists(work, "md", "bars.md") else ""
     adoc = read(work, "adoc", "bars.adoc") if exists(work, "adoc", "bars.adoc") else ""
@@ -5477,7 +5573,7 @@ def case_display_style(work):
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
                  "  md:\n    format: markdown\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     md = read(work, "md", "integrals.md") if exists(work, "md", "integrals.md") else ""
     page = read(work, "html", "integrals.html") if exists(work, "html", "integrals.html") \
@@ -5505,7 +5601,7 @@ def case_display_style(work):
             fh.write(page)
         with open(place(again, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  md:\n    format: markdown\n")
-        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                        cwd=again, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         back = read(again, "md", "integrals.md") if exists(again, "md", "integrals.md") else ""
     # The page again, math.display_style_in_text set for one target and
@@ -5519,7 +5615,7 @@ def case_display_style(work):
         fh.write("targets:\n  md:\n    format: markdown\n    math:\n"
                  "      display_style_in_text: true\n"
                  "  plain:\n    format: markdown\n")
-    kept_run = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    kept_run = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                               cwd=kept, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
     kept_md = read(kept, "md", "integrals.md") if exists(kept, "md", "integrals.md") else ""
@@ -5549,7 +5645,7 @@ def case_display_style(work):
     def varied_run():
         """(what the run said, the styled target's page, the plain target's,
         the rows of math-repaired.csv)."""
-        done = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+        done = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                               cwd=varied, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
         pages = [read(varied, t, "styled.md") if exists(varied, t, "styled.md") else ""
@@ -5571,7 +5667,7 @@ def case_display_style(work):
                  "  language: en-US\n  contents:\n    - unread\n")
     with open(place(unread, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    done = started(["python3", os.path.join(BIN, "convert.py"), "--quick"],
+    done = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                           cwd=unread, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     unread_said = done.stdout + done.stderr
     unread_page = read(unread, "html", "unread.html") \
@@ -5658,7 +5754,7 @@ def case_asciidoc_layout(work):
         fh.write(ONE_PIXEL)
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
     page = read(work, "html", "ch.html") if exists(work, "html", "ch.html") else ""
@@ -5697,7 +5793,7 @@ def case_quick(work):
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run(*flags, env=None):
-        result = started(["python3", os.path.join(BIN, "convert.py"), "--quiet", *flags],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quiet", *flags],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, env=env)
         return result.stdout + result.stderr
@@ -5745,7 +5841,7 @@ def case_pdf_without_latex(work):
         if found:
             os.symlink(found, place(tools, program))
     put_python(tools)
-    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -5775,7 +5871,7 @@ def case_word_bookmarks(work):
     def build(setting):
         with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  word:\n    format: docx\n" + setting)
-        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         names = {}
@@ -5829,7 +5925,7 @@ def case_pdf_svg_without_converter(work):
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2026-06-01'\n")
     os.chmod(fake, 0o755)
-    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -5862,7 +5958,7 @@ def case_pdf_with_old_latex(work):
     with open(fake, "w") as fh:
         fh.write("#!/bin/sh\necho 'OERFMT:2023-11-01'\n")
     os.chmod(fake, 0o755)
-    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -5898,7 +5994,7 @@ def case_pdf_with_newer_latex(work):
                  "case \"$*\" in *OERFMT*) echo 'OERFMT:2099-06-01'; exit 0 ;; esac\n"
                  "exit 1\n")
     os.chmod(fake, 0o755)
-    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL,
                             env=dict(os.environ, PATH=tools))
@@ -5966,7 +6062,7 @@ def case_pdf_capacity(work):
                      + " > \"$out/${name%.tex}.log\"\n"
                      "exit 1\n")
         os.chmod(fake, 0o755)
-        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                                 cwd=book, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, env=dict(os.environ, PATH=tools))
         said[name] = result.stdout + result.stderr
@@ -6013,7 +6109,7 @@ def case_html_ids(work):
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n")
     with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.ids\n  title: Ids\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     a = read(work, "html", "a.html") if exists(work, "html", "a.html") else ""
     b = read(work, "html", "b.html") if exists(work, "html", "b.html") else ""
@@ -6032,7 +6128,7 @@ def case_html_ids(work):
         fh.write("targets:\n  html:\n    format: html\n")
     with open(place(percent, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.percent\n  title: Percent\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=percent, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     c = read(percent, "html", "c.html") if exists(percent, "html", "c.html") else ""
     c_checked = open(place(percent, "output-check.csv")).read() if exists(
@@ -6087,7 +6183,7 @@ def case_inherited_variables(work):
             fh.write("targets:\n  html:\n    format: html\n")
         with open(place(folder, "project.yaml"), "w") as fh:
             fh.write("project:\n  identifier: org.example.inherited\n  title: Inherited\n")
-        ran = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        ran = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                              cwd=folder, capture_output=True, text=True,
                              stdin=subprocess.DEVNULL, env=dict(os.environ, **extra))
         page = place(folder, "html", "p.html")
@@ -6136,7 +6232,7 @@ def case_turned_pictures(work):
                  "  small:\n    format: docx\n    images:\n      downsample: 2\n")
     with open(place(work, "project.yaml"), "w") as fh:
         fh.write("project:\n  identifier: org.example.turned\n  title: Turned\n")
-    ran = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    ran = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def pictures(path, folder):
@@ -6209,7 +6305,7 @@ def case_html_images(work):
                  'height="371.4"></iframe></p></body></html>')
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "p.html") if exists(work, "html", "p.html") else ""
     images = re.findall(r"<img[^>]*>", page)
@@ -6244,14 +6340,14 @@ def case_asciidoc_markdown(work):
         fh.write(ONE_PIXEL)
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     back = work + "-back"
     if exists(work, "md"):
         shutil.copytree(place(work, "md"), back)
         with open(place(back, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                        cwd=back, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     agree = started(["python3", os.path.join(ROOT, "util", "compare-output.py"),
                             place(work, "html"), place(back, "html")],
@@ -6394,7 +6490,7 @@ def case_asciidoc_target(work):
     def convert_in(where, config):
         with open(place(where, "conversion.yaml"), "w") as fh:
             fh.write(config)
-        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                        cwd=where, capture_output=True, text=True,
                        stdin=subprocess.DEVNULL)
 
@@ -6478,14 +6574,14 @@ def case_title_id(work):
         fh.write("---\ntitle: Sets\n---\n\n## Sets\n\nText.\n")
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     again = work + "-again"
     if exists(work, "html"):
         shutil.copytree(place(work, "html"), again)
         with open(place(again, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n")
-    run = started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=again,
+    run = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=again,
                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(again, "html", "sets.html") if exists(again, "html", "sets.html") else ""
     return [
@@ -7255,7 +7351,7 @@ def case_link_titles(work):
     def convert_in(where, config):
         with open(place(where, "conversion.yaml"), "w") as fh:
             fh.write(config)
-        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                        cwd=where, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     convert_in(work, "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n"
                      "  adoc:\n    format: asciidoc\n")
@@ -7310,7 +7406,7 @@ def case_html_table_repairs(work):
                  '</body></html>')
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     page = read(work, "html", "t.html") if exists(work, "html", "t.html") else ""
     return [
@@ -7486,7 +7582,7 @@ def case_bare_links(work):
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        return started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+        return started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=work,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
     first = run()
     report = []
@@ -7614,7 +7710,7 @@ def case_word_equations(work):
     def build(setting):
         with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  source:\n    format: source\n" + setting)
-        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         return result, tex_of(place(work, "source", "eq.docx"))
@@ -7732,7 +7828,7 @@ def case_word_equation_text(work):
             z.writestr(info, data)
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n  source:\n    format: source\n")
-    result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                             cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     sys.path.insert(0, os.path.join(ROOT, "lib"))
     import docxrepair
@@ -7821,7 +7917,7 @@ def case_word_text_math(work):
     def build(setting):
         with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  source:\n    format: source\n" + setting)
-        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         back = started(["pandoc", "-f", "docx", "-t", "markdown", "--wrap=none",
@@ -7900,7 +7996,7 @@ def case_word_text_minus(work):
         with open(place(work, "conversion.yaml"), "w") as fh:
             fh.write("targets:\n  html:\n    format: html\n" + setting
                      + "  source:\n    format: source\n" + setting)
-        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                                 cwd=work, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         # Without smart, an en dash read back is one, not --.
@@ -8016,7 +8112,7 @@ def case_source_target(work):
             fh.write("targets:\n  html:\n    format: html\n  fixed:\n    format: source\n" + extra)
 
     def run():
-        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                               cwd=work, capture_output=True, text=True)
 
     def differ(n):
@@ -8151,7 +8247,7 @@ def case_word_repairs(work):
     def run(config):
         with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write(config)
-        result = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+        result = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                                 cwd=work, capture_output=True, text=True)
         pages = "".join(read(work, "html", f) for f in sorted(os.listdir(place(work, "html")))
                         if f.endswith(".html")) if exists(work, "html") else ""
@@ -8214,7 +8310,7 @@ def case_markdown_source(work):
     def run():
         with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n  html:\n    format: html\n  mine:\n    format: source\n")
-        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                               cwd=work, capture_output=True, text=True)
 
     first = run()
@@ -8316,7 +8412,7 @@ def case_markdown_table_captions(work):
                  "| F3 | c |\n|----|---|\n| 5  | 6 |\n")
     with open(place(work, "table-captions.csv"), "a", encoding="utf-8") as fh:
         fh.write("fig#table-1,For F1\nfig#table-2,For FH\nfig#table-3,For F3\n")
-    done = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    done = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                           cwd=work, capture_output=True, text=True)
     copy = read(work, "mine", "ch.md") if exists(work, "mine", "ch.md") else ""
     fig = read(work, "mine", "fig.md") if exists(work, "mine", "fig.md") else ""
@@ -8365,7 +8461,7 @@ def adoc_root_reads_back(work):
     shutil.copytree(place(work, "adoc"), back)
     with open(place(back, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                    cwd=back, capture_output=True, text=True)
     page = place(back, "html", "ch.html")
     return os.path.exists(page) and "<mroot>" in open(page, encoding="utf-8").read()
@@ -8380,7 +8476,7 @@ def case_fidelity_writers(work):
                  "A cube root, $\\sqrt[3]{x}$.\n")
     with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n")
-    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick"],
+    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                          cwd=work, capture_output=True, text=True)
     report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
     return [
@@ -8451,7 +8547,7 @@ def case_fidelity_epub(work):
                  '<p>The <a href="handout.pdf">handout</a>.</p></body></html>')
     with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  epub:\n    format: epub3\n  word:\n    format: docx\n")
-    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick",
+    run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
                    "--allow-remote-pictures"],
                          cwd=work, capture_output=True, text=True)
     report = read(work, "fidelity.csv") if exists(work, "fidelity.csv") else ""
@@ -8508,7 +8604,7 @@ def case_alt_text(work):
                  "targets:\n  html:\n    format: html\n")
     with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:
         fh.write("Image,Alt\nimg/h.png,\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     rows = []
     if exists(work, "image-alt-missing.csv"):
@@ -8558,7 +8654,7 @@ def case_alt_shared(work):
         raise AssertionError(repr(found)[:800])
 
     def reasons(where):
-        started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=where,
+        started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=where,
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if not exists(where, "image-alt-missing.csv"):
             return []
@@ -8653,7 +8749,7 @@ def case_highlighting(work):
     with open(place(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
         fh.write("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
                  "  word:\n    format: docx\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=work,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     with open(os.path.join(BIN, "highlighting.theme"), encoding="utf-8") as fh:
         theme = json.load(fh)
@@ -9322,7 +9418,7 @@ def case_docx_target(work):
         fh.write("Image,Alt\nassets/rule.png,[decorative]\n")
     with open(place(work, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  word:\n    format: docx\n")
-    run = started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=work,
+    run = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=work,
                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def part(name, inside):
@@ -9341,7 +9437,7 @@ def case_docx_target(work):
             shutil.copy(place(work, "word", name), back)
     with open(place(back, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  html:\n    format: html\n")
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick"], cwd=back,
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"], cwd=back,
                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
     one_back = read(back, "html", "one.html") if exists(back, "html", "one.html") else ""
     two_back = read(back, "html", "two.html") if exists(back, "html", "two.html") else ""
@@ -9488,7 +9584,7 @@ def case_title_heading(work):
                      + "".join("    - %s\n" % stem for stem, _ in pages) + project)
         with open(place(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets + extra)
-        result = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
+        result = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"], cwd=path,
                                 capture_output=True, text=True, stdin=subprocess.DEVNULL)
         said[name] = result.stdout + result.stderr
         return path
@@ -9931,7 +10027,7 @@ def case_review_columns(work):
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        return started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
+        return started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"], cwd=work,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def header(name):
@@ -10013,7 +10109,7 @@ def case_excel_sidecars(work):
         fh.write("targets:\n  html:\n    format: html\n")
 
     def run():
-        done = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        done = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                               cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         return done.stdout + done.stderr
 
@@ -10067,7 +10163,7 @@ def case_excel_sidecars(work):
         fh.write("Image,Alt,Source,Reason,CurrentAlt,Drafted by,Reviewed\r\n"
                  "one.png,A red square,page,missing,,claude,\r\n"
                  "two.png,A blue square \u2013 smaller,page,missing,,claude,\r\n")
-    rewritten = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    rewritten = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                                cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     rewritten_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     # As Excel for Mac's plain "CSV" saves it: Mac OS Roman, its lines
@@ -10075,7 +10171,7 @@ def case_excel_sidecars(work):
     with open(place(work, "image-alt.csv"), "w", encoding="mac_roman", newline="") as fh:
         fh.write("Image,Alt\r\none.png,A red square\r\n"
                  "two.png,The square\u2019s blue \u2013 smaller\r\n")
-    mac = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    mac = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                          cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     mac_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     # And as a text editor saves it: UTF-8 without the mark, which the run
@@ -10085,7 +10181,7 @@ def case_excel_sidecars(work):
     with open(place(work, "image-alt.csv"), "wb") as fh:
         fh.write(editor)
     beside_before = sorted(n for n in os.listdir(work) if n.lstrip(".").startswith("image-alt.csv"))
-    unmarked = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    unmarked = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                               cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     unmarked_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
     beside_after = sorted(n for n in os.listdir(work) if n.lstrip(".").startswith("image-alt.csv"))
@@ -10097,7 +10193,7 @@ def case_excel_sidecars(work):
         fh.write(b"Image,Alt\r\none.png,A red square\r\ntwo.png,M\x81ller's blue square\r\n")
     built = os.path.getmtime(place(work, "html", "page.html")) \
         if exists(work, "html", "page.html") else None
-    stopped = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    stopped = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                              cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     stopped_built = os.path.getmtime(place(work, "html", "page.html")) \
         if exists(work, "html", "page.html") else None
@@ -10138,7 +10234,7 @@ def case_excel_sidecars(work):
         return sorted(n for n in os.listdir(work)
                       if any(n.lstrip(".").startswith(name) and n != name for name in kept))
     beside_kept = beside_them()
-    left = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    left = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                           cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                           timeout=1200)
     left_page = read(work, "html", "page.html") if exists(work, "html", "page.html") else ""
@@ -10562,7 +10658,7 @@ def case_quoted_lists(work):
                      % os.path.basename(path))
         with open(place(path, "conversion.yaml"), "w", encoding="utf-8") as fh:
             fh.write("targets:\n" + targets)
-        started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=path,
+        started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"], cwd=path,
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def markdown(path, stem):
@@ -11349,7 +11445,7 @@ def case_structure(work):
                                     "title": "The Book", "numbering": True,
                                     "contents": sample}}, fh, sort_keys=False)
     second = started(
-        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"], cwd=work,
         capture_output=True, text=True, stdin=subprocess.DEVNULL)
     toc = read(work, "html", "toc.html") if exists(work, "html", "toc.html") \
         else ""
@@ -11478,7 +11574,7 @@ def case_markdown_target(work):
     for name in ("project.yaml", "conversion.yaml"):
         shutil.copy(place(first, name), place(second, name))
     again = started(
-        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=second,
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"], cwd=second,
         capture_output=True, text=True, stdin=subprocess.DEVNULL)
     compare = started(
         ["python3", os.path.join(ROOT, "util", "compare-output.py"),
@@ -11497,7 +11593,7 @@ def case_markdown_target(work):
             shutil.copy(src, place(third, name))
     for name in ("project.yaml", "conversion.yaml"):
         shutil.copy(place(first, name), place(third, name))
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                    cwd=third, capture_output=True, text=True,
                    stdin=subprocess.DEVNULL)
     mds = [n for n in os.listdir(place(first, "src"))
@@ -11936,7 +12032,7 @@ def case_book_name(work):
                 continue
             with open(place(folder, file), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        done = started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+        done = started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
                               cwd=folder, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL)
         return folder, done, done.stdout + done.stderr
@@ -11993,7 +12089,7 @@ def case_book_name(work):
                        "a.adoc": "= A\n\nText.\n", "b.adoc": "= B\n\nText.\n"}.items():
         with open(place(checked, file), "w", encoding="utf-8") as fh:
             fh.write(text)
-    started(["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", "--check-only"],
+    started(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet", "--check-only"],
                    cwd=checked, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     title = ""
     epubs = glob.glob(place(adoc, "epub", "*.epub"))
@@ -12256,7 +12352,7 @@ def case_own_files(work):
             with open(place(folder, path), "wb") as fh:
                 fh.write(data)
         result = started(
-            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
             cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env=dict(os.environ, **(env or {})))
         return folder, result
@@ -12394,6 +12490,7 @@ CASES = [
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),
+    ("a run converts in a sandbox", case_sandbox),
     ("a file that isn't what its name says stops the run", case_kinds),
     ("a picture named by URL stops the run", case_remote_pictures),
     ("two books in one project, each a course of its own", case_two_books),

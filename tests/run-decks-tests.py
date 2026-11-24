@@ -815,7 +815,7 @@ def folder(work, config, project=True, decks_given=None):
 
 
 def convert(work, *flags, env=None):
-    return subprocess.run([sys.executable, os.path.join(BIN, "convert.py"), "--quiet", *flags],
+    return subprocess.run([sys.executable, os.path.join(BIN, "convert.py"), "--no-sandbox", "--quiet", *flags],
                           cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                           env=env)
 
@@ -3076,7 +3076,8 @@ def case_fallbacks(work):
     write(template, text)
     decks_dir = folder(place(work, "decks"), "targets:\n  pdf:\n    format: pdf\n",
                        decks_given={"agenda.md": FALLBACK})
-    result = subprocess.run([sys.executable, place(copy, "bin", "convert.py"), "--quiet"],
+    result = subprocess.run([sys.executable, place(copy, "bin", "convert.py"), "--no-sandbox",
+                             "--quiet"],
                             cwd=decks_dir, capture_output=True, text=True,
                             stdin=subprocess.DEVNULL)
     out = result.stderr
