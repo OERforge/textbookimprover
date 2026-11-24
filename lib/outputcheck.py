@@ -45,6 +45,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
 
 import alttext
+import limits
 import projectpaths
 
 # What a link names that isn't a file of the set, a scheme in any case
@@ -874,7 +875,8 @@ def find_validator(name):
         if not os.path.isfile(named):
             return None
         if named.lower().endswith(".jar"):
-            return ["java", "-jar", named] if shutil.which("java") else None
+            return (["java"] + limits.java_options() + ["-jar", named]
+                    if shutil.which("java") else None)
         return [named]
     found = shutil.which(command)
     return [found] if found else None

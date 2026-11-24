@@ -1466,6 +1466,46 @@ def case_latex_reads(work):
          or fail(drawing_said[-600:] + own_said[-600:])),
     ]
 
+def case_limits(work):
+    """The limits a run gives its programs (lib/limits.py): a size or a
+    count that doesn't read refused before anything is converted, and a
+    huge page's Pandoc stopped under --max-memory with its own word and the
+    run's, the limit named."""
+    def fail(message):
+        raise AssertionError(message)
+    folder = os.path.join(work, "book")
+    os.makedirs(os.path.join(folder, "src", "book"))
+    with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.limits\n  title: Limits\n")
+    with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    with open(os.path.join(folder, "src", "book", "big.html"), "w", encoding="utf-8") as fh:
+        fh.write("<html><head><title>Big</title></head><body><h1>Big</h1><p>"
+                 + "word " * 3000000 + "</p></body></html>")
+
+    def build(*options):
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                               "--quick", "--quiet", *options], cwd=folder, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL)
+        return done, done.stdout + done.stderr
+    bad_size, bad_size_said = build("--max-memory", "3x")
+    bad_jobs, bad_jobs_said = build("--jobs", "0")
+    stopped, stopped_said = build("--max-memory", "400M")
+    return [
+        ("a size or a count that doesn't read stops the run before anything is converted",
+         lambda: bad_size.returncode != 0 and "3x isn't a size (6G, 6000M). Nothing was "
+         "converted." in bad_size_said and bad_jobs.returncode != 0
+         and "--jobs 0: give one or more" in bad_jobs_said
+         and not os.path.exists(os.path.join(folder, "output", "html"))
+         or fail(bad_size_said[-300:] + bad_jobs_said[-300:])),
+        ("a huge page's Pandoc stops under --max-memory with its own word, and the run names "
+         "the limit",
+         lambda: stopped.returncode != 0 and "Heap exhausted" in stopped_said
+         and "pandoc failed with exit code 251. It ran out of the memory a program may use "
+         "(400 MB, --max-memory)." in stopped_said or fail(stopped_said[-600:])),
+    ]
+
+
 def case_sandbox(work):
     """A run converts in a sandbox (lib/sandbox.py): a page's Lua reading a
     file outside the project with io.lines, which LaTeX's list of what it
@@ -12491,6 +12531,7 @@ CASES = [
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),
     ("a run converts in a sandbox", case_sandbox),
+    ("a run's programs are held to its limits", case_limits),
     ("a file that isn't what its name says stops the run", case_kinds),
     ("a picture named by URL stops the run", case_remote_pictures),
     ("two books in one project, each a course of its own", case_two_books),

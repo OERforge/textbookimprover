@@ -1900,6 +1900,8 @@ def latex_stopped(code, run, log, said, source, tex_dir, pages):
                 "finished the PDF"
                 + (", as a system kills a program when memory runs out, and as a time limit "
                    "or a person can" if stopped == signal.SIGKILL else "")
+                + (", the processor time a program of the run may use being spent (convert.py's "
+                   "--max-time, two hours by default)" if stopped == signal.SIGXCPU else "")
                 + ". LaTeX reported no error of its own, and what it left half written "
                 "wasn't read again. " + pages_then(log, said)]
     block = error_block(log) or error_block(said)

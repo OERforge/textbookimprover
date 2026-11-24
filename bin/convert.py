@@ -117,6 +117,7 @@ try:
     from sidecars import math_keep_rows
     import texreads
     import sandbox
+    import limits
     import filekinds
     import wcag
 except ImportError:
@@ -550,7 +551,7 @@ def run(command, env=None, cwd=None, check=True, capture=False):
                             capture_output=capture)
     if check and result.returncode:
         die(f"{os.path.basename(command[0])} failed with exit code "
-            f"{result.returncode}.")
+            f"{result.returncode}.{LIMITS.why(result.returncode, command[0])}")
     return result
 
 
@@ -1729,6 +1730,9 @@ REMOTE_SAID = []
 # (enter_sandbox); each counted in the targets' stamps.
 SANDBOX_ENV = []
 SANDBOX_READ = []
+# What each program the run starts may use, and how many run side by side
+# (--max-memory, --max-time, --jobs; lib/limits.py).
+LIMITS = limits.Limits()
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -5999,7 +6003,7 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
 
     stopped, refused = {}, {}
     masters = [m for m, _ in latex_parts]
-    workers = max(1, min(len(masters), os.cpu_count() or 1, 4))
+    workers = LIMITS.latex_jobs(len(masters))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, masters))
     failed = [(m, log) for m, ok, _, log in results if not ok]
@@ -6215,7 +6219,7 @@ def deck_pdfs(target, stems, names, base, language):
             if TRACE else None, picture_paths=str(target["picture_paths"]) == "on",
             code_wrap=target["code_wrap"])
 
-    workers = max(1, min(len(stems), os.cpu_count() or 1, 4))
+    workers = LIMITS.latex_jobs(len(stems))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, stems))
     written, failed, pages, missing, dropped, ratios = [], [], 0, {}, [], {}
@@ -6457,7 +6461,7 @@ def deck_pptxs(target, stems, names, base, language, work):
             title=os.path.splitext(os.path.basename(names.get(stem, stem)))[0],
             notes=str(target["slides.notes"]), env=env)
 
-    workers = max(1, min(len(jobs), os.cpu_count() or 1, 4))
+    workers = LIMITS.pandoc_jobs(len(jobs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, jobs))
     written, failed, slides, ratios, layouts = [], [], 0, {}, set()
@@ -6710,7 +6714,7 @@ def deck_presentations(target, stems, base, language):
                      HEADER_FILTER],
             level=level, language=language, shape=shape, notes=notes, env=env)
 
-    workers = max(1, min(len(jobs), os.cpu_count() or 1, 4))
+    workers = LIMITS.pandoc_jobs(len(jobs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, jobs))
     written, failed, slides, ratios, warnings = [], [], 0, {}, []
@@ -7978,6 +7982,17 @@ def main():
                         help="show the file or folder PATH inside the sandbox, read-only, "
                              "for a program that needs it; may be given again. The read "
                              "checks still take only what a part may read, and --allow-read")
+    parser.add_argument("--max-memory", metavar="SIZE",
+                        help="the memory each program the run starts may use (6G, 6000M; 0 "
+                             "for no limit); by default three quarters of the machine's")
+    parser.add_argument("--max-time", metavar="TIME",
+                        help="the processor time each program the run starts may use (7200, "
+                             "90m, 2h; 0 for no limit); by default 2h")
+    parser.add_argument("--jobs", type=int, metavar="N",
+                        help="how many LaTeX builds, or Pandoc conversions, run side by "
+                             "side; by default as many as fit in three quarters of the "
+                             "machine's memory, at 4 GB a build and 2 GB a conversion, up to "
+                             "the processors and four")
     parser.add_argument("--rebuild", action="store_true",
                         help="build every target and package, whatever its stamp says "
                              "(as make -B does), keeping the caches in output/work/")
@@ -8007,6 +8022,17 @@ def main():
     global LATEXMKRC, ALLOW_ARGS, ALLOW_REMOTE
     LATEXMKRC = args.latexmkrc
     ALLOW_REMOTE = args.allow_remote_pictures
+    # The limits first, so that every program this run starts, and the run
+    # in the sandbox, has them (lib/limits.py).
+    global LIMITS
+    try:
+        LIMITS = limits.Limits.given(args.max_memory, args.max_time, args.jobs)
+    except ValueError as exc:
+        die(f"{exc}. Nothing was converted.")
+    LIMITS.apply()
+    if not os.environ.get(sandbox.INSIDE):
+        for line in LIMITS.warnings():
+            say(line)
     SANDBOX_ENV[:] = sandbox_names(args.sandbox_env)
     SANDBOX_READ[:] = sandbox_paths(args.sandbox_read)
     # Before the run moves to the project's folder, so a folder given

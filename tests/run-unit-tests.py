@@ -870,6 +870,104 @@ def check_reads():
     ]
 
 
+def check_limits():
+    """lib/limits.py: sizes and times as given; how many of a kind run side
+    by side, from the machine's memory or --jobs; what a run warns of; and
+    the limits applied to a program it starts: Pandoc stopped with its own
+    word on a huge page, a loop stopped by its processor time, and a JVM
+    given a heap under the limit."""
+    import limits
+    sizes = [limits.parse_size(t) for t in ("6G", "6000M", "1.5gb", "512k", "0", "42")]
+    times = [limits.parse_time(t) for t in ("7200", "90m", "2h", "0", "45s")]
+    refused = []
+    for parse, text in ((limits.parse_size, "3x"), (limits.parse_size, "-1G"),
+                        (limits.parse_time, "2 days"), (limits.parse_time, "")):
+        try:
+            parse(text)
+        except ValueError as exc:
+            refused.append(str(exc))
+    gb = limits.GB
+    big = limits.Limits(12 * gb, machine=16 * gb, cpus=8)
+    small = limits.Limits(int(4.5 * gb), machine=6 * gb, cpus=8)
+    tiny = limits.Limits(int(2.2 * gb), machine=3 * gb, cpus=8)
+    told = limits.Limits(12 * gb, jobs=2, machine=16 * gb, cpus=8)
+    unknown = limits.Limits(None, machine=None, cpus=2)
+    counts = [(big.latex_jobs(10), big.pandoc_jobs(10)), (small.latex_jobs(10),
+              small.pandoc_jobs(10)), (tiny.latex_jobs(10), tiny.pandoc_jobs(10)),
+              (told.latex_jobs(10), told.pandoc_jobs(1)), (unknown.latex_jobs(10),
+              big.latex_jobs(1))]
+    warned = (big.warnings(), tiny.warnings(), limits.Limits(20 * gb, machine=16 * gb).warnings())
+    try:
+        limits.Limits.given(jobs=0)
+        no_jobs = ""
+    except ValueError as exc:
+        no_jobs = str(exc)
+    work = scratch("limits-")
+    probe = os.path.join(work, "probe.py")
+    with open(probe, "w", encoding="utf-8") as fh:
+        fh.write(textwrap.dedent("""\
+            import json, os, resource, subprocess, sys
+            sys.path.insert(0, sys.argv[1])
+            import limits
+            mode = sys.argv[2]
+            if mode == "memory":
+                limits.Limits(300 << 20, None, machine=8 << 30).apply()
+                big = os.path.join(sys.argv[3], "big.html")
+                with open(big, "w") as fh:
+                    fh.write("<p>" + "word " * 3000000 + "</p>")
+                done = subprocess.run(["pandoc", "-f", "html", "-t", "json", big, "-o",
+                                       os.devnull], capture_output=True, text=True)
+                print(json.dumps({"code": done.returncode, "said": done.stderr,
+                                  "ghcrts": os.environ.get("GHCRTS"),
+                                  "data": resource.getrlimit(resource.RLIMIT_DATA),
+                                  "java": limits.java_options()}))
+            else:
+                limits.Limits(None, 1, machine=8 << 30).apply()
+                done = subprocess.run([sys.executable, "-c", "while True: pass"])
+                print(json.dumps({"code": done.returncode,
+                                  "why": limits.Limits(None, 1).why(done.returncode)}))
+            """))
+    env = dict(os.environ, GHCRTS="-A8m")
+
+    def probed(mode):
+        done = subprocess.run([sys.executable, probe, os.path.join(ROOT, "lib"), mode, work],
+                              capture_output=True, text=True, env=env, timeout=300)
+        try:
+            return json.loads(done.stdout)
+        except ValueError:
+            return {"stderr": done.stderr[-500:]}
+    memory = probed("memory") if shutil.which("pandoc") else None
+    cpu = probed("cpu")
+    pandoc_why = limits.Limits(300 << 20).why(251, "/usr/bin/pandoc")
+    return [
+        ("sizes and times read as given, 0 for none, and one that doesn't read refused",
+         lambda: sizes == [6 * gb, 6000 << 20, int(1.5 * gb), 512 << 10, None, 42]
+         and times == [7200, 5400, 7200, None, 45] and len(refused) == 4
+         and "isn't a size" in refused[0] and "isn't a time" in refused[2]
+         or fail(f"{sizes} {times} {refused}")),
+        ("side by side, as many as fit in three quarters of the memory at 4 GB a LaTeX build "
+         "and 2 GB a conversion, at least one and at most four; --jobs in its place; the "
+         "items the most",
+         lambda: counts == [(3, 4), (1, 2), (1, 1), (2, 1), (2, 1)] or fail(repr(counts))),
+        ("a machine below 4 GB warned of, and a limit above its memory, and --jobs 0 refused",
+         lambda: warned[0] == [] and "may not build" in warned[1][0]
+         and "limits nothing" in warned[2][0] and "give one or more" in no_jobs
+         or fail(repr(warned) + no_jobs)),
+        ("a program under the memory limit: Pandoc stops on a huge page with its own word, "
+         "given a heap of two thirds, a variable's other options kept, and a JVM half",
+         lambda: memory is None or (memory.get("code") == 251
+                                    and "Heap exhausted" in memory.get("said", "")
+                                    and memory.get("ghcrts") == "-A8m -M200m"
+                                    and memory.get("data") == [300 << 20, 300 << 20]
+                                    and memory.get("java") == ["-Xmx256m"])
+         and "ran out of the memory a program may use (300 MB" in pandoc_why
+         or fail(repr(memory) + pandoc_why)),
+        ("a loop stopped by its processor time, and said so",
+         lambda: cpu.get("code") == -signal.SIGXCPU and "--max-time" in cpu.get("why", "")
+         or fail(repr(cpu))),
+    ]
+
+
 def check_sandbox():
     """lib/sandbox.py: a program run in each sandbox this machine has,
     bubblewrap's and Landlock's, reads the project and what it's shown,
@@ -12551,6 +12649,7 @@ GROUPS = [
     ("the LaTeX a book supplies, scanned, and LaTeX's own list of what it opened",
      check_texreads),
     ("lib/sandbox.py, the sandbox a run converts in", check_sandbox),
+    ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
     ("what a page names by URL", check_named_by_url),

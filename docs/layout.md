@@ -155,6 +155,18 @@ Three options change what's shown, each on the command line alone, for one run, 
 
 A folder `--allow-read` or `--allow-read-anyway` takes is shown too. The other scripts don't sandbox themselves yet, so a script other than `convert.py` that builds a book (`build-pdf.py` run by hand, say) is as safe as the book it's given.
 
+### What a run may use
+
+Each program a run starts is held to limits you give on the command line, never in a project's settings, since a book from elsewhere would raise its own. They're a net under a runaway or hostile file, set well above what a real book needs, and they change nothing a run builds, so a target isn't built again for them.
+
+- **`--max-memory SIZE`** (`6G`, `6000M`; `0` for none): the memory each program may use, by default three quarters of the machine's, which is what Linux reports (`MemTotal`, or the limit of the cgroup the run is in, where that's lower). Pandoc is given a heap of two thirds of it, so it stops with its own message (`Heap exhausted`), which the run follows with the limit it ran into, and a validator's Java half.
+- **`--max-time TIME`** (`7200`, `90m`, `2h`; `0` for none): the processor time each program may use, by default two hours. It stops a loop such as TeX's `\def\a{\a}\a`, which runs forever without growing, and the run says the program spent its time.
+- **`--jobs N`**: how many LaTeX builds (a LaTeX book's parts, a deck's PDFs), or Pandoc conversions (decks), run side by side. By default, as many as fit in three quarters of the memory at 4 GB a LaTeX build and 2 GB a conversion, at least one, and at most the processors and four.
+
+What a real book needs, as measured: a whole book's LuaLaTeX run took up to 3.2 GB, and two at once ran out of a machine of 5.8 GB; a 15 MB Markdown page of one word repeated made Pandoc 3.14 use 2.1 GB. Below 4 GB the run warns that a long book's PDF may not build. Under WSL the memory is the Linux machine's, which WSL makes half of Windows' by default; `memory=` in `.wslconfig` gives it more ([WSL's settings](https://learn.microsoft.com/windows/wsl/wsl-config)).
+
+The memory limit is the kernel's `RLIMIT_DATA`, which counts what a program writes, not the address space it reserves, which Pandoc's runtime, Java, and Chromium reserve far beyond what they use. The time limit is `RLIMIT_CPU`, processor time, not the clock: a program that waits uses none, and none of the programs a run starts waits on anything but the others.
+
 ## Where a run is started
 
 Start `convert.py` in the project's folder, or name the folder with `-d`:
