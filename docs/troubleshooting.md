@@ -26,6 +26,8 @@ A folder that Google Drive, OneDrive, or Dropbox syncs, reached from WSL under `
 
 **`Stopping: N media reference(s) could not be resolved`** — a page shows an image that isn't on disk or isn't in a format the run can identify; `media-unresolved.csv` names each one. Usually it's an EMF or WMF, Word's own vector formats, which no browser shows: [replace it in Word or convert it](architecture.md#what-conversion-does-to-your-pages).
 
+**`Stopping: N name(s) in the sources don't name their files as every reader would`** — a page names a picture or a file with a backslash (`assets\figure.png`), in another case than the file's (`Figure.PNG` for `figure.png`), or a picture by another kind's extension (a PNG named `.jpg`). Your own machine may find it, and a server, another system, or an EPUB reader won't. Rename the reference in the source to match the file, or the file to match its kind; or put `media.fix_names: true` under `defaults:` in `conversion.yaml`, and the run reads each as its file and warns ([What a part reads](layout.md#what-a-part-reads)).
+
 **A page is in the wrong place in the book** — check `project-sample.yaml`, among the reports in `output/reports/book/`. When a run worked out the book's order itself, the sample holds what it decided, for you to correct.
 
 **Keys like `page#table-3` don't match what you see** — in a table report or `table-captions.csv`, the number counts the page's data tables only, in reading order; a table that only holds an image becomes a figure and isn't counted. The `Excerpt` column identifies the table.

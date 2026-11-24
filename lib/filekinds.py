@@ -244,6 +244,13 @@ def said(path, found, role, kinds, shown=None):
             f"{WORDS.get(found, found)}")
 
 
+# The extension a picture of each kind is saved under.
+EXTENSION_OF = {"png": ".png", "jpeg": ".jpg", "gif": ".gif", "webp": ".webp", "svg": ".svg",
+                "tiff": ".tif", "bmp": ".bmp", "pdf": ".pdf", "postscript": ".eps",
+                "wmf": ".wmf", "emf": ".emf", "jp2": ".jp2", "avif": ".avif",
+                "heic": ".heic", "ico": ".ico"}
+
+
 def media_type(head):
     """The media type of a picture a page can show, by head, or None:
     PNG, JPEG, GIF, WebP, and SVG (epubsource.sniff's answer)."""

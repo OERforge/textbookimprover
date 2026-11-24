@@ -398,6 +398,7 @@ def case_markdown(work):
     with open(place(work, "tables.md"), "w", encoding="utf-8") as fh:
         fh.write("# old\n")
     result = convert(work, "defaults:\n  pages:\n    split_level: 2\n"
+                           "  media:\n    fix_names: true\n"
                            "targets:\n  html:\n    format: html\n"
                            "  epub:\n    format: epub3\n", fixtures=("tables",))
     # "long run.md" is the page long-run: no space reaches an href.
@@ -438,8 +439,8 @@ def case_markdown(work):
          lambda: exists(work, "html", "assets", "Pipe-Sizes.png")
          and 'src="assets/Pipe-Sizes.png"' in page
          and not exists(work, "html", "assets", "Pipe Sizes.png")),
-        ("an image path written with a backslash is read with a slash, "
-         "and the run says so",
+        ("an image path written with a backslash is read with a slash under "
+         "media.fix_names, and the run says so",
          lambda: 'src="assets/Curve.png"' in page
          and 'src="assets/_under.png"' in page
          and result.stderr.count("a path only Windows resolves") == 2),
@@ -572,7 +573,7 @@ def case_tree_layout(work):
                   encoding="utf-8-sig") as fh:
             fh.write("Label,Description\nTable 1.1,Intervals and their counts\n")
         with open(os.path.join(folder, "conversion.yaml"), "w", encoding="utf-8") as fh:
-            fh.write("defaults:\n  footer: Free to read\n"
+            fh.write("defaults:\n  footer: Free to read\n  media:\n    fix_names: true\n"
                      "targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
                      "  word:\n    format: docx\n")
         with open(os.path.join(folder, "project.yaml"), "w", encoding="utf-8") as fh:
@@ -692,7 +693,7 @@ def case_tree_layout(work):
         ("a sidecar in sidecars/book/ is read",
          lambda: "Intervals and their counts" in page),
         ("a picture a page names, one named with another case, and one named as Windows "
-         "names it are found among the sources",
+         "names it are found among the sources, under media.fix_names",
          lambda: all(exists(tree, "output", "html", "assets", image)
                      for image in ("Pipe-Sizes.png", "Curve.png", "_under.png"))),
         ("the run writes nothing among the sources and nothing at the project's top",
@@ -1101,7 +1102,9 @@ def case_kinds(work):
     before any program opens it: a web page under a picture's name a page
     names, a program among the sources no page names, a Word file that's
     text, and a Word file's own picture that's a web page, which the run
-    extracts; a PNG named .jpg is warned of, and the run goes on."""
+    extracts; a PNG named .jpg a page names is a naming slip, which stops
+    the run without media.fix_names and is copied under its own kind's
+    extension with it."""
     def fail(message):
         raise AssertionError(message)
 
@@ -1142,6 +1145,30 @@ def case_kinds(work):
     slip, slip_run, slip_said = project("slip", {
         "src/book/one.md": b"# One\n\n![a picture](assets/dot.jpg)\n",
         "src/book/assets/dot.jpg": png})
+    fixed, fixed_run, fixed_said = project("fixed", {
+        "conversion.yaml": b"defaults:\n  media:\n    fix_names: true\n"
+                           b"targets:\n  html:\n    format: html\n",
+        "src/book/one.md": b"# One\n\n![a picture](assets/dot.jpg)\n",
+        "src/book/assets/dot.jpg": png})
+    # A PNG named .jpg outside the part, under media.fix_names: the read
+    # check stops it, and no copy is written where its name leads.
+    os.makedirs(os.path.join(work, "outside"), exist_ok=True)
+    with open(os.path.join(work, "outside", "dot.jpg"), "wb") as fh:
+        fh.write(png)
+    away, away_run, away_said = project("away", {
+        "conversion.yaml": b"defaults:\n  media:\n    fix_names: true\n"
+                           b"targets:\n  html:\n    format: html\n",
+        "src/book/one.md": b"# One\n\n![a picture](../../../outside/dot.jpg)\n"})
+    # One named by a path that climbs out of the part and back in: its
+    # copy would land outside the work folder, so it stays a slip.
+    climb, climb_run, climb_said = project("climb", {
+        "conversion.yaml": b"defaults:\n  media:\n    fix_names: true\n"
+                           b"targets:\n  html:\n    format: html\n",
+        "src/book/one.md": b"# One\n\n![a picture](../../src/book/assets/dot.jpg)\n",
+        "src/book/assets/dot.jpg": png})
+    fixed_page = os.path.join(fixed, "output", "html", "one.html")
+    fixed_html = open(fixed_page, encoding="utf-8").read() if os.path.exists(fixed_page) \
+        else ""
     stopped = "aren't what their names say"
     return [
         ("a web page under a picture's name a page names stops the run, naming it, and "
@@ -1160,10 +1187,30 @@ def case_kinds(work):
          lambda: inner_run.returncode != 0 and "image1.png is named as a PNG picture, and its "
          "first bytes are a web page (HTML)." in inner_said and stopped in inner_said
          or fail(inner_said[-600:])),
-        ("a PNG named .jpg is warned of, and the run goes on",
-         lambda: slip_run.returncode == 0 and "WARNING: src/book/assets/dot.jpg is named as a "
-         "JPEG picture, and its first bytes are a PNG picture." in slip_said
+        ("a PNG named .jpg that a page names is a naming slip, which stops the run without "
+         "media.fix_names",
+         lambda: slip_run.returncode != 0 and "ERROR: src/book/one.md names an image "
+         "assets/dot.jpg, a PNG picture under another kind's name" in slip_said
          or fail(slip_said[-600:])),
+        ("and with it is copied under its own kind's extension and named so, the source as "
+         "it was",
+         lambda: fixed_run.returncode == 0 and 'src="assets/dot.png"' in fixed_html
+         and os.path.isfile(os.path.join(fixed, "output", "html", "assets", "dot.png"))
+         and os.path.isfile(os.path.join(fixed, "src", "book", "assets", "dot.jpg"))
+         and not os.path.exists(os.path.join(fixed, "src", "book", "assets", "dot.png"))
+         and "read as assets/dot.png (media.fix_names)" in fixed_said
+         or fail(fixed_said[-600:])),
+        ("one whose copy would land outside the part's work folder stops the run under it too",
+         lambda: climb_run.returncode != 0 and "which media.fix_names can't copy under its own"
+         in climb_said and not glob.glob(os.path.join(climb, "output", "**", "dot.png"),
+                                         recursive=True) or fail(climb_said[-600:])),
+        ("one outside the part is the read check's to stop, and nothing is copied where its "
+         "name leads",
+         lambda: away_run.returncode != 0 and "which leads out of the project" in away_said
+         and "read as" not in away_said
+         and not os.path.exists(os.path.join(work, "outside", "dot.png"))
+         and not glob.glob(os.path.join(away, "**", "dot.png"), recursive=True)
+         or fail(away_said[-600:])),
     ]
 
 def case_latex_reads(work):
@@ -2271,14 +2318,34 @@ def case_linked_paths(work):
     started(["pandoc", "-f", "markdown", "-o", place(work, "word.docx")],
                    input="# Word\n\nThe [handout](docs/HANDOUT.PDF).\n", text=True,
                    capture_output=True)
-    result = convert(work, "targets:\n  html:\n    format: html\n  print:\n    format: html\n",
+    stopped = convert(work, "targets:\n  html:\n    format: html\n  print:\n    format: html\n",
+                      fixtures=())
+    stopped_said = stopped.stdout + stopped.stderr
+    stopped_page = exists(work, "html", "md.html")
+    result = convert(work, "defaults:\n  media:\n    fix_names: true\n"
+                           "targets:\n  html:\n    format: html\n  print:\n    format: html\n",
                      fixtures=())
     page = {stem: read(work, "html", stem + ".html") if exists(work, "html", stem + ".html")
             else "" for stem in ("md", "html", "adoc", "word")}
     printed = read(work, "print", "html.html") if exists(work, "print", "html.html") else ""
     said = result.stdout + result.stderr
+    in_target = convert(work, "targets:\n  html:\n    format: html\n    media:\n"
+                              "      fix_names: true\n", fixtures=())
     return [
-        ("the run succeeds", lambda: result.returncode == 0),
+        ("without media.fix_names, each name that doesn't name its file as every reader "
+         "would stops the run, naming each and the setting, and nothing is built",
+         lambda: stopped.returncode != 0 and not stopped_page
+         and stopped_said.count("ERROR: ") >= 7
+         and "ERROR: src/book/md.md links to docs/handout.PDF#page=2, and the file is "
+         "Docs/Handout.pdf, a name in another case" in stopped_said
+         and "or set media.fix_names: true under defaults: in conversion.yaml" in stopped_said
+         or fail(stopped_said[-800:])),
+        ("media.fix_names in a target stops the run: the whole book shares it",
+         lambda: in_target.returncode != 0
+         and "media.fix_names belongs to defaults, not to target 'html'"
+         in in_target.stdout + in_target.stderr
+         or fail((in_target.stdout + in_target.stderr)[-400:])),
+        ("with it, the run succeeds", lambda: result.returncode == 0),
         ("each source's link to a file named in another case, or with backslashes, links "
          "to the file, which is copied beside the pages",
          lambda: all('href="Docs/Handout.pdf"' in page[stem] for stem in page)

@@ -939,6 +939,46 @@ def check_filekinds():
                            "html": None} or fail(str(media))),
     ]
 
+def check_book_level_keys():
+    """A key the book alone sets, in a section a target sets too
+    (media.fix_names beside media.lowercase): read from defaults for every
+    target, refused in a target's block, said to belong under defaults."""
+    conversion = oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+
+    def resolved(text, target="html"):
+        path = os.path.join(scratch(), "conversion.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        try:
+            return oerconfig.resolve(conversion, project_schema,
+                                     [oerconfig.load_document(path)], target=target)
+        except oerconfig.ConfigError as error:
+            return str(error)
+    head = "targets:\n  html:\n    format: html\n  pdf:\n    format: pdf\n"
+    given = resolved("defaults:\n  media:\n    fix_names: true\n" + head)
+    given_pdf = resolved("defaults:\n  media:\n    fix_names: true\n" + head, "pdf")
+    left = resolved(head)
+    in_target = resolved(head + "    media:\n      fix_names: true\n", "pdf")
+    off_in_target = resolved(head + "    media:\n      fix_names: false\n", "pdf")
+    sibling = resolved(head + "    media:\n      lowercase: true\n", "pdf")
+    homes = dict(oerconfig._homes("media.fix_names"))
+    return [
+        ("a book-level key under defaults: is every target's, and false when not given",
+         lambda: not isinstance(given, str) and given["media.fix_names"] is True
+         and given_pdf["media.fix_names"] is True and left["media.fix_names"] is False
+         or fail(repr((given, left)))),
+        ("in a target's block it's refused, true or false, saying it belongs to defaults",
+         lambda: isinstance(in_target, str) and isinstance(off_in_target, str)
+         and "media.fix_names belongs to defaults, not to target 'pdf'" in in_target
+         or fail(repr((in_target, off_in_target)))),
+        ("its section's other keys are still a target's own",
+         lambda: not isinstance(sibling, str) and sibling["media.lowercase"] is True
+         or fail(repr(sibling))),
+        ("where it belongs is said as under defaults: alone",
+         lambda: set(homes.values()) == {"under defaults:"} or fail(repr(homes))),
+    ]
+
 def check_texreads():
     """The scan of the LaTeX a book supplies, and LaTeX's own list of what
     it opened (lib/texreads.py), on text and files written here."""
@@ -12008,6 +12048,7 @@ GROUPS = [
     ("the LaTeX a book supplies, scanned, and LaTeX's own list of what it opened",
      check_texreads),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
+    ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),

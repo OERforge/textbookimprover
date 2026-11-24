@@ -97,8 +97,8 @@ def png(path, red, green, blue, size=8):
 
 # A deck of slides at level 1, as most decks written for beamer are: its
 # title a YAML list of one, notes, a pause, a slide a rule begins, a
-# picture named in another case than its file's, and a slide whose title
-# has a character New Computer Modern Sans Bold lacks.
+# picture, and a slide whose title has a character New Computer Modern Sans
+# Bold lacks.
 FLAT = """\
 ---
 title:
@@ -132,7 +132,7 @@ Text on a slide with no title.
 
 # A Chart
 
-![A rising line](img/Chart.PNG)
+![A rising line](img/chart.png)
 
 # Market Demand
 
@@ -1113,6 +1113,12 @@ def case_folder(work):
     work = folder(work, PAGES)
     shutil.copy(place(work, "README.md"), place(work, "notes.adoc"))
     write(place(work, "image-alt.csv"), "Image,Alt\nimg/chart,A line rising to the right\n")
+    # The picture named in another case than its file's, which stops the
+    # run until media.fix_names is set.
+    deck = place(work, "Flat Deck.md")
+    write(deck, read(deck).replace("](img/chart.png)", "](img/Chart.PNG)"))
+    stopped = convert(work, "--quick")
+    write(place(work, "conversion.yaml"), "defaults:\n  media:\n    fix_names: true\n" + PAGES)
     result = convert(work, "--quick")
     out = result.stderr
     page = lambda name: read(place(work, "pages", name))  # noqa: E731
@@ -1153,8 +1159,12 @@ def case_folder(work):
          is not None and "<details class=\"notes\" open" not in flat),
         ("a pause isn't on the page", lambda: ". . ." not in flat
          and "Second point, after a pause." in flat),
-        ("a picture named in another case is read as its file, and said to be",
-         lambda: 'src="img/chart.png"' in flat
+        ("a picture named in another case stops the run, unless media.fix_names reads it "
+         "as its file, and says so",
+         lambda: stopped.returncode != 0
+         and "ERROR: src/slides/Flat Deck.md names an image img/Chart.PNG, and the file is "
+             "img/chart.png" in stopped.stderr
+         and 'src="img/chart.png"' in flat
          and "names an image img/Chart.PNG, and the file is img/chart.png" in out),
         ("the alt-text sidecar reaches a deck's picture",
          lambda: 'alt="A line rising to the right"' in flat),

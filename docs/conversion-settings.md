@@ -320,6 +320,10 @@ How media extracted from the source is handled.
 
 Abort as soon as an image can't be identified, rather than collecting every such image and stopping once at the gate.
 
+**`media.fix_names`**—`bool`; default `false`; *book level: in defaults, never a target*
+
+What a run does with a name in the sources that doesn't name its file as every reader would: a backslash as a folder's separator (assets\figure.png, which only Windows reads), a name differing from its file only in case (Figure.PNG for figure.png, which macOS and Windows find and a server or Pandoc doesn't), or a picture of one kind under another kind's name (a PNG named .jpg, which a page or an EPUB declares by its name). Off, the run stops, naming each. On, it reads each as its file, a picture of another kind copied under its own kind's extension, and names the copies so, warning of each; the sources stay as they are. Read once for the book, from defaults.
+
 **`media.lowercase`**—`bool`; default `false`
 
 Copy each image and file a page names under its name in lowercase, the letters A to Z, and name it so in the page: in an html target, a revealjs target, and a markdown or asciidoc target, whose references are otherwise the author's own, with forward slashes. A server that tells case apart then finds what a page names however the source spelled it. Two files whose names differ only in case stop the run before anything is written. A source target's copies keep the author's references, since they name the author's files, which the run doesn't rename; nor do the files in an EPUB, a PDF, a Word file, or a PowerPoint file have names a reader sees. A target written into the folder that holds the sources, on a file system that ignores case, as macOS's and Windows's do, finds a source's own file under its lowercase name and leaves it as it's named, which a server that tells case apart won't find; the run warns of it, and a folder of the target's own is the fix.

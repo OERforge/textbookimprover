@@ -1656,6 +1656,11 @@ LANGUAGE_DECLARED = False
 # by its master, as its preamble gives it. LANGUAGES: each page's
 # languages.Decision, by its name, worked out once for every target.
 PAGE_SOURCES = {}
+# media.fix_names: whether a name in the sources that doesn't name its file
+# as every reader would is read as its file (portable_media_paths), or
+# stops the run; and the names met, for the stop.
+FIX_NAMES = False
+NAME_SLIPS = []
 # How many formulas in running text each HTML page sets in display style,
 # which math.display_style_in_text keeps: by a page's stem, and by the path
 # of a target's variant of one (read_variants).
@@ -2911,7 +2916,17 @@ def portable_media_paths(path, base, name):
     A link to a local file that isn't a page (linked_file), which a target
     copies beside its pages as it does an image, is found the same way,
     its fragment or query kept: one that names no file as written was
-    copied by no target, and its page linked to nothing."""
+    copied by no target, and its page linked to nothing.
+
+    And a picture of one kind under another kind's name (a PNG named
+    .jpg, filekinds), which a page or an EPUB declares by its name: copied
+    into the part's work folder under its own kind's extension, where a
+    target finds it before the source, and named so.
+
+    Each is a naming slip: with media.fix_names the intermediate takes
+    the name that works and the run warns; without, it's kept in
+    NAME_SLIPS, and the run stops once every source is read
+    (stop_on_slips)."""
     from names import case_match
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
@@ -2949,43 +2964,113 @@ def portable_media_paths(path, base, name):
             return cased[0], "windows" if swapped != ref else "case"
         return None
 
+    def kind(ref):
+        """ref, or the name candidate() gives it, as a picture of another
+        kind: (the copy's name, "kind", what it is), the copy made under
+        media.fix_names; or None."""
+        named = unquote(ref)
+        # A name the part may not read is check_reads' to stop on: it isn't
+        # opened here, and nothing is written for it.
+        if os.path.isabs(named) or named.startswith(("\\", "~")) \
+                or re.match(r"^[a-zA-Z]:", named):
+            return None
+        path = P(base).referenced(named)
+        if P(base).unreadable(path) or not os.path.isfile(path):
+            return None
+        found = filekinds.mismatch(path)
+        if not found or not filekinds.picture_slip(found[0], found[1]):
+            return None
+        renamed = os.path.splitext(named)[0] + filekinds.EXTENSION_OF[found[0]]
+        if FIX_NAMES:
+            work = os.path.realpath(P(base).run_dir())
+            copy = os.path.join(work, renamed)
+            if not os.path.realpath(os.path.dirname(copy)).startswith(work + os.sep) \
+                    and os.path.realpath(os.path.dirname(copy)) != work:
+                NAME_SLIPS.append(
+                    f"src/{PART}/{name} names {ref}, "
+                    f"{filekinds.WORDS.get(found[0], found[0])} under another kind's name, "
+                    "which media.fix_names can't copy under its own, the name climbing out "
+                    "of the part's folder: name it from the part's folder")
+                return None
+            if not (os.path.exists(copy) and os.path.samefile(copy, path)):
+                os.makedirs(os.path.dirname(copy), exist_ok=True)
+                if os.path.lexists(copy):
+                    os.remove(copy)
+                shutil.copyfile(path, copy)
+        return renamed.replace(os.sep, "/"), "kind", filekinds.WORDS.get(found[0], found[0])
+
+    def better_name(ref):
+        better = candidate(ref)
+        sort = kind(better[0] if better else ref)
+        if better and sort:
+            return sort[0], better[1] + "+kind", sort[2]
+        return sort or (better + (None,) if better else None)
+
     def walk(node):
         if isinstance(node, dict):
             if node.get("t") == "Image":
                 ref = node["c"][2][0]
                 better = None if ref.lower().startswith(EXTERNAL_REF) \
-                    else candidate(ref)
+                    else better_name(ref)
                 if better:
-                    fixed.append(("image", ref, better[0], better[0], better[1]))
-                    node["c"][2][0] = better[0]
+                    fixed.append(("image", ref, better[0], better[0], better[1], better[2]))
+                    if FIX_NAMES:
+                        node["c"][2][0] = better[0]
             elif node.get("t") == "Link":
                 ref = node["c"][2][0]
                 parts = linked_file(ref)
-                better = candidate(parts[0]) if parts else None
+                better = better_name(parts[0]) if parts else None
                 if better:
-                    fixed.append(("link", ref, better[0] + parts[1], better[0], better[1]))
-                    node["c"][2][0] = better[0] + parts[1]
+                    fixed.append(("link", ref, better[0] + parts[1], better[0], better[1],
+                                  better[2]))
+                    if FIX_NAMES:
+                        node["c"][2][0] = better[0] + parts[1]
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
             for value in node:
                 walk(value)
     walk(doc["blocks"])
-    if fixed:
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh)
-        for kind, ref, better, file, how in fixed:
-            names = f"names an image {ref}" if kind == "image" else f"links to {ref}"
-            if how == "case":
-                missed = "Pandoc doesn't" if kind == "image" \
-                    else "a server that tells case apart doesn't"
-                say(f"WARNING: {name} {names}, and the file is {file}, a name in another "
-                    f"case, which macOS and Windows find and {missed}; read as {better}. "
-                    "Changing it in the source is the fix.")
-            else:
-                say(f"WARNING: {name} {names}, a path only Windows resolves; read as "
-                    f"{better}. Changing it in the source is the fix.")
-    return [(ref, better) for _, ref, better, _, _ in fixed]
+    if not fixed:
+        return []
+    lines = []
+    for sort, ref, better, file, how, what in fixed:
+        names = f"names an image {ref}" if sort == "image" else f"links to {ref}"
+        said = []
+        if how.startswith("case"):
+            missed = "Pandoc doesn't" if sort == "image" \
+                else "a server that tells case apart doesn't"
+            said.append(f"and the file is {file}, a name in another case, which macOS and "
+                        f"Windows find and {missed}")
+        elif how.startswith("windows"):
+            said.append("a path only Windows resolves")
+        if how.endswith("kind"):
+            said.append(f"{what} under another kind's name, which a page or an EPUB "
+                        "declares by its name")
+        lines.append((f"src/{PART}/{name} {names}, " + "; and ".join(said), better))
+    if not FIX_NAMES:
+        NAME_SLIPS.extend(line for line, _ in lines)
+        return []
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    for line, better in lines:
+        say(f"WARNING: {line}; read as {better} (media.fix_names). Changing it in the "
+            "source is the fix.")
+    return [(ref, better) for _, ref, better, _, _, _ in fixed]
+
+
+def stop_on_slips():
+    """Stop, once every source is read, on the names that don't name their
+    files as every reader would (portable_media_paths), unless
+    media.fix_names reads each as its file."""
+    if not NAME_SLIPS:
+        return
+    for line in dict.fromkeys(NAME_SLIPS):
+        say(f"ERROR: {line}.")
+    die(f"Stopping: {len(set(NAME_SLIPS))} name(s) in the sources don't name their files as "
+        "every reader would. Name each file as it is in the source, or set media.fix_names: "
+        f"true under defaults: in {CONFIG_NAME}, and the run reads each as its file and "
+        "names its copies so, the sources as they are. Nothing was converted.")
 
 
 def settle_markdown(path, base, name, decks=False, report=True):
@@ -3437,6 +3522,7 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
              "-o", target, "--lua-filter=" + HTML_RAW_FILTER],
             env=env, cwd=P(base).run_dir())
         out.append(target)
+    stop_on_slips()
     check_reads(base, out)
     return out
 
@@ -3495,6 +3581,7 @@ def read_variants(base, target, work, env):
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
             settle_markdown(out, base, name, DECK_RUN, report=False)
         raw[stem] = out
+    stop_on_slips()
     check_reads(base, list(raw.values()))
     return raw
 
@@ -3678,8 +3765,9 @@ def check_kinds(base):
     """Every file among the part's sources whose name this run knows read
     for its first bytes before any program opens it (filekinds): a
     picture, a medium, or a source that's another kind of file stops the
-    run, with no way past; a picture of another kind is warned of. Dot
-    names are passed over, as the part's reading passes over them."""
+    run, with no way past; a picture of another kind is a naming slip
+    where a page names it. Dot names are passed over, as the part's
+    reading passes over them."""
     project = P(base)
     folder = project.sources()
     paths = []
@@ -3687,8 +3775,11 @@ def check_kinds(base):
         folders[:] = sorted(f for f in folders if not f.startswith(".")
                             and not os.path.islink(os.path.join(top, f)))
         paths += [os.path.join(top, n) for n in sorted(files) if not n.startswith(".")]
-    say_kinds(*kind_problems(paths, lambda path: f"src/{PART}/"
-                             + os.path.relpath(path, folder)))
+    # A picture of another kind is a naming slip where a page names it
+    # (portable_media_paths), and nothing opens one no page names.
+    stops, _slips = kind_problems(paths, lambda path: f"src/{PART}/"
+                                  + os.path.relpath(path, folder))
+    say_kinds(stops, [])
 
 
 def check_reads(base, pages):
@@ -3765,6 +3856,7 @@ def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
     # the first under every page that shows either. A file is told from
     # another as the file system tells it, so one named in two ways, as a
     # file system that ignores case finds it, is one.
+    stop_on_slips()
     check_reads(base, [P(base).raw(stem) for stem in stems])
     written = {naming: {} for naming in namings if any(naming)}
     for stem in stems:
@@ -7906,6 +7998,8 @@ def main():
                   if str(entry).strip()]
     LATEX_MACROS = str(first["latex.macros"] or "").strip()
     WORD_DELETIONS = str(first["word.tracked_deletions"] or "accept")
+    global FIX_NAMES
+    FIX_NAMES = bool(first["media.fix_names"])
     #                           which the configuration keeps out of targets
     # Two source targets write the same copies unless they differ in the one
     # setting of their own; nothing breaks, but one of them is wasted work.

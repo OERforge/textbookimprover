@@ -483,7 +483,7 @@ def _homes(dotted):
         top = schema.node(dotted.split(".")[0])
         where = ("under project:" if block is None
                  else f"in a {block}" if top.target_only
-                 else "under defaults:" if top.book_level
+                 else "under defaults:" if top.book_level or schema.node(dotted).book_level
                  else f"under defaults: or a {block}")
         out.append((name, where))
     return out
@@ -786,6 +786,16 @@ def resolve(schema, project_schema, documents, target=None,
                 problems.append(
                     f"{target_source}: {name} belongs to defaults, not to "
                     f"target {target!r}, because the whole book shares it")
+                continue
+            # A key of a section that's the book's alone (media.fix_names),
+            # its section otherwise a target's too.
+            given = target_block.get(name)
+            for key, grandchild in (child.keys or {}).items():
+                if grandchild.book_level and isinstance(given, dict) \
+                        and given.get(key) not in (None, {}, []):
+                    problems.append(
+                        f"{target_source}: {name}.{key} belongs to defaults, not to "
+                        f"target {target!r}, because the whole book shares it")
 
     if problems:
         raise ConfigError("\n".join(problems))
