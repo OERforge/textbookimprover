@@ -27,9 +27,13 @@ What the parts' runs leave is read as data a sandboxed run wrote: a file
 that is a link, or too long, is passed over, and the record is written
 to a new file that can't be a link someone left in output/.
 
-Not in it yet, of what the archive plan's record holds: the TeX packages
-and fonts a PDF used, each file LaTeX read under --allow-read, how many
-pages --toc and --include-all-html placed, and the checkers' versions.
+For each PDF LaTeX built, what it was built with (lib/texrecord.py): the
+release, the TeX Live packages and the fonts, and the files read outside
+TeX's tree, a file under --allow-read among them.
+
+Not in it yet, of what the archive plan's record holds: a deck's PDF's
+and a drawing's LaTeX, how many pages --toc and --include-all-html
+placed, and the checkers' versions.
 
 Copyright 2026 Robert Szarka
 
@@ -139,6 +143,8 @@ def clear_fragments(base):
         for name in os.listdir(folder):
             if name.endswith(".json"):
                 os.remove(os.path.join(folder, name))
+    import texrecord
+    texrecord.clear(base)
 
 
 def sandbox_said():
@@ -249,6 +255,16 @@ def _pandoc_data():
                                               if os.path.isdir(p) and os.listdir(p))}
 
 
+def _latex(base, targets):
+    """What LaTeX built each of targets' PDFs with, this run or the one
+    that built what output/ holds (lib/texrecord.py)."""
+    import texrecord
+    try:
+        return texrecord.read(base, targets)
+    except OSError:
+        return {}
+
+
 def _platform():
     release = platform.release()
     return {"system": platform.system(), "release": release, "machine": platform.machine(),
@@ -323,6 +339,7 @@ def values(base, argv, moment, moment_from, status):
         environment.update(stamps.environment_values(fmt))
     if os.environ.get("TZ"):
         environment["TZ"] = os.environ["TZ"]
+    parts = _fragments(base)
     return _strings({
         "record": FORMAT,
         "run": {
@@ -343,7 +360,9 @@ def values(base, argv, moment, moment_from, status):
         "pandoc data": _pandoc_data(),
         "platform": _platform(),
         "environment": environment,
-        "parts": _fragments(base),
+        "parts": parts,
+        "latex": _latex(base, {t for p in parts.values() if isinstance(p, dict)
+                               for t in (p.get("targets") or {})}),
         "stamps": _stamps(base),
         "outputs": _outputs(base),
     })

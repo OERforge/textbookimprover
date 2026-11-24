@@ -1952,6 +1952,19 @@ def scan_supplied(base, resolved, pages_dir, stems):
                                        "The PDF wasn't built, and an earlier one is as it was."))
 
 
+def record_tex(base, key, fls, pdf, log):
+    """What LaTeX built the PDF with, for the build record a run of
+    convert.py writes (lib/texrecord.py)."""
+    if not projectpaths.builds_beside():
+        return
+    import texrecord
+    try:
+        texrecord.write(base, key, fls, pdf, log, ENGINE)
+    except OSError as exc:
+        print(f"NOTE: the build record won't say what LaTeX built {key} with: {exc}.",
+              file=sys.stderr)
+
+
 def pdf_via_latex(book_json, filters, searched, out_path, base, work, environment, seed,
                   pages=None, kept=None):
     """Build out_path from book_json as Pandoc's -t pdf would, with LaTeX
@@ -2038,6 +2051,8 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
             command, 44, "", stderr + texreads.recorder_stop(
                 outside, lambda path: texreads.shown(P(base).top(), path),
                 part=texreads.part_of(P(base))) + "\n"), said, source
+    record_tex(base, environment.get("TARGET_NAME") or "pdf",
+               os.path.join(tex_dir, LATEX_JOB + ".fls"), made, log)
     shutil.copyfile(made, out_path)
     return subprocess.CompletedProcess(command, 0, "", stderr + pandoc_warnings(log)), said, source
 

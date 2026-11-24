@@ -867,6 +867,77 @@ def case_build_record(work):
     ]
 
 
+def case_build_record_latex(work):
+    """The build record says what LaTeX built a PDF with: the LaTeX
+    release, the TeX Live packages that hold what it read, with their
+    revisions, or the files where there's no package database, each face
+    the PDF embeds and where it came from, and each other file it read
+    outside TeX's tree with its SHA-256, none of the project's own; and a
+    second run, the PDF up to date, says the same."""
+    import yaml
+
+    def fail(message):
+        raise AssertionError(message)
+    if shutil.which("lualatex") is None:
+        print("  skip  lualatex not installed; what the build record says of LaTeX isn't "
+              "checked")
+        return []
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    write("project.yaml", "project:\n  identifier: org.example.texrecord\n  title: Record\n"
+          "  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n")
+    write("src/book/one.md", "# One\n\nA page with $x^2$ and **bold** words.\n")
+    done = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
+        cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    path = os.path.join(work, "output", "ti-build.yaml")
+    record = {}
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
+            record = yaml.safe_load(fh) or {}
+    latex = (record.get("latex") or {}).get("pdf") or {}
+    again = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet"],
+        cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    later = {}
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
+            later = yaml.safe_load(fh) or {}
+    top = os.path.realpath(work)
+    others = latex.get("other files read") or {}
+    fonts = latex.get("fonts")
+    return [
+        ("the record names the LaTeX release and what LaTeX read in TeX's tree",
+         lambda: done.returncode == 0 and latex.get("engine") == "lualatex"
+         and re.match(r"\d{4}-\d{2}-\d{2}", latex.get("latex", ""))
+         and ("amsmath" in (latex.get("packages") or {})
+              and all(re.fullmatch(r"\d+", r) for r in latex["packages"].values())
+              or any(f.endswith("/amsmath.sty") for f in latex.get("tex files") or []))
+         or fail(done.stderr[-600:] + repr(latex)[:1500])),
+        ("each face the PDF embeds, and where it came from",
+         lambda: fonts == "pikepdf isn't installed"
+         or isinstance(fonts, dict) and fonts and all(
+             isinstance(v, dict) and (v.get("package") or v.get("file in TeX's tree")
+                                      or v.get("file")) for v in fonts.values())
+         or fail(repr(fonts))),
+        ("each other file it read, outside TeX's tree and the project, by its SHA-256",
+         lambda: all(os.path.isabs(k) and not (os.path.realpath(k) + os.sep).startswith(top + os.sep)
+                     and re.fullmatch(r"[0-9a-f]{64}|larger than 64 MiB|can't be read", v)
+                     for k, v in others.items()) or fail(repr(others)[:1500])),
+        ("a second run, the PDF up to date, still says what LaTeX built it with",
+         lambda: again.returncode == 0
+         and later["parts"]["book"]["targets"]["pdf"]["built"] == "up to date"
+         and (later.get("latex") or {}).get("pdf") == latex
+         or fail(again.stderr[-600:] + repr(later.get("latex"))[:600])),
+    ]
+
+
 def case_archive_dates(work):
     """The zip and tar files a run writes itself, a target's archive and a
     package's cartridge, are the same bytes when the book is built again
@@ -12758,6 +12829,7 @@ CASES = [
      case_archive_dates),
     ("one moment for a run's programs, and a second run building nothing", case_one_moment),
     ("the build record, of what a run built and with what", case_build_record),
+    ("the build record, of what LaTeX built a PDF with", case_build_record_latex),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

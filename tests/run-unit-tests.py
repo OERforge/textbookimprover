@@ -1301,6 +1301,99 @@ def check_buildrecord():
     ]
 
 
+def check_texrecord():
+    """lib/texrecord.py: TeX Live's package database read, a relocated
+    file's path among it; what a build read put into packages, and what's
+    in TeX's tree and no package listed; the project's own files and
+    /dev/null left out, another file named with its SHA-256; a face found
+    in TeX's tree given its package; a piece that's a link passed over;
+    and a target's piece kept until it's built again."""
+    import hashlib
+    import json
+    import texrecord
+    work = scratch("texrecord-")
+    root = os.path.join(work, "tex")
+    os.makedirs(os.path.join(root, "tlpkg"))
+    with open(os.path.join(root, "tlpkg", "texlive.tlpdb"), "w", encoding="utf-8") as fh:
+        fh.write("name amsmath\nrevision 80868\nrunfiles size=1\n"
+                 " RELOC/tex/latex/amsmath/amsmath.sty\n\n"
+                 "name plex\nrevision 77682\nrunfiles size=1\n"
+                 " texmf-dist/fonts/opentype/ibm/plex/IBMPlexSerif-Regular.otf\n")
+    for rel in ("texmf-dist/tex/latex/amsmath/amsmath.sty",
+                "texmf-var/luatex-cache/x.luc"):
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+        open(os.path.join(root, rel), "w").close()
+    project = os.path.join(work, "book")
+    os.makedirs(os.path.join(project, "src", "book"))
+    with open(os.path.join(project, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: B\n")
+    with open(os.path.join(project, "src", "book", "one.tex"), "w", encoding="utf-8") as fh:
+        fh.write("text")
+    outside = os.path.join(work, "outside.conf")
+    with open(outside, "w", encoding="utf-8") as fh:
+        fh.write("conf")
+    fls = os.path.join(project, "output", "work", "book.fls")
+    os.makedirs(os.path.dirname(fls))
+    with open(fls, "w", encoding="utf-8") as fh:
+        fh.write(f"PWD {project}\nINPUT {root}/texmf-dist/tex/latex/amsmath/amsmath.sty\n"
+                 f"INPUT {root}/texmf-var/luatex-cache/x.luc\nINPUT src/book/one.tex\n"
+                 f"INPUT /dev/null\nINPUT {outside}\n")
+    saved_root, saved_db = list(texrecord._ROOT), list(texrecord._PACKAGES)
+    texrecord._ROOT[:] = [os.path.realpath(root)]
+    texrecord._PACKAGES[:] = []
+    try:
+        gathered = texrecord.gather(project, fls, os.path.join(work, "none.pdf"), "LaTeX2e "
+                                    "<2026-11-01> patch level 1", "lualatex")
+        gathered["fonts"] = {"IBMPlexSerif-Regular": {
+            "tex": "texmf-dist/fonts/opentype/ibm/plex/IBMPlexSerif-Regular.otf"}}
+        summed = texrecord.summary(gathered, os.path.realpath(root))
+        folder = os.path.join(project, *texrecord.FOLDER)
+        os.makedirs(folder)
+        with open(os.path.join(work, "planted.json"), "w", encoding="utf-8") as fh:
+            json.dump({"build": "planted"}, fh)
+        os.symlink(os.path.join(work, "planted.json"), os.path.join(folder, "planted.json"))
+        with open(os.path.join(folder, "pdf.json"), "w", encoding="utf-8") as fh:
+            json.dump(dict(gathered, build="pdf"), fh)
+        read = texrecord.read(project)
+        # A target built again: its pending piece takes the place of its
+        # kept one, another target's kept as it is; and the record reads
+        # only the targets it's given.
+        with open(os.path.join(folder, "other.json"), "w", encoding="utf-8") as fh:
+            json.dump(dict(gathered, build="other"), fh)
+        texrecord.write(project, "pdf (main.tex)", fls, os.path.join(work, "none.pdf"), "",
+                        "lualatex")
+        texrecord.promote(project, "pdf")
+        promoted = sorted(texrecord.read(project))
+        only = sorted(texrecord.read(project, {"other"}))
+        os.remove(os.path.join(folder, "planted.json"))
+        left = sorted(os.listdir(folder))
+    finally:
+        texrecord._ROOT[:] = saved_root
+        texrecord._PACKAGES[:] = saved_db
+    return [
+        ("what LaTeX read in TeX's tree is put into its packages, a relocated file's too, and "
+         "what's in no package listed",
+         lambda: summed["packages"] == {"amsmath": "80868"}
+         and summed["in TeX's tree, in no package"] == ["texmf-var/luatex-cache/x.luc"]
+         and summed["latex"] == "2026-11-01, patch level 1" or fail(repr(summed))),
+        ("the project's own files and /dev/null are left out, and another file is named with "
+         "its SHA-256",
+         lambda: summed["other files read"] == {
+             os.path.realpath(outside): hashlib.sha256(b"conf").hexdigest()}
+         or fail(repr(summed["other files read"]))),
+        ("a face in TeX's tree is given its package",
+         lambda: summed["fonts"]["IBMPlexSerif-Regular"]["package"] == "plex"
+         or fail(repr(summed["fonts"]))),
+        ("a piece left as a link is passed over",
+         lambda: list(read) == ["pdf"] or fail(repr(list(read)))),
+        ("a target built again has its new piece in place of its last, another's kept, and the "
+         "record reads the targets it's given",
+         lambda: promoted == ["other", "pdf (main.tex)"] and only == ["other"]
+         and left == ["other.json", "pdf__main.tex_.json", "pending"]
+         or fail(repr((promoted, only, left)))),
+    ]
+
+
 def check_archivedates():
     """lib/archivedates.py: a zip member's date from SOURCE_DATE_EPOCH, in
     UTC, within a zip's years and to its even second; the file's own
@@ -12928,6 +13021,7 @@ GROUPS = [
      "tars", check_archivedates),
     ("lib/buildrecord.py, the build record's strings, paths, and the files it reads and "
      "writes", check_buildrecord),
+    ("lib/texrecord.py, what the build record says LaTeX built a PDF with", check_texrecord),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),

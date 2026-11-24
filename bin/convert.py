@@ -780,6 +780,15 @@ def record_stamps(targets, base=None):
         if target.stamp is not None and target.swapped and target_present(target):
             stamps.write_stamp(target.stamp_path, target.stamp)
     if base is not None:
+        if projectpaths.builds_beside():
+            import texrecord
+            for target in targets:
+                if target.stamp is not None and target.swapped and target_present(target):
+                    try:
+                        texrecord.promote(base, target.name)
+                    except OSError as exc:
+                        say(f"NOTE: the build record won't say what LaTeX built {target.name} "
+                            f"with: {exc}.")
         record_part(base, targets)
 
 
@@ -6024,6 +6033,14 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                     outside, lambda path: texreads.shown(P(base).top(), path),
                     f"the PDF for target {target.name}", part=PART)
                 return master, False, pdf, log or result.stdout
+            if projectpaths.builds_beside():
+                import texrecord
+                key = target.name if len(latex_parts) == 1 else f"{target.name} ({master})"
+                try:
+                    texrecord.write(base, key, os.path.join(folder, stem + ".fls"), pdf,
+                                    log, latexbuild.ENGINE)
+                except OSError as exc:
+                    say(f"NOTE: the build record won't say what LaTeX built {key} with: {exc}.")
         if not ok:
             # What latexmk itself said last, for a build that stopped with
             # no error in LaTeX's log (LuaLaTeX ended by the system, a file
