@@ -19,7 +19,9 @@ WHERE THE SOURCES GO
 A folder of one kind goes whole: a book's into src/book/, a folder of
 decks alone into src/slides/ (or when project.kind says slides), and a
 LaTeX book that keeps its sources in its own src/ has that folder's
-files in src/book/. A folder holding a book and decks is split, each
+files in src/book/. A folder of Markdown alone is one book, decks written
+in Markdown among it too, unless --slides names the decks or
+project.kind says slides. A folder holding a book and decks is split, each
 source placed by the first of these that places it:
 
   1. By its type: a PowerPoint or Impress file is a deck, a Word file the
@@ -1319,7 +1321,8 @@ def main(argv=None):
     parser.add_argument("--slides", action="append", default=[], metavar="PATTERN",
                         help="a pattern matching the file names of decks written in "
                              "Markdown, in a folder holding a book too ('lecture-*.md'); "
-                             "may be given again")
+                             "may be given again. Without it a folder of Markdown alone "
+                             "is one book, unless project.kind says slides")
     parser.add_argument("--dry-run", action="store_true",
                         help="say what it would do, and do nothing")
     args = parser.parse_args(argv)
