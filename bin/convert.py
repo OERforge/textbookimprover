@@ -114,6 +114,7 @@ try:
     from names import safe_path, safe_stem, is_safe, output_path
     import sidecars
     from sidecars import math_keep_rows
+    import texreads
     import wcag
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -668,11 +669,15 @@ def stamp_targets(base, targets, latex_book=False):
             top=stamps.top_digest(root, PART, target_named_files(target, base, schema,
                                                                  latex_book)),
             software=stamps.software_digest(stamps.software(target.format, latex_book)),
-            # --latexmkrc changes a LaTeX book's own PDF, and nothing else
-            # of this script's changes a target: the packager's options
-            # are counted in a package's stamp.
-            options=stamps.options_digest(
-                {"--latexmkrc": True} if LATEXMKRC and target.format == "pdf" else {}))
+            # --latexmkrc changes a LaTeX book's own PDF, and --allow-read
+            # what any target's LaTeX may read; nothing else of this
+            # script's changes a target: the packager's options are
+            # counted in a package's stamp. The folders --allow-read gave
+            # are kept in the stamp's file too, for the packager to refuse.
+            options=stamps.options_digest(dict(
+                {"--latexmkrc": True} if LATEXMKRC and target.format == "pdf" else {},
+                **({"--allow-read": sorted(texreads.ALLOWED)} if texreads.ALLOWED else {}))),
+            allowed=texreads.ALLOWED)
         target.stamp_path = P(base).stamp_file(stamps.stamp_name("target", target.name))
 
 
@@ -1671,6 +1676,9 @@ PART_ARGS = []
 # For a builder the run starts, in a run that builds each target beside
 # its folder: build it there too.
 BESIDE_ARGS = []
+# --allow-read, passed on to build-pdf.py (texreads.ALLOWED holds the
+# folders for this run).
+ALLOW_ARGS = []
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -2102,6 +2110,60 @@ def stop_alone(base, prep, master, place, env):
     return None
 
 
+# A LaTeX book's own packages and classes, which LaTeX finds from the
+# folder it runs in whatever file loads them.
+PACKAGE_EXTENSIONS = (".sty", ".cls", ".clo", ".def", ".cfg", ".fd", ".bbx", ".cbx", ".lbx")
+
+
+def scan_latex_book(base, masters):
+    """A LaTeX book's files read for the files they name before LaTeX or
+    Pandoc's reader runs (texreads): each master and every file it reaches,
+    from the master's own folder, as LaTeX finds a name from where it runs;
+    the part's packages and classes; and the latex.macros file, which the
+    copies are given. A name that leads outside what the part reads stops
+    the run, naming the override; what the scan can't follow is warned
+    of."""
+    import latexsource
+    project = P(base)
+    readable = texreads.rule(project)
+    found = texreads.Findings()
+    packages = [f for f in texreads.tex_files(project.sources())
+                if os.path.splitext(f)[1].lower() in PACKAGE_EXTENSIONS]
+    seen = set()
+
+    def scan(names, starts):
+        for name in names:
+            if (name, starts[0]) in seen or not os.path.isfile(project.source(name)):
+                continue
+            seen.add((name, starts[0]))
+            found.extend(texreads.scan_file(project.source(name), f"src/{PART}/{name}",
+                                            starts, readable))
+    refused = None
+    for master in masters:
+        starts = [project.source(os.path.dirname(master))]
+        scan([master] + packages, starts)
+        try:
+            files, _ = latexsource.reached(base, master)
+        except projectpaths.Refused as exc:
+            # A file the master reaches names one outside, which the
+            # reader's resolver met first: the part's files are scanned
+            # for it, to name its line, and the resolver's stop stands
+            # where the scan finds nothing.
+            refused = refused or exc
+            files = texreads.tex_files(project.sources())
+        scan([f for f in files if f != master], starts)
+    macros = project.named(LATEX_MACROS, setting="latex.macros") if LATEX_MACROS else ""
+    if macros and os.path.isfile(macros):
+        found.extend(texreads.scan_file(
+            macros, LATEX_MACROS, [project.source(os.path.dirname(masters[0]))], readable))
+    try:
+        texreads.report(found, say, PART, "Nothing was converted.")
+    except SystemExit as exc:
+        die(str(exc))
+    if refused is not None:
+        raise refused
+
+
 def read_latex_to_json(base, masters, env, work, titles=None):
     """A LaTeX book, read whole through each of its masters by Pandoc,
     from a copy put right where Pandoc's reader can't take it
@@ -2114,6 +2176,7 @@ def read_latex_to_json(base, masters, env, work, titles=None):
     import latexsource
     if isinstance(masters, str):
         masters = [masters]
+    scan_latex_book(base, masters)
     stems, order, header, parts, preps, counts = [], [], {}, [], [], {}
     untitled = []
     for index, master in enumerate(masters):
@@ -5535,7 +5598,9 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         folder = os.path.join(build, os.path.dirname(master))
         # The PDF and the log where they're looked for, whatever the book's
         # .latexmkrc says ($out_dir); the command line wins over it.
-        command = ["latexmk", "-lualatex", "-outdir=.", "-auxdir=.",
+        # -recorder (latexmk's default, which the book's own rc file could
+        # turn off): LaTeX's list of the files it opened, checked after.
+        command = ["latexmk", "-lualatex", texreads.RECORDER, "-outdir=.", "-auxdir=.",
                    "-interaction=nonstopmode", "-halt-on-error", "-file-line-error",
                    "-r", seed_rc, os.path.basename(master)]
         if TRACE:
@@ -5547,6 +5612,14 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
         log = latexsource.read_text(log_path) if os.path.exists(log_path) else ""
         pdf = os.path.join(folder, stem + ".pdf")
         ok = result.returncode == 0 and os.path.exists(pdf)
+        if ok:
+            outside = texreads.recorded_outside(os.path.join(folder, stem + ".fls"),
+                                                texreads.rule(P(base), also=[build, work]))
+            if outside:
+                refused[master] = texreads.recorder_stop(
+                    outside, lambda path: texreads.shown(P(base).top(), path),
+                    f"the PDF for target {target.name}", part=PART)
+                return master, False, pdf, log or result.stdout
         if not ok:
             # What latexmk itself said last, for a build that stopped with
             # no error in LaTeX's log (LuaLaTeX ended by the system, a file
@@ -5556,13 +5629,16 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
                 if line.strip()][:LATEXMK_SAID])
         return master, ok, pdf, log or result.stdout
 
-    stopped = {}
+    stopped, refused = {}, {}
     masters = [m for m, _ in latex_parts]
     workers = max(1, min(len(masters), os.cpu_count() or 1, 4))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, masters))
     failed = [(m, log) for m, ok, _, log in results if not ok]
     for master, log in failed:
+        if master in refused:
+            say(refused[master])
+            continue
         if len(masters) > 1:
             say(f"LaTeX stopped on {master}:")
         errors = latexbuild.first_errors(log)
@@ -5700,10 +5776,12 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
              f"{len(failed)} of the {len(masters)} PDFs for target {target.name} weren't "
              "built (" + ", ".join(m for m, _ in failed[:4])
              + (", ..." if len(failed) > 4 else "") + ")")
-            + ": LaTeX stopped on the book's own files, made to build with LaTeX's "
-            "tagging. A book can need changes of its own to build that way "
-            "(docs/latex.md says which the copy makes); pdf.from: pages builds the "
-            "PDF from the converted pages instead.")
+            + (": LaTeX read files outside the part, as said above."
+               if all(m in refused for m, _ in failed) else
+               ": LaTeX stopped on the book's own files, made to build with LaTeX's "
+               "tagging. A book can need changes of its own to build that way "
+               "(docs/latex.md says which the copy makes); pdf.from: pages builds the "
+               "PDF from the converted pages instead."))
     unplaced_warning(target.name, counts, paths, "the PDF")
     return written
 
@@ -5776,11 +5854,17 @@ def deck_pdfs(target, stems, names, base, language):
     kept, cff2 = {}, []
     unmatched, beamer, one_level, unlinked, untagged_blocks = [], {}, [], [], []
     untied, step_links, unsettled = {}, {}, []
+    notes = [n for _stem, result in results for n in result.get("scan_notes") or []]
+    for line in texreads.note_lines(notes):
+        say(line)
     for stem, result in results:
         for command in result["beamer_commands"]:
             beamer.setdefault(command, []).append(stem)
         if not result["ok"]:
             failed.append(stem)
+            if result.get("refused"):
+                say(result["refused"])
+                continue
             if result["svg_failed"]:
                 say(f"{stem}'s PDF wasn't built: LaTeX can't show an SVG image, and "
                     + "; ".join(f"{src} couldn't be made a PDF ({why})"
@@ -7497,6 +7581,12 @@ def main():
                         help="build a LaTeX book's own PDF with the book's .latexmkrc or "
                              "latexmkrc, which latexmk runs as Perl: for a book of your own, "
                              "never one from elsewhere")
+    parser.add_argument("--allow-read", action="append", default=[], metavar="FOLDER",
+                        help="let a LaTeX book's LaTeX, and the LaTeX a page supplies, read "
+                             "LaTeX's own files (a package, a class, a bibliography, an "
+                             "\\input) in FOLDER, outside the project, for this run; may be "
+                             "given again. Not a picture. A build made with it can't be "
+                             "packed")
     parser.add_argument("--rebuild", action="store_true",
                         help="build every target and package, whatever its stamp says "
                              "(as make -B does), keeping the caches in output/work/")
@@ -7523,8 +7613,21 @@ def main():
                              "in one (check-output.py --verbose)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
-    global LATEXMKRC
+    global LATEXMKRC, ALLOW_ARGS
     LATEXMKRC = args.latexmkrc
+    # Before the run moves to the project's folder, so a folder given
+    # from where it was started is that one.
+    try:
+        allowed = texreads.allow(args.allow_read)
+    except ValueError as exc:
+        die(f"{exc}. Nothing was converted.")
+    ALLOW_ARGS = [a for folder in allowed for a in ("--allow-read", folder)]
+    for folder in allowed:
+        say(f"WARNING: --allow-read: LaTeX may read its own files (packages, classes, "
+            f"bibliographies, \\input files, not pictures) in {folder}, outside the project, "
+            "for this run. What it builds can't be packed, since the project doesn't hold "
+            "what it read: nothing is packaged, and build-cartridge.py refuses the targets "
+            "until they're built again without --allow-read.")
     if args.clean and (args.check_only or args.src_status):
         die(f"--clean empties output/ to build everything, and "
             f"{'--check-only' if args.check_only else '--src-status'} builds nothing. "
@@ -8239,7 +8342,7 @@ def main():
                     target, base, latex_parts, paths, work,
                     language if LANGUAGE_DECLARED else None, project, targets))
                 continue
-            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS,
+            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS, *ALLOW_ARGS,
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
                          + (["--title", title] if title else []),
@@ -8284,7 +8387,7 @@ def main():
                                             pages_by_dir[target.pages_dir])
             if not named:
                 continue
-            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS,
+            result = run(["python3", PDF_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS, *ALLOW_ARGS,
                           "--latex-target",
                           "--target", target.name,
                           "--intermediates", target.pages_dir]
@@ -8374,6 +8477,10 @@ def package_book(base, every, built, project, passthrough, args, pages_by_dir=No
     # its pages from the first html target's directory; a package whose
     # includes name another html target is a roadmap item.
     unnamed = 1 if UNNAMED else 0
+    if texreads.ALLOWED:
+        say("Nothing is packaged: --allow-read let LaTeX read files outside the project, "
+            "which a package can't hold. Build again without it to package the book.")
+        return unnamed or code
     if DECK_RUN:
         # Decks are packaged beside a book, or as a course of their own,
         # once a package can hold more than one target (ROADMAP.md).

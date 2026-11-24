@@ -1096,6 +1096,135 @@ def case_stamps(work):
     ]
 
 
+def case_latex_reads(work):
+    """The LaTeX a book supplies reads only what its part may: a page's raw
+    LaTeX naming a file outside stops the PDF before LaTeX runs, naming
+    the page and the override; --allow-read FOLDER lets it read the file,
+    warns, packages nothing, and leaves the targets' stamps naming the
+    folder, so the packager refuses them after; Lua reading the file, which
+    the scan can't follow, is warned of and stopped by LaTeX's own list of
+    what it opened, in a page's PDF, a LaTeX book's drawings, and its own
+    PDF; and a LaTeX book's \\input outside isn't read as its text under
+    --allow-read, nor a picture outside."""
+    def fail(message):
+        raise AssertionError(message)
+    if shutil.which("lualatex") is None:
+        print("  skip  lualatex not installed; the LaTeX a book supplies isn't checked")
+        return []
+
+    def write(name, text, folder):
+        path = os.path.join(folder, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build(folder, *options):
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
+        return done, done.stdout + done.stderr
+
+    secret = os.path.join(os.path.dirname(work), os.path.basename(work) + "-secret")
+    write("outside.tex", "Not the book's words.\n", secret)
+    write("outside.png", "not a picture\n", secret)
+    outside = os.path.join(secret, "outside.tex")
+
+    def project(name, page, targets="  pdf:\n    format: pdf\n"):
+        folder = os.path.join(work, name)
+        write("project.yaml", "project:\n  identifier: org.example.latex-reads\n"
+              "  title: LaTeX reads\n", folder)
+        write("conversion.yaml", "targets:\n  html:\n    format: html\n" + targets, folder)
+        write(page[0], page[1], os.path.join(folder, "src", "book"))
+        return folder
+
+    raw = project("raw", ("one.md", "# One\n\nWords.\n\n```{=latex}\n"
+                          f"\\input{{{outside}}}\n```\n"))
+    pdf = os.path.join("output", "pdf", "org.example.latex-reads.pdf")
+    # Lua in a LaTeX book's preamble, which its drawings' LaTeX and its own
+    # PDF's run.
+    read_lua = ("\\directlua{local f = io.open(\"" + outside + "\") "
+                "if f then texio.write_nl(f:read()) f:close() end}\n")
+    refused, refused_said = build(raw)
+    refused_pdf = os.path.exists(os.path.join(raw, pdf))
+    allowed, allowed_said = build(raw, "--allow-read", secret)
+    stamp = os.path.join(raw, "output", "work", "stamps", "target-html.json")
+    held = open(stamp, encoding="utf-8").read() if os.path.exists(stamp) else ""
+    packed = subprocess.run(["python3", os.path.join(BIN, "build-cartridge.py"), "-d", raw],
+                            capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    lua = project("lua", ("one.md", "# One\n\nWords.\n\n```{=latex}\n\\directlua{"
+                          f'local f = io.open("{outside}") '
+                          "if f then tex.print(f:read()) f:close() end}\n```\n"))
+    lua_run, lua_said = build(lua)
+
+    book = project("book", ("book.tex", "\\documentclass{book}\n\\begin{document}\n"
+                            "\\chapter{One}\n"
+                            f"\\input{{{os.path.join(secret, 'outside')}}}\n"
+                            "\\end{document}\n"), targets="")
+    book_run, book_said = build(book, "--allow-read", secret)
+    book_text = "".join(open(p, encoding="utf-8").read() for p in
+                        glob.glob(os.path.join(book, "output", "html", "*.html")))
+    picture = project("picture", ("book.tex", "\\documentclass{book}\n\\usepackage{graphicx}"
+                                  "\n\\begin{document}\n\\chapter{One}\n"
+                                  f"\\includegraphics{{{os.path.join(secret, 'outside.png')}}}"
+                                  "\n\\end{document}\n"), targets="")
+    picture_run, picture_said = build(picture, "--allow-read", secret)
+    drawing = project("drawing", ("book.tex", "\\documentclass{book}\n\\usepackage{tikz}\n"
+                                  + read_lua + "\\begin{document}\n\\chapter{One}\nWords.\n"
+                                  "\\begin{tikzpicture}\\draw (0,0) -- (1,1);"
+                                  "\\end{tikzpicture}\n\\end{document}\n"), targets="")
+    drawing_run, drawing_said = build(drawing)
+    own = project("own", ("book.tex", "\\documentclass{book}\n" + read_lua
+                          + "\\begin{document}\n\\chapter{One}\nWords.\n\\end{document}\n"),
+                  targets="  pdf:\n    format: pdf\n    pdf:\n      from: book\n")
+    own_run, own_said = build(own)
+    own_pdf = glob.glob(os.path.join(own, "output", "pdf", "*.pdf"))
+    return [
+        ("a page's raw LaTeX naming a file outside the part stops its PDF before LaTeX runs, "
+         "naming the page and --allow-read",
+         lambda: refused.returncode != 0
+         and f"the page one's raw LaTeX: \\input{{{outside}}}, which leads out of the project"
+         in refused_said and "--allow-read FOLDER" in refused_said and not refused_pdf
+         or fail(refused_said[-800:])),
+        ("--allow-read FOLDER lets it read the file, saying a build made so can't be packed, "
+         "packages nothing, and the stamps name the folder",
+         lambda: allowed.returncode == 0 and os.path.exists(os.path.join(raw, pdf))
+         and f"WARNING: --allow-read: LaTeX may read its own files" in allowed_said
+         and "Nothing is packaged: --allow-read" in allowed_said
+         and '"allow_read"' in held and os.path.realpath(secret) in held
+         or fail(allowed_said[-800:])),
+        ("and the packager refuses a target its stamp says was built so",
+         lambda: packed.returncode != 0
+         and "Target html was built with --allow-read" in packed.stderr
+         or fail(packed.stdout[-300:] + packed.stderr[-300:])),
+        ("Lua reading a file outside is warned of, and LaTeX's own list of what it opened "
+         "stops the PDF, naming the file",
+         lambda: lua_run.returncode != 0
+         and "It runs Lua, which can open any file (1)" in lua_said
+         and "Stopping: LaTeX read 1 file(s)" in lua_said
+         and f"{os.path.realpath(outside)}, which leads out of the project" in lua_said
+         and not os.path.exists(os.path.join(lua, pdf))
+         or fail(lua_said[-800:])),
+        ("a LaTeX book's \\input of a file outside isn't read as its text under --allow-read, "
+         "which the run says, and a picture outside still stops the run",
+         lambda: book_run.returncode != 0 and "Not the book's words." not in book_text
+         and "--allow-read lets LaTeX's own runs read such a file, but a page's text is read "
+         "from the part alone" in book_said
+         and picture_run.returncode != 0
+         and "\\includegraphics{" + os.path.join(secret, "outside.png") + "}" in picture_said
+         or fail(book_said[-600:] + picture_said[-600:])),
+        ("Lua in a LaTeX book's preamble reading a file outside stops its drawings' LaTeX "
+         "and the book's own PDF, by LaTeX's own list of what it opened",
+         lambda: drawing_run.returncode != 0 and own_run.returncode != 0
+         and "that a drawing of the book's may not be built from" in drawing_said
+         and "that the PDF for target pdf may not be built from" in own_said
+         and "LaTeX read files outside the part, as said above." in own_said
+         and f"{os.path.realpath(outside)}, which leads out of the project" in own_said
+         and not own_pdf
+         or fail(drawing_said[-600:] + own_said[-600:])),
+    ]
+
 def case_reads(work):
     """A part reads only its own sources: a page naming a picture, a
     linked file, raw HTML's src, srcset, or a stylesheet's url() outside
@@ -1233,10 +1362,14 @@ def case_reads(work):
          and "a name made from an attribute" in adoc_attribute_said
          and "Not the book's" not in adoc_said
          or fail(adoc_said[-400:] + adoc_attribute_said[-400:])),
-        ("a LaTeX book's \\input of a file outside the part, and its picture, stop the run",
+        ("a LaTeX book's \\input of a file outside the part, and its picture, stop the run "
+         "before LaTeX or Pandoc's reader runs, naming each with its line",
          lambda: tex_outside.returncode != 0 and tex_picture.returncode != 0
-         and f"The LaTeX book names {up}/outside, which leads out of the project" in tex_said
-         and f"names {up}/abs.png, which leads out of the project" in tex_picture_said
+         and f"src/book/book.tex, line 4: \\input{{{up}/outside}}, which leads out of the "
+         "project" in tex_said
+         and f"src/book/book.tex, line 5: \\includegraphics{{{up}/abs.png}}, which leads out "
+         "of the project" in tex_picture_said
+         and "Nothing was converted." in tex_said
          or fail(tex_said[-400:] + tex_picture_said[-400:])),
         ("a Word file's picture linked to a file outside it is named, and the run goes on",
          lambda: word_run.returncode == 0
@@ -11998,6 +12131,7 @@ CASES = [
     ("a target built beside its folder and swapped in", case_built_beside),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
+    ("the LaTeX a book supplies reads only what its part may", case_latex_reads),
     ("two books in one project, each a course of its own", case_two_books),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),

@@ -1119,6 +1119,15 @@ def main():
             # own identifier and title where it has them.
             projectpaths.set_part(found[2], base)
         args.pages = P(base).target_place(found[0], found[1] or None)
+        # A target built with convert.py's --allow-read read files outside
+        # the project, which a package can't hold: its stamp names them.
+        held = stamps.read_stamp(P(base).stamp_file(stamps.stamp_name("target", found[0]))) \
+            if hasattr(P(base), "stamp_file") else None
+        if held is not None and held.allowed and not args.init:
+            sys.exit(f"Target {found[0]} was built with --allow-read, which let LaTeX read "
+                     f"files outside the project ({', '.join(held.allowed)}), and a package "
+                     "holds only what the project does. Build it again without "
+                     "--allow-read, then package it. Nothing was packaged.")
     sample_path = P(base).report(SAMPLE_NAME)
     output_path = args.output or P(base).package_file("imsmanifest.xml", package)
 

@@ -866,6 +866,139 @@ def check_reads():
     ]
 
 
+def check_texreads():
+    """The scan of the LaTeX a book supplies, and LaTeX's own list of what
+    it opened (lib/texreads.py), on text and files written here."""
+    import texreads
+    import stamps
+    work = scratch("texreads-")
+    part = os.path.join(work, "src", "book")
+    outside = os.path.join(work, "outside")
+    os.makedirs(part)
+    os.makedirs(outside)
+    for name in ("chapter.tex", os.path.join("figs", "a.png")):
+        os.makedirs(os.path.dirname(os.path.join(part, name)), exist_ok=True)
+        with open(os.path.join(part, name), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+    real_part = os.path.realpath(part)
+
+    def readable(path):
+        real = os.path.realpath(path)
+        return None if real == real_part or real.startswith(real_part + os.sep) \
+            else "which leads out of the project"
+    text = "\n".join([
+        r"\documentclass[12pt]{book}",                       # 1, inside
+        r"\usepackage{amsmath,../../outside/mine}",          # 2, stop
+        r"\input{/etc/hostname} % \input{/etc/shadow}",      # 3, stop; comment not
+        r"\verb|\input{/etc/a}| \input chapter",             # 4, verb not; plain inside
+        r"\begin{verbatim}",                                 # 5
+        r"\input{/etc/b}",                                   # 6, verbatim not
+        r"\end{verbatim}",                                   # 7
+        r"\includegraphics[width=1in]{figs/a}",              # 8, inside
+        r"\includegraphics{../../outside/b}",                # 9, stop
+        r"\input{\chapters/one}",                            # 10, made
+        r"\directlua{io.open('x')}",                         # 11, lua
+        r"\ExplSyntaxOn \file_input:n {/etc/c} \ExplSyntaxOff",  # 12, stop
+        r"\openin\myin=/etc/d",                              # 13, stop
+        r"\immediate\write18{ls}",                           # 14, shell
+        r"\import{../../outside/}{e}",                       # 15, stop
+        r"\graphicspath{{figs/}{../../outside/}}",            # 16, stop (second)
+        r"\begin{luacode}",                                  # 17, lua
+        r"io.open('/etc/f')  \input{/etc/f}",                # 18, Lua's text not
+        r"\end{luacode}",                                    # 19
+        r"\newwrite\w \immediate\openout\w=notes.txt",       # 20, write
+        r"\input{\%not a name}",                             # 21, made
+    ])
+    found = texreads.scan(text, "src/book/book.tex", [part], readable)
+    stopped = sorted((n, c) for _w, n, c, _name, _y in found.stops)
+    noted = sorted((n, k) for _w, n, k, _t in found.notes)
+    texreads.ALLOWED[:] = []
+    texreads.allow([outside])
+    allowed = texreads.scan(r"\input{../../outside/mine}" "\n"
+                            r"\includegraphics{../../outside/b}", "x", [part], readable)
+    texreads.ALLOWED[:] = []
+    tree = (texreads.tex_trees() or [None])[0]
+    in_tree = texreads.scan(r"\input{" + os.path.join(tree, "x.tex") + "}", "x", [part],
+                            readable) if tree else None
+    # A .fls as LuaLaTeX's -recorder writes one: names from its PWD.
+    fls = os.path.join(work, "input.fls")
+    with open(fls, "w", encoding="utf-8") as fh:
+        fh.write(f"PWD {part}\nINPUT chapter.tex\nINPUT ./figs/a.png\nOUTPUT input.log\n"
+                 f"INPUT {os.path.join(outside, 'secret.tex')}\nINPUT /etc/fonts/fonts.conf\n"
+                 + (f"INPUT {os.path.join(tree, 'tex', 'latex', 'x.sty')}\n" if tree else "")
+                 + "INPUT chapter.tex\n")
+    listed = texreads.recorded(fls)
+    caught = texreads.recorded_outside(fls, readable)
+    missing = texreads.recorded_outside(os.path.join(work, "none.fls"), readable)
+    document = {"meta": {"header-includes": {"t": "MetaBlocks", "c": [
+        {"t": "RawBlock", "c": ["latex", r"\input{/etc/g}"]}]}},
+        "blocks": [{"t": "Para", "c": [{"t": "RawInline", "c": ["tex", r"\input{/etc/h}"]},
+                                       {"t": "RawInline", "c": ["html", "<b>"]}]}]}
+    raw = texreads.raw_latex(document)
+    in_document = texreads.scan_document(document, "the page one's raw LaTeX", [part],
+                                         readable)
+    template = os.path.join(work, "book.latex")
+    with open(template, "w", encoding="utf-8") as fh:
+        fh.write("$head()$\n${ foot() }\n$body$\n")
+    for name in ("head.latex", "foot.latex"):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as fh:
+            fh.write(r"\input{/etc/i}" + "\n")
+    partials = sorted(os.path.basename(p) for p in texreads.template_files(template))
+    stamp = stamps.Stamp("a", "b", "c", "d", "e", allowed=["/x"])
+    path = os.path.join(work, "stamp.json")
+    stamps.write_stamp(path, stamp)
+    back = stamps.read_stamp(path)
+    plain = stamps.Stamp("a", "b", "c", "d", "e")
+    try:
+        texreads.allow([os.path.join(work, "nowhere")])
+        refused = ""
+    except ValueError as exc:
+        refused = str(exc)
+    return [
+        ("a name written out that leads outside stops, by each command that reads a file: "
+         "a package, \\input with and without braces, a picture, expl3's file input, "
+         "\\openin, \\import, and \\graphicspath; a comment, \\verb, verbatim, and Lua's own "
+         "text don't count",
+         lambda: stopped == [(2, "\\usepackage"), (3, "\\input"), (9, "\\includegraphics"),
+                             (12, "\\file_input:n"), (13, "\\openin"), (15, "\\import"),
+                             (16, "\\graphicspath")] or fail(str(stopped))),
+        ("what can't be followed is noted: a name a macro makes, Lua, shell escape, and "
+         "\\openout",
+         lambda: noted == [(10, "made"), (11, "lua"), (14, "shell"), (17, "lua"),
+                           (20, "write"), (21, "made")] or fail(str(noted))),
+        ("each stop and note says where, its line, and what",
+         lambda: "  src/book/book.tex, line 3: \\input{/etc/hostname}, which leads out of the "
+         "project." in texreads.stop_lines(found.stops)
+         and any("It runs Lua, which can open any file (2)" in line
+                 for line in texreads.note_lines(found.notes)) or fail(str(found.stops))),
+        ("--allow-read lets a file of LaTeX's own in its folder be read, not a picture",
+         lambda: [c for _w, _n, c, _x, _y in allowed.stops] == ["\\includegraphics"]
+         or fail(str(allowed.stops))),
+        ("a full path into TeX's own tree is read",
+         lambda: in_tree is None or not in_tree.stops or fail(str(in_tree.stops))),
+        ("a .fls's names are made whole from its PWD, each once, and those outside the part, "
+         "TeX's trees, and fontconfig's settings are caught; with no .fls, nothing says what "
+         "was read",
+         lambda: listed[:2] == [os.path.join(part, "chapter.tex"),
+                                os.path.join(part, "figs", "a.png")]
+         and listed.count(os.path.join(part, "chapter.tex")) == 1
+         and [p for p, _y in caught] == [os.path.join(outside, "secret.tex")]
+         and missing and missing[0][0] is None or fail(f"{listed} {caught} {missing}")),
+        ("a document's raw LaTeX and TeX are found, in its metadata too, not its HTML, and "
+         "scanned with no line of the block's",
+         lambda: [t for _p, t in raw] == ["\\input{/etc/g}", "\\input{/etc/h}"]
+         and [n for _w, n, _c, _x, _y in in_document.stops] == [None, None]
+         or fail(f"{raw} {in_document.stops}")),
+        ("a template's partials beside it are found, by both of Pandoc's forms",
+         lambda: partials == ["book.latex", "foot.latex", "head.latex"] or fail(str(partials))),
+        ("a stamp keeps --allow-read's folders in its file, which reads back, and one without "
+         "has none",
+         lambda: back is not None and back.allowed == ["/x"]
+         and "allow_read" not in plain.as_dict() or fail(str(back and back.allowed))),
+        ("--allow-read of a folder that isn't there is refused, naming it",
+         lambda: "--allow-read" in refused and "nowhere" in refused or fail(refused)),
+    ]
+
 def check_figure_names():
     """A book's PDF figures in a folder it also links to under another
     name: found by both names, whichever the disk lists first, and each
@@ -11799,6 +11932,8 @@ GROUPS = [
     ("a target's stamp, the five digests of what it's built from", check_stamps),
     ("what a part may read, and the links that lead out of it", check_reads),
     ("a book's PDF figure reached by two names", check_figure_names),
+    ("the LaTeX a book supplies, scanned, and LaTeX's own list of what it opened",
+     check_texreads),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),

@@ -550,11 +550,15 @@ class OutlineCache:
 # --------------------------------------------------------------------------
 
 class Stamp:
-    """The five digests of what a target is built from, and their sum."""
+    """The five digests of what a target is built from, and their sum;
+    and allowed, the folders outside the project its LaTeX was let read
+    (--allow-read), which the options' digest counts and the stamp's file
+    names, so that the packager can refuse such a build."""
 
-    def __init__(self, settings, sources, top, software, options):
+    def __init__(self, settings, sources, top, software, options, allowed=()):
         self.parts = {"settings": settings, "sources": sources, "top": top,
                       "software": software, "options": options}
+        self.allowed = [str(a) for a in allowed or ()]
 
     @property
     def digest(self):
@@ -562,11 +566,17 @@ class Stamp:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def as_dict(self):
-        return dict(self.parts, stamp=self.digest)
+        values = dict(self.parts, stamp=self.digest)
+        if self.allowed:
+            values["allow_read"] = list(self.allowed)
+        return values
 
     @classmethod
     def from_dict(cls, values):
-        return cls(*(str(values[name]) for name in PARTS))
+        allowed = values.get("allow_read") or []
+        if not isinstance(allowed, list):
+            raise ValueError("allow_read isn't a list")
+        return cls(*(str(values[name]) for name in PARTS), allowed=allowed)
 
 
 def changed(old, new):
@@ -596,7 +606,7 @@ def read_stamp(path):
     values = read_json(path)
     try:
         stamp = Stamp.from_dict(values)
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, AttributeError):
         return None
     return stamp if values.get("stamp") == stamp.digest else None
 

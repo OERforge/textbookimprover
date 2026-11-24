@@ -97,7 +97,19 @@ A part reads its own sources, in `src/<part>/`, and what a run extracted or rend
 - **A LaTeX book's `.latexmkrc`** isn't read unless `--latexmkrc` is given, since latexmk runs it as Perl; give it only for a book of your own.
 - **A Word file's picture linked to a file outside it,** a relationship the file marks as external, isn't read, and is left out of the page, which the run says, naming each.
 
-No setting or option lets a page read outside its part; copy the file into `src/<part>/` and name it there. A file a setting names is read from the top, as [What you keep](#what-you-keep) says. What a book's own LaTeX can read as it runs is another matter: LuaTeX's Lua can open any file you can, so until TextbookImprover runs LaTeX in a sandbox, don't build a LaTeX book you don't trust.
+No setting or option lets a page read outside its part; copy the file into `src/<part>/` and name it there. A file a setting names is read from the top, as [What you keep](#what-you-keep) says.
+
+### The LaTeX a book supplies
+
+LaTeX opens whatever file it's told to, and LuaTeX's Lua whatever file you can. So the LaTeX that comes with a book is checked twice: read before LaTeX runs, and LaTeX's own list of the files it opened read after.
+
+- **Before LaTeX runs,** the run reads the LaTeX the book supplies for the commands that read a file (`\input`, `\include`, `\usepackage`, `\documentclass`, `\includegraphics`, `\bibliography`, `\addbibresource`, `\lstinputlisting`, `\openin`, `\graphicspath`, `\import`, expl3's file functions, and their kin). That LaTeX is a page's raw LaTeX and its front matter (`header-includes`), the file `pdf.metadata` names, the book's own `pdf.template` and the partials beside it, a deck's raw LaTeX, and, for a LaTeX book, its masters, every file they reach, its packages and classes, and the `latex.macros` file. A name written out is found as LaTeX finds it, from the folder LaTeX runs in (for a LaTeX book, its master's), and one outside what the part reads stops the run, naming the file, its line, and the name. A comment, `\verb`, and a verbatim environment are passed over.
+- **What it can't follow, it warns of:** a name made by a macro or a template's variable, Lua (`\directlua`, `luacode`), shell escape (`\write18`), and `\openout`.
+- **After LaTeX runs,** before a PDF is put in place, the list of every file LaTeX opened (LuaLaTeX's `-recorder`) is checked: a file outside the part, TeX's own trees, the system's fonts and fontconfig's settings, and TextbookImprover's own folder stops the build, naming it, and the last good PDF is kept. It catches `\input`, `\openin`, pictures, and Lua's `io.open`, but not every way Lua has to read a file (`io.lines` and `loadfile` aren't listed), so it's a second check, not a wall. It covers a PDF built from the pages, a LaTeX book's own PDF, its drawings, and a deck's PDF; not a PDF Pandoc builds itself (for a picture named by its web address, or with `OER_PDF_VIA=pandoc`), where the first check alone applies.
+
+**`--allow-read FOLDER`,** given to `convert.py` (or `build-pdf.py`) for one run, and again for each folder, lets both checks accept LaTeX's own files in `FOLDER`: a package, a class, or a bibliography you keep outside the project, or a file a page's raw LaTeX inputs. It never lets in a picture, nor a LaTeX book's `\input` files as the pages' text, which the conversion reads from the part alone. It's for your own files on your own machine: a project built with it doesn't hold what it read, so the run warns, packages nothing, and `build-cartridge.py` refuses every target of that build until it's built again without `--allow-read`. No setting can give it.
+
+Neither check reaches everything Lua can do, so until TextbookImprover runs LaTeX in a sandbox, don't build a book you don't trust: a LaTeX book, or one whose pages carry raw LaTeX.
 
 ## Where a run is started
 

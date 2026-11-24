@@ -74,6 +74,7 @@ from names import case_match
 import pandocversion
 import pandocrun
 import projectpaths
+import texreads
 
 P = projectpaths.of
 
@@ -555,19 +556,28 @@ def binder_sources(base, pdfs, skip=()):
     return found, missing
 
 
-def readable(base, path, named):
+def readable(base, path, named, picture=False, text=False):
     """path, a file the book names (named, as the book names it), when its
     part may read it; otherwise the run stops, naming it: a part reads its
     own sources and nothing else, so an \\input, a picture, or a database
     named outside them, behind a link that leads out, or under a dot name
-    isn't read (projectpaths' unreadable)."""
+    isn't read (projectpaths' unreadable). A file of LaTeX's own, a
+    bibliography say, in a folder --allow-read gave is read (texreads);
+    not a picture, and not the book's text (text), which the conversion
+    reads from the part alone."""
     project = P(base)
+    if not (picture or text) and texreads.allowed_elsewhere(os.path.realpath(path),
+                                                            fonts=False):
+        return path
     why = project.unreadable(path) if hasattr(project, "unreadable") else None
     if why:
         raise projectpaths.Refused(
             f"The LaTeX book names {named}, {why}. A part reads only its own sources "
             f"(src/{project.part()}/): copy the file there, keeping no link to where it was, "
-            "and name it there. Nothing was converted.")
+            "and name it there."
+            + (" --allow-read lets LaTeX's own runs read such a file, but a page's text is "
+               "read from the part alone." if text and texreads.ALLOWED else "")
+            + " Nothing was converted.")
     return path
 
 
@@ -582,7 +592,7 @@ def resolve(base, name, folder=""):
         for candidate in (name, name + ".tex"):
             path = os.path.normpath(os.path.join(where, candidate))
             if os.path.isfile(P(base).source(path)):
-                readable(base, P(base).source(path), name)
+                readable(base, P(base).source(path), name, text=True)
                 return path
     return None
 
@@ -5120,14 +5130,23 @@ def render(base, work, preamble, items, say, counter=None):
         write_text(os.path.join(rdir, job + ".tex"),
                    head + "\\usepackage[active,tightpage]{preview}\n"
                    "\\begin{document}\n" + body + "\\end{document}\n")
+        # -recorder: LaTeX's list of the files it opened, checked after
+        # (texreads), the book's preamble being the book's.
         result = subprocess.run(
-            [engine, "-interaction=nonstopmode", "-halt-on-error",
+            [engine, texreads.RECORDER, "-interaction=nonstopmode", "-halt-on-error",
              "-output-directory", rdir, os.path.join(rdir, job + ".tex")],
             cwd=P(base).run_dir(), env=P(base).tex_env(), capture_output=True, text=True,
             errors="replace", stdin=subprocess.DEVNULL)
         pdf = os.path.join(rdir, job + ".pdf")
         if result.returncode != 0 or not os.path.isfile(pdf):
             return None, result.stdout[-800:]
+        outside = texreads.recorded_outside(os.path.join(rdir, job + ".fls"),
+                                            texreads.rule(P(base), also=[rdir, work]))
+        if outside:
+            raise projectpaths.Refused(texreads.recorder_stop(
+                outside, lambda path: texreads.shown(P(base).top(), path),
+                "a drawing of the book's", "Nothing was converted.",
+                texreads.part_of(P(base))))
         return pdf, ""
 
     # Each page the drawing's PDF by pdfseparate, poppler's, which copies
@@ -5241,12 +5260,12 @@ def resolve_graphic(base, name, dirs, counter=None):
                 if not (ext or os.path.splitext(name)[1]):
                     continue
                 if exact and os.path.isfile(P(base).source(candidate)):
-                    readable(base, P(base).source(candidate), name)
+                    readable(base, P(base).source(candidate), name, picture=True)
                     return candidate
                 if not exact:
                     found = case_match(P(base).sources(), candidate)
                     if found:
-                        readable(base, P(base).source(found), name)
+                        readable(base, P(base).source(found), name, picture=True)
                         if counter is not None:
                             counter["graphics_case"] = counter.get("graphics_case", 0) + 1
                         return found

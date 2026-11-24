@@ -80,6 +80,7 @@ from latexbuild import (  # noqa: E402
 import pagefooter  # noqa: E402
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
+import texreads  # noqa: E402
 from names import safe_stem  # noqa: E402
 
 DIVISIONS = {"front": "\\frontmatter", "main": "\\mainmatter",
@@ -1920,6 +1921,35 @@ def latex_stopped(code, run, log, said, source, tex_dir, pages):
             "the last of what it said:"] + last
 
 
+def scan_supplied(base, resolved, pages_dir, stems):
+    """The LaTeX the book supplies, read before LaTeX runs for the files
+    it names (texreads): each page's raw LaTeX and front matter, the file
+    pdf.metadata names, and the book's own template and its partials. A
+    name leading outside what the part reads stops the build; what the
+    scan can't follow is warned of. TextbookImprover's own LaTeX isn't
+    read: it names no file of the book's."""
+    project = P(base)
+    starts = [project.run_dir(), project.sources()]
+    readable = texreads.rule(project)
+    found = texreads.Findings()
+    for stem in stems:
+        found.extend(texreads.scan_document(load_page(pages_dir, stem),
+                                            f"the page {stem}'s raw LaTeX", starts, readable))
+    setting = str(resolved["pdf.metadata"] or "").strip()
+    if setting:
+        found.extend(texreads.scan_document({"meta": metadata_file(base, setting)},
+                                            f"{setting} (pdf.metadata)", starts, readable))
+    own = own_template(base, resolved)
+    if own:
+        for path in texreads.template_files(own):
+            found.extend(texreads.scan_file(path, texreads.shown(project.top(), path), starts, readable))
+    for line in texreads.note_lines(found.notes):
+        print(line, file=sys.stderr)
+    if found.stops:
+        sys.exit(texreads.stop_message(found.stops, texreads.part_of(project),
+                                       "The PDF wasn't built, and an earlier one is as it was."))
+
+
 def pdf_via_latex(book_json, filters, searched, out_path, base, work, environment, seed,
                   pages=None, kept=None):
     """Build out_path from book_json as Pandoc's -t pdf would, with LaTeX
@@ -1957,7 +1987,11 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
     if env.get("SOURCE_DATE_EPOCH"):
         # LaTeX writes the PDF's dates in local time, with the zone's offset.
         env["TZ"] = "UTC"
-    command = [ENGINE, "-halt-on-error", "-interaction", "nonstopmode", "-jobname", LATEX_JOB,
+    # -recorder: LaTeX's own list of the files it opened, checked after
+    # (texreads), as the scan before can't follow a name a macro or Lua
+    # makes.
+    command = [ENGINE, texreads.RECORDER, "-halt-on-error", "-interaction", "nonstopmode",
+               "-jobname", LATEX_JOB,
                "-output-directory", tex_dir, f"\\setrandomseed {seed} \\input{{{tex}}}"]
     log_path = os.path.join(tex_dir, LATEX_JOB + ".log")
     said, log, code = "", "", 1
@@ -1994,6 +2028,14 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
                          f"{os.path.join(there, 'book.tex')}.")
         return subprocess.CompletedProcess(command, code or 43, "",
                                            stderr + "\n".join(lines) + "\n"), said, source
+    outside = texreads.recorded_outside(
+        os.path.join(tex_dir, LATEX_JOB + ".fls"),
+        texreads.rule(P(base), also=[work] + [d for d in searched if d]))
+    if outside:
+        return subprocess.CompletedProcess(
+            command, 44, "", stderr + texreads.recorder_stop(
+                outside, lambda path: texreads.shown(P(base).top(), path),
+                part=texreads.part_of(P(base))) + "\n"), said, source
     shutil.copyfile(made, out_path)
     return subprocess.CompletedProcess(command, 0, "", stderr + pandoc_warnings(log)), said, source
 
@@ -2089,6 +2131,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
     out_path = os.path.join(out_dir, output_name(resolved, project, name))
     if as_latex:
         return write_latex(base, name, resolved, project, document, out_dir)
+    if not latex_only:
+        scan_supplied(base, resolved, pages_dir, real)
 
     work = projectpaths.mkdtemp(prefix="build-pdf-")
     try:
@@ -2383,6 +2427,11 @@ def main():
     # From convert.py, in a run that builds each target beside its folder
     # and swaps it in: write it there.
     parser.add_argument("--beside", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--allow-read", action="append", default=[], metavar="FOLDER",
+                        help="let LaTeX read the book's own LaTeX files (a package, a "
+                        "class, a bibliography, an \\input) in FOLDER, outside the "
+                        "project, for this run; may be given again. Not a picture. A "
+                        "build made with it can't be packed")
     args = parser.parse_args()
     why = projectpaths.not_a_project(args.dir)
     if why:
@@ -2395,6 +2444,10 @@ def main():
             print(note, file=sys.stderr)
     projectpaths.set_part(args.part, args.dir)
     projectpaths.build_beside(args.dir, args.beside)
+    try:
+        texreads.allow(args.allow_read)
+    except ValueError as exc:
+        sys.exit(f"{exc}. Nothing was built.")
 
     for program in ("pandoc",) if args.latex_only or args.latex_target else ("pandoc", ENGINE):
         if shutil.which(program) is None:

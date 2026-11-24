@@ -57,6 +57,7 @@ import highlighting
 import latexbuild
 import pandocrun
 import projectpaths
+import texreads
 
 P = projectpaths.of
 
@@ -957,6 +958,17 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
               "pdf": out_pdf}
     level = renumber(doc.get("blocks", []), level)
     result["tag"] = tag = frame_tag(doc.get("blocks", []), level)
+    # The deck's own raw LaTeX and front matter, read for the files they
+    # name before LaTeX runs (texreads): one leading outside what the
+    # part reads stops the deck's PDF; what can't be followed is noted.
+    deck = os.path.splitext(os.path.basename(intermediate))[0]
+    found = texreads.scan_document(doc, f"the deck {deck}'s raw LaTeX",
+                                   [P(base).run_dir(), P(base).sources()], texreads.rule(P(base)))
+    result["scan_notes"] = found.notes
+    if found.stops:
+        result["refused"] = texreads.stop_message(
+            found.stops, texreads.part_of(P(base)), "The deck's PDF wasn't built.")
+        return result
     work = projectpaths.mkdtemp(prefix="deck-pdf-")
     try:
         result["svg_failed"] = svgs_to_pdf(doc, base, work)
@@ -1033,8 +1045,8 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         for run in range(1, LATEX_RUNS + 1):
             try:
                 done = subprocess.run(
-                    [latexbuild.ENGINE, "-interaction=nonstopmode", "-halt-on-error",
-                     "-file-line-error", "deck.tex"],
+                    [latexbuild.ENGINE, texreads.RECORDER, "-interaction=nonstopmode",
+                     "-halt-on-error", "-file-line-error", "deck.tex"],
                     cwd=work, capture_output=True, text=True, errors="replace",
                     stdin=subprocess.DEVNULL, env=env, timeout=LATEX_TIMEOUT)
             except subprocess.TimeoutExpired:
@@ -1064,6 +1076,13 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
         result["own_levels"] = ONE_LEVEL not in result["log"]
         result["linked_marks"] = UNLINKED not in result["log"]
         result["block_headings"] = UNTAGGED_BLOCKS not in result["log"]
+        outside = texreads.recorded_outside(os.path.join(work, "deck.fls"),
+                                            texreads.rule(P(base), also=[work]))
+        if outside:
+            result["refused"] = texreads.recorder_stop(
+                outside, lambda path: texreads.shown(P(base).top(), path),
+                f"the deck {deck}'s PDF", part=texreads.part_of(P(base)))
+            return result
         os.makedirs(os.path.dirname(os.path.abspath(out_pdf)), exist_ok=True)
         shutil.copyfile(os.path.join(work, "deck.pdf"), out_pdf)
         result["pages"] = latexbuild.pages_written(result["log"]) or 0
