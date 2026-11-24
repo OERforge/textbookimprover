@@ -2797,14 +2797,26 @@ def check_consistency():
     builtin = re.findall(
         r'"([^"]+)"',
         re.search(r"BACK_MATTER_ORDER = \[(.*?)\]", source, re.S).group(1))
-    # The newest release, as the changelog's first dated section,
-    # TextbookImprover's version (lib/tiversion.py, which the audit and
-    # the build record read), and the installation page's download
-    # example name it; the release commit changes all three.
+    # The newest release, as the changelog's first dated section, and
+    # the installation page's download example name it; TextbookImprover's
+    # version (lib/tiversion.py, which the audit and the build record
+    # read) is it on the release's commit, where the changelog has no
+    # Unreleased section, and after it a later release's with ".dev",
+    # while the changelog has one. The release commit changes all three.
     changelog = open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
     released = re.search(r"^## \[(\d+\.\d+)\] - ", changelog, re.M).group(1)
+    unreleased = re.search(r"^## \[(.+?)\]", changelog, re.M).group(1) == "Unreleased"
     version = re.search(r'^VERSION = "([^"]+)"', open(
         os.path.join(ROOT, "lib", "tiversion.py"), encoding="utf-8").read(), re.M).group(1)
+
+    def numbers(text):
+        return tuple(int(n) for n in text.split("."))
+
+    def version_right():
+        if not unreleased:
+            return version == released
+        dev = re.fullmatch(r"(\d+\.\d+)\.dev", version)
+        return bool(dev) and numbers(dev.group(1)) > numbers(released)
     installation = open(os.path.join(ROOT, "docs", "installation.md"),
                         encoding="utf-8").read()
     named = set(re.findall(r"textbookimprover-(\d+\.\d+)", installation)
@@ -2843,8 +2855,10 @@ def check_consistency():
     return [
         ("the schema's back-matter default matches the built-in order",
          lambda: list(declared) == builtin),
-        ("the newest release is TextbookImprover's version, and the one the installation page "
-         "downloads", lambda: version == released and named == {released}),
+        ("TextbookImprover's version is the newest release on its commit, and a later one's "
+         "with .dev after it, and the installation page downloads the newest",
+         lambda: version_right() and named == {released}
+         or fail(repr((version, released, unreleased, named)))),
         ("the oldest Pandoc is the same everywhere it's checked, and every suite that runs "
          "convert.py checks it", lambda: len(pandoc_minimums) == 1
          and {"run-convert-tests.py", "run-latex-tests.py", "run-pdf-tests.py",

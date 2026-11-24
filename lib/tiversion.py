@@ -3,11 +3,15 @@ tiversion.py -- TextbookImprover's version, in one place, and what a build
 record says of the copy that ran: the version, the commit, whether the
 checkout had changes, and a digest of its own files.
 
-The version names a release, and between releases names the last one: a
-copy of the code past it is told apart by its commit and its digest, and a
-release's archive, with no Git, by its digest alone (stamps.own_digest,
-over bin/, lib/, and vendor/, so the same files give the same digest from
-a checkout or an archive).
+The version names a release on the release's commit alone. From the
+commit after it, it names the next release with ".dev" after it (PEP
+440's development release, "0.11.dev" after 0.10), so a copy of the code
+between releases never says it's the last one, even one with no Git to
+name its commit, as GitHub's archive of a branch has none; the release
+commit drops ".dev". A copy is told apart from another of the same
+version by its commit and its digest, and one with no Git by its digest
+alone (stamps.own_digest, over bin/, lib/, and vendor/, so the same files
+give the same digest from a checkout or an archive).
 
 The moment a run gives every program it starts is its SOURCE_DATE_EPOCH:
 the person's where it's set, so a build made again under it writes the
@@ -39,7 +43,7 @@ import shutil
 import subprocess
 import time
 
-VERSION = "0.10"
+VERSION = "0.11.dev"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The variable by which a run marks the SOURCE_DATE_EPOCH it set itself,
