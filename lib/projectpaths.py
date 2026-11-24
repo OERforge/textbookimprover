@@ -477,6 +477,36 @@ class Tree(Project):
                 return f"which is in src/ and not among the sources of the part built (src/{own}/)"
         return None
 
+    def unreadable(self, path, part=None, allow=()):
+        """Why the part may not read path, or None when it may: a part
+        reads its own sources (src/<part>/) and what the run extracted or
+        rendered for it (output/work/parts/<part>/), each name in them
+        not beginning with a dot unless allow has it, every link followed.
+        Not the rest of the project (its .git/, another part, what a run
+        wrote, originals/), and not outside it. path is a file's as the
+        run would open it; it needn't exist."""
+        part = self.part(part)
+        real = os.path.realpath(path)
+        for folder in (self._in("src", part), self._in("output", "work", "parts", part)):
+            top = os.path.realpath(folder)
+            if real == top or real.startswith(top.rstrip(os.sep) + os.sep):
+                names = os.path.relpath(real, top).split(os.sep)
+                dotted = [n for n in names if n.startswith(".") and n not in (".", "..")
+                          and n not in allow]
+                if dotted:
+                    return (f"which is a name beginning with a dot ({dotted[0]}), and "
+                            "a part doesn't read one")
+                return None
+        root = os.path.realpath(self.root)
+        if real != root and not real.startswith(root.rstrip(os.sep) + os.sep):
+            return "which leads out of the project"
+        names = os.path.relpath(real, root).split(os.sep)
+        if names[0] == "src" and len(names) > 1:
+            return f"which is among another part's sources (src/{names[1]}/)"
+        return (f"which is in {names[0]}/ and not among the part's sources (src/{part}/)"
+                if len(names) > 1 else
+                f"which is at the project's top, not among the part's sources (src/{part}/)")
+
     def named(self, value, part=None, setting=None):
         """The file or folder a setting names, from the project's top;
         a path the settings may not name stops the run (_unnamed)."""
@@ -995,6 +1025,40 @@ def settle(folder):
         restore(kept, ("output",), "")
     _delete(project.top("output", "work", "staging"))
     return back
+
+
+def outside_links(folder, part=None):
+    """Each link among a part's sources and sidecars that leads out of
+    its folder, a link to a link followed to its end, as (the link, from
+    the project's top; what it says it leads to, as written, which names
+    nothing of the machine's the project didn't). A part reads only its own
+    folders, so such a link stops a run wherever it's met: one in a
+    project unpacked from elsewhere would have a file of the reader's
+    machine read as the book's. A link inside the folder is the book's
+    own, and a dot name isn't read, so neither is looked into."""
+    project = of(folder)
+    if not isinstance(project, Tree):
+        return []
+    part = project.part(part)
+    root = os.path.realpath(project.root)
+    found = []
+    for kept in (project.sources(part), project._in("sidecars", part)):
+        top = os.path.realpath(kept)
+        if not os.path.isdir(kept):
+            continue
+        for here, dirs, names in os.walk(kept):
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            for name in sorted(names) + dirs:
+                path = os.path.join(here, name)
+                if name.startswith(".") or not os.path.islink(path):
+                    continue
+                real = os.path.realpath(path)
+                if real != top and not real.startswith(top.rstrip(os.sep) + os.sep):
+                    found.append((os.path.relpath(path, root).replace(os.sep, "/"),
+                                  os.readlink(path)))
+            # A linked folder is the link's own matter, above, not walked.
+            dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(here, d))]
+    return found
 
 
 def clean_output(folder, nothing="Nothing was converted."):

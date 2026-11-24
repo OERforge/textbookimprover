@@ -510,7 +510,7 @@ RUNS = []
 RUN_TAIL = 15
 
 
-def convert(work, env=None, any_layout=False, top=()):
+def convert(work, env=None, any_layout=False, top=(), options=()):
     # Every book is a project, but for the case that compares the two
     # layouts: one a case wrote into a plain folder is laid out here.
     # top: the names of files a setting names, which stay at the top.
@@ -518,7 +518,7 @@ def convert(work, env=None, any_layout=False, top=()):
         laidout.settle(work, top=top)
     began = time.monotonic()
     done = subprocess.run(
-        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"], cwd=work,
+        ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options], cwd=work,
         capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env)
     RUNS.append((os.path.basename(work), done.returncode, time.monotonic() - began,
                  (done.stdout + done.stderr).splitlines()[-RUN_TAIL:]))
@@ -5422,8 +5422,8 @@ def case_book_pdf_seeded(work):
     the seed the Pandoc route's is (latexbuild.latexmk_seed_rc), so what
     LuaTeX's random numbers make, tagpdf's namespace among them, comes out
     the same. The book draws a random number into its text, and its own
-    .latexmkrc sets the LuaLaTeX command and code to run before the book,
-    both of which the seed keeps."""
+    .latexmkrc, read with --latexmkrc, sets the LuaLaTeX command and code
+    to run before the book, both of which the seed keeps."""
     label = ("a LaTeX book's PDF from its own LaTeX, built twice under SOURCE_DATE_EPOCH, "
              "is the same file, a random number in its text")
     why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
@@ -5444,7 +5444,7 @@ def case_book_pdf_seeded(work):
     for _ in range(2):
         for made in ("pdf", "rendered"):
             shutil.rmtree(place(book, made), ignore_errors=True)
-        done = convert(book, env=env)
+        done = convert(book, env=env, options=["--latexmkrc"])
         path = place(book, "pdf", "book.pdf")
         with open(path, "rb") if os.path.exists(path) else open(os.devnull, "rb") as fh:
             built.append((done.returncode, fh.read()))
@@ -7198,8 +7198,10 @@ def case_line_measure(work):
 
 def case_pdf_copy(work):
     """The PDF target's copy of the book's folder: a link the book makes
-    to a folder beside it still finds it, the book's .latexmkrc is kept
-    and doesn't move the PDF, and what LaTeX couldn't resolve is named."""
+    to a folder outside its part stops the run, and one inside it finds
+    its folder from the copy; the book's .latexmkrc is read only with
+    --latexmkrc, and then doesn't move the PDF; and what LaTeX couldn't
+    resolve is named."""
     why = why_no_tex("no lualatex or latexmk for the PDF target", "lualatex", "latexmk")
     if why:
         return [("the PDF build's copy of the book keeps its links and .latexmkrc",
@@ -7226,7 +7228,16 @@ def case_pdf_copy(work):
         fh.write("Image,Alt\nfigs/a.png,A blue square\n")
     with open(place(book, "conversion.yaml"), "w") as fh:
         fh.write("targets:\n  pdf:\n    format: pdf\n")
-    result = convert(book)
+    # The folder outside the part, linked: the run stops. Moved inside
+    # it and linked there, it's found from the copy.
+    outside = convert(book)
+    outside_said = outside.stdout + outside.stderr
+    os.remove(place(book, "figs"))
+    shutil.move(place(work, "shared"), place(book, "shared"))
+    os.symlink(os.path.join("shared", "figs"), place(book, "figs"))
+    unread = convert(book)
+    unread_said = unread.stdout + unread.stderr
+    result = convert(book, options=["--latexmkrc"])
     said = result.stdout + result.stderr
     pdf = place(book, "pdf", "book.pdf")
 
@@ -7251,12 +7262,19 @@ def case_pdf_copy(work):
             walk(doc.Root.StructTreeRoot)
         return alts == ["A blue square"]
     return [
-        ("the book's .latexmkrc is kept, and the PDF is built where it's looked for, "
-         "whatever that says",
+        ("a link the book makes to a folder outside its part stops the run, naming it",
+         lambda: outside.returncode != 0 and "src/book/figs is a link to" in outside_said
+         and "Nothing was converted." in outside_said),
+        ("without --latexmkrc the book's .latexmkrc isn't read, so the package it finds "
+         "isn't found, and the run says so",
+         lambda: unread.returncode != 0 and "src/book/.latexmkrc isn't read" in unread_said
+         and "--latexmkrc builds the book with it" in unread_said),
+        ("with it, the book's .latexmkrc is kept, and the PDF is built where it's looked "
+         "for, whatever that says",
          lambda: result.returncode == 0 and os.path.exists(pdf)
          and (not shutil.which("pdftotext") or "FROM THE STYLE" in subprocess.run(
              ["pdftotext", pdf, "-"], capture_output=True, text=True).stdout)),
-        ("a link the book makes to a folder beside it finds it from the copy",
+        ("a link the book makes to a folder inside its part finds it from the copy",
          figure),
         ("what LaTeX couldn't resolve is named",
          lambda: "couldn't resolve 1 reference(s) and 1 citation(s)" in said
@@ -10082,11 +10100,12 @@ def case_unsupported(work):
     with open(place(work, "shapestyle.sty"), "w", encoding="utf-8") as fh:
         fh.write(UNSUPPORTED_STYLE)
     pdf(place(work, "plot.pdf"), word="Plot")
-    # A figure in a folder beside the book, which it links to.
-    shared = os.path.abspath(os.path.join(work, "..", os.path.basename(work) + "-shared"))
+    # A figure in a folder of the book's, which it links to under another
+    # name: a link leading out of the part would stop the run.
+    shared = place(work, "figures")
     os.makedirs(shared)
     pdf(place(shared, "linked.pdf"), word="Link")
-    os.symlink(shared, place(work, "shared"))
+    os.symlink("figures", place(work, "shared"))
     with open(place(shared, "linked.pdf"), "rb") as fh:
         linked_original = fh.read()
     with open(place(work, "image-alt.csv"), "w", encoding="utf-8") as fh:

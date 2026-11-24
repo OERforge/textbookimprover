@@ -792,6 +792,80 @@ def check_stamps():
     ]
 
 
+def check_reads():
+    """What a part may read: its own sources and what the run made for it,
+    no dot name, links followed; and the links among a part's folders
+    that lead out of them."""
+    import projectpaths
+    work = scratch("reads-")
+
+    def write(path, text="x\n"):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    root = os.path.join(work, "project")
+    outside = os.path.join(work, "outside.png")
+    write(outside)
+    for name in ("src/book/a.png", "src/book/assets/b.png", "src/book/.hidden/c.png",
+                 "src/book/.latexmkrc", "src/other/d.png", "sidecars/book/image-alt.csv",
+                 "output/work/parts/book/one/media/image1.png", "output/html/e.png",
+                 "notes.txt", ".git/config", "originals/book/f.png"):
+        write(os.path.join(root, name))
+    os.symlink("../a.png", os.path.join(root, "src", "book", "assets", "inside.png"))
+    os.symlink(outside, os.path.join(root, "src", "book", "assets", "out.png"))
+    os.symlink("../../notes.txt", os.path.join(root, "src", "book", "notes.png"))
+    os.symlink(os.path.dirname(outside), os.path.join(root, "src", "book", "folder"))
+    os.symlink(outside, os.path.join(root, "sidecars", "book", "table-headers.csv"))
+    os.symlink("../a.png", os.path.join(root, "src", "book", ".hidden", "skipped.png"))
+    projectpaths.forget(root)
+    project = projectpaths.of(root)
+
+    def why(*names, allow=()):
+        return project.unreadable(os.path.join(root, *names), "book", allow)
+    answers = {
+        "own": why("src", "book", "a.png"),
+        "own below": why("src", "book", "assets", "b.png"),
+        "link inside": why("src", "book", "assets", "inside.png"),
+        "made": why("output", "work", "parts", "book", "one", "media", "image1.png"),
+        "missing inside": why("src", "book", "gone.png"),
+    }
+    refused = {
+        "link out": why("src", "book", "assets", "out.png"),
+        "link to the top": why("src", "book", "notes.png"),
+        "up and out": why("src", "book", "..", "..", "..", "outside.png"),
+        "other part": why("src", "other", "d.png"),
+        "dot folder": why("src", "book", ".hidden", "c.png"),
+        "dot file": why("src", "book", ".latexmkrc"),
+        "a target's": why("output", "html", "e.png"),
+        "git": why(".git", "config"),
+        "originals": why("originals", "book", "f.png"),
+        "top": why("notes.txt"),
+        "sidecar": why("sidecars", "book", "image-alt.csv"),
+    }
+    allowed = why("src", "book", ".latexmkrc", allow=(".latexmkrc",))
+    links = sorted(link for link, _ in projectpaths.outside_links(root, "book"))
+    return [
+        ("a part reads its own sources and what the run made for it, a link among them "
+         "that leads inside them too",
+         lambda: not any(answers.values()) or fail(str(answers))),
+        ("and nothing else: a link out, ../ past the project, another part, a dot name, "
+         "a target's folder, .git, originals/, the top, or a sidecar by a page's path",
+         lambda: all(refused.values()) or fail(str({k: v for k, v in refused.items()
+                                                   if not v}))),
+        ("each reason names where the file is",
+         lambda: "leads out of the project" in refused["link out"]
+         and "another part's sources (src/other/)" in refused["other part"]
+         and "(.hidden)" in refused["dot folder"] and "in .git/" in refused["git"]
+         or fail(str(refused))),
+        ("a dot name allowed is read",
+         lambda: allowed is None or fail(allowed)),
+        ("the links that lead out of a part's sources and sidecars are found, linked folders "
+         "too, and one in a dot folder, which isn't read, isn't",
+         lambda: links == ["sidecars/book/table-headers.csv", "src/book/assets/out.png",
+                           "src/book/folder", "src/book/notes.png"] or fail(str(links))),
+    ]
+
+
 def check_move_to_src():
     work = scratch("move-to-src-")
     tool = os.path.join(ROOT, "util", "move-to-src.py")
@@ -11690,6 +11764,7 @@ def check_run_all():
 GROUPS = [
     ("the rule for a name that becomes a folder or a file", check_naming_rule),
     ("a target's stamp, the five digests of what it's built from", check_stamps),
+    ("what a part may read, and the links that lead out of it", check_reads),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),

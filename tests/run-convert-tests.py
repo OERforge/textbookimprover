@@ -1096,6 +1096,160 @@ def case_stamps(work):
     ]
 
 
+def case_reads(work):
+    """A part reads only its own sources: a page naming a picture, a
+    linked file, raw HTML's src, srcset, or a stylesheet's url() outside
+    them, behind a link that leads out, in another part, or under a dot
+    name stops the run, naming each, and nothing is written; so does a
+    link among the sources or the sidecars that leads out, an AsciiDoc
+    include:: of a file outside or of a name made from an attribute, and a
+    LaTeX book's \\input or picture outside. A Word file's picture linked
+    outside it is named. What's inside builds."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text, folder=None, mode="w"):
+        path = os.path.join(folder or work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, mode, **({} if "b" in mode else {"encoding": "utf-8"})) as fh:
+            fh.write(text)
+
+    def build(folder, *options):
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC"))
+        return done, done.stdout + done.stderr
+
+    secret = os.path.join(os.path.dirname(work), os.path.basename(work) + "-secret")
+    write("abs.png", ONE_PIXEL, secret, "wb")
+    write("rel.png", ONE_PIXEL, secret, "wb")
+    write("raw.png", ONE_PIXEL, secret, "wb")
+    write("set.png", ONE_PIXEL, secret, "wb")
+    write("css.png", ONE_PIXEL, secret, "wb")
+    write("linked.png", ONE_PIXEL, secret, "wb")
+    write("doc.pdf", "%PDF-1.4 not the book's\n", secret)
+    write("chapter.adoc", "== Outside\n\nNot the book's.\n", secret)
+    write("outside.tex", "Not the book's.\n", secret)
+    # From a part's folder, each project being a folder of work's.
+    up = os.path.relpath(secret, os.path.join(work, "project", "src", "book"))
+
+    def project(name, parts=False):
+        folder = os.path.join(work, name)
+        write("project.yaml", "project:\n  identifier: org.example.reads\n  title: Reads\n"
+              + ("  parts:\n    book:\n      kind: book\n    other:\n      kind: files\n"
+                 if parts else ""), folder)
+        write("conversion.yaml", "targets:\n  html:\n    format: html\n"
+              "  epub:\n    format: epub3\n", folder)
+        write("src/book/assets/ok.png", ONE_PIXEL, folder, "wb")
+        return folder
+
+    pages = project("pages", parts=True)
+    write("src/other/other.png", ONE_PIXEL, pages, "wb")
+    write("src/book/.hidden/dot.png", ONE_PIXEL, pages, "wb")
+    write("src/book/one.md", "# One\n\n"
+          f"![abs]({secret}/abs.png)\n\n![rel]({up}/rel.png)\n\n"
+          "![other](../other/other.png)\n\n![dot](.hidden/dot.png)\n\n![ok](assets/ok.png)\n\n"
+          f"[a file]({up}/doc.pdf)\n\n"
+          f'<img src="{up}/raw.png" alt="raw">\n\n'
+          f'<img srcset="{up}/set.png 1x" src="assets/ok.png" alt="set">\n\n'
+          f'<div style="background: url({up}/css.png)">css</div>\n', pages)
+    refused, said = build(pages)
+
+    linked = project("linked")
+    write("src/book/one.md", "# One\n\n![ok](assets/linked.png)\n", linked)
+    os.symlink(os.path.join(secret, "linked.png"),
+               os.path.join(linked, "src", "book", "assets", "linked.png"))
+    in_sources, in_sources_said = build(linked)
+    sidecar = project("sidecar")
+    write("src/book/one.md", "# One\n\n![ok](assets/ok.png)\n", sidecar)
+    os.makedirs(os.path.join(sidecar, "sidecars", "book"))
+    os.symlink(os.path.join(secret, "doc.pdf"),
+               os.path.join(sidecar, "sidecars", "book", "image-alt.csv"))
+    in_sidecars, in_sidecars_said = build(sidecar)
+
+    adoc = project("adoc")
+    write("src/book/one.adoc", f"= One\n\ninclude::{up}/chapter.adoc[]\n", adoc)
+    adoc_outside, adoc_said = build(adoc)
+    write("src/book/one.adoc", "= One\n\n:chapters: .\n\ninclude::{chapters}/two.adoc[]\n",
+          adoc)
+    adoc_attribute, adoc_attribute_said = build(adoc)
+
+    tex = project("tex")
+    write("src/book/book.tex", "\\documentclass{book}\n\\begin{document}\n"
+          f"\\chapter{{One}}\n\\input{{{up}/outside}}\n\\end{{document}}\n", tex)
+    tex_outside, tex_said = build(tex)
+    write("src/book/book.tex", "\\documentclass{book}\n\\usepackage{graphicx}\n"
+          "\\begin{document}\n\\chapter{One}\n"
+          f"\\includegraphics{{{up}/abs.png}}\n\\end{{document}}\n", tex)
+    tex_picture, tex_picture_said = build(tex)
+
+    word = project("word")
+    with zipfile.ZipFile(os.path.join(FIXTURES, "metadata.docx")) as source, \
+            zipfile.ZipFile(os.path.join(word, "src", "book", "metadata.docx"), "w") as copy:
+        for item in source.infolist():
+            data = source.read(item.filename)
+            if item.filename == "word/_rels/document.xml.rels":
+                data = data.replace(
+                    b"</Relationships>",
+                    b'<Relationship Id="rIdOut" Type="http://schemas.openxmlformats.org/'
+                    b'officeDocument/2006/relationships/image" Target="file:///C:/Users/a/'
+                    b'photo.png" TargetMode="External"/></Relationships>')
+            copy.writestr(item, data)
+    word_run, word_said = build(word)
+
+    inside = project("inside")
+    write("src/book/one.md", "# One\n\n![ok](assets/ok.png)\n\n"
+          '<img src="assets/ok.png" alt="raw ok">\n', inside)
+    built, built_said = build(inside)
+    return [
+        ("a page naming a file outside its part stops the run, naming each: a full path, "
+         "../ out of the project, another part, a dot folder, a linked file, raw HTML's "
+         "src and srcset, and a stylesheet's url(); and nothing is built",
+         lambda: refused.returncode != 0
+         and f"names {secret}/abs.png, a full path" in said
+         and f"names {up}/rel.png, which leads out of the project" in said
+         and "names ../other/other.png, which is among another part's sources (src/other/)"
+         in said
+         and "names .hidden/dot.png, which is a name beginning with a dot (.hidden)" in said
+         and f"names {up}/doc.pdf" in said and f"names {up}/raw.png" in said
+         and f"names {up}/set.png" in said and f"names {up}/css.png" in said
+         and "names assets/ok.png" not in said
+         and "Stopping: 8 file(s) a page names" in said
+         and not os.path.exists(os.path.join(pages, "output", "html"))
+         and not os.path.exists(os.path.join(pages, "output", "epub"))
+         or fail(said[-1500:])),
+        ("a link among the sources that leads out, and one among the sidecars, stop the run "
+         "before anything's read, naming each",
+         lambda: in_sources.returncode != 0 and in_sidecars.returncode != 0
+         and "src/book/assets/linked.png is a link to" in in_sources_said
+         and "sidecars/book/image-alt.csv is a link to" in in_sidecars_said
+         and "Nothing was converted." in in_sources_said
+         or fail(in_sources_said[-400:] + in_sidecars_said[-400:])),
+        ("an AsciiDoc include:: of a file outside the part, and of a name made from an "
+         "attribute, stop the run",
+         lambda: adoc_outside.returncode != 0 and adoc_attribute.returncode != 0
+         and f"includes {up}/chapter.adoc, which leads out of the project" in adoc_said
+         and "a name made from an attribute" in adoc_attribute_said
+         and "Not the book's" not in adoc_said
+         or fail(adoc_said[-400:] + adoc_attribute_said[-400:])),
+        ("a LaTeX book's \\input of a file outside the part, and its picture, stop the run",
+         lambda: tex_outside.returncode != 0 and tex_picture.returncode != 0
+         and f"The LaTeX book names {up}/outside, which leads out of the project" in tex_said
+         and f"names {up}/abs.png, which leads out of the project" in tex_picture_said
+         or fail(tex_said[-400:] + tex_picture_said[-400:])),
+        ("a Word file's picture linked to a file outside it is named, and the run goes on",
+         lambda: word_run.returncode == 0
+         and "metadata.docx shows 1 picture(s) linked to a file outside it "
+         "(file:///C:/Users/a/photo.png)" in word_said
+         or fail(word_said[-500:])),
+        ("a page naming only its part's files builds, raw HTML's too",
+         lambda: built.returncode == 0
+         and os.path.isfile(os.path.join(inside, "output", "html", "assets", "ok.png"))
+         or fail(built_said[-500:])),
+    ]
+
+
 def case_two_parts(work):
     """A project whose src/ holds a book and decks builds each part in a
     run of its own: each target from its part, each part's reports and
@@ -11843,6 +11997,7 @@ CASES = [
     ("a book and its decks in one project, each a part", case_two_parts),
     ("a target built beside its folder and swapped in", case_built_beside),
     ("a target built again only when what it's built from changed", case_stamps),
+    ("a part reads only its own sources", case_reads),
     ("two books in one project, each a course of its own", case_two_books),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),

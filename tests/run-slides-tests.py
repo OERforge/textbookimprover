@@ -5483,7 +5483,9 @@ def case_other_formats(work):
 
     blocked = folder_of("blocked", "folder.odp", "linked.odp", "clean.pptx")
     os.makedirs(place(blocked, "folder.pptx"))
-    os.symlink(place(work, "nowhere.pptx"), place(blocked, "linked.pptx"))
+    # A link to nothing in the decks' own folder: one leading out of it
+    # stops the run before any deck is looked at (projectpaths.outside_links).
+    os.symlink("nowhere.pptx", place(blocked, "linked.pptx"))
     result = run(blocked)
     yield "a folder or a link to nothing at a deck's PowerPoint name keeps it from being " \
         "saved, said so", result.returncode == 0 and all(

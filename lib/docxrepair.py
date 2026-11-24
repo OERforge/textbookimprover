@@ -1628,6 +1628,32 @@ def math_paragraphs(xml):
     return MATH_PARAGRAPH.sub(split, xml), count
 
 
+def linked_pictures(path):
+    """The pictures a Word file shows by linking to a file outside it (its
+    relationships of an image's type with TargetMode External), as each
+    link names its file.
+    Pandoc's reader leaves each out of the page without a word (measured
+    with Pandoc 3.14, 2026-11-18), and nothing outside the project is read
+    for it, so a run names them. A web address is among them: it's no
+    more the book's than a file of the author's machine."""
+    import zipfile
+    found = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                if not (name.startswith("word/") and name.endswith(".rels")):
+                    continue
+                text = archive.read(name).decode("utf-8", "replace")
+                for rel in re.findall(r"<Relationship\b[^>]*>", text):
+                    if 'TargetMode="External"' in rel and re.search(
+                            r'Type="[^"]*/image"', rel):
+                        target = re.search(r'Target="([^"]*)"', rel)
+                        if target and target.group(1) not in found:
+                            found.append(target.group(1))
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return []
+    return found
+
 def repaired_copy(source, destination, headings="keep", deletions="accept", notes=None):
     """Write a copy of the .docx with the repairs applied to
     word/document.xml and word/footnotes.xml, the bar accents and the

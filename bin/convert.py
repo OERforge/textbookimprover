@@ -651,7 +651,10 @@ def stamp_targets(base, targets, latex_book=False):
     project_schema = oerconfig.load_schema(
         os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
     root = os.path.abspath(P(base).top())
-    sources = stamps.tree_digest(P(base).sources(), allow=stamps.SOURCES_ALLOWED, root=root)
+    # The dot files the run reads, and no others: a LaTeX book's
+    # .latexmkrc with --latexmkrc.
+    sources = stamps.tree_digest(P(base).sources(),
+                                 allow=LATEXMKRC_NAMES[:1] if LATEXMKRC else (), root=root)
     # packaging.yaml's project: block, which conversion holds the book's
     # names to, and reads for them where project.yaml isn't there.
     packaged = oerconfig.inline_project(P(base).packaging_file()) or {}
@@ -665,9 +668,11 @@ def stamp_targets(base, targets, latex_book=False):
             top=stamps.top_digest(root, PART, target_named_files(target, base, schema,
                                                                  latex_book)),
             software=stamps.software_digest(stamps.software(target.format, latex_book)),
-            # No option of this script's changes a target: the packager's
+            # --latexmkrc changes a LaTeX book's own PDF, and nothing else
+            # of this script's changes a target: the packager's options
             # are counted in a package's stamp.
-            options=stamps.options_digest({}))
+            options=stamps.options_digest(
+                {"--latexmkrc": True} if LATEXMKRC and target.format == "pdf" else {}))
         target.stamp_path = P(base).stamp_file(stamps.stamp_name("target", target.name))
 
 
@@ -1699,6 +1704,10 @@ LATEX_COLORS = []
 # own layout, set or not, where any other has the default page.
 LATEX_LAYOUT = {}
 LATEX_BOOK = []
+# A LaTeX book's latexmk settings, which latexmk reads from the folder it
+# runs in and runs as Perl: read only with --latexmkrc (LATEXMKRC).
+LATEXMKRC_NAMES = (".latexmkrc", "latexmkrc")
+LATEXMKRC = False
 # A PDF figure written with its fonts embedded (latexbuild.embed_figure_fonts),
 # by its path in the book, for the next copy that needs it.
 EMBEDDED_FIGURES = {}
@@ -2486,12 +2495,58 @@ def asciidoc_header(text):
     return found
 
 
+ADOC_INCLUDE = re.compile(r"^include::([^\[\n]+)\[", re.M)
+
+
+def check_adoc_includes(base, paths):
+    """Pandoc's AsciiDoc reader opens each file an include:: names as it
+    reads, from the including file's folder, wherever the name leads; so
+    each is checked first, and the files those include, against what the
+    part may read (projectpaths' unreadable). A name built from an
+    attribute ({chapters}/one.adoc) can't be checked before the reader
+    makes it, and stops the run too, the name to be written out."""
+    project = P(base)
+    if not hasattr(project, "unreadable"):
+        return
+    problems, seen, queue = [], set(), [os.path.abspath(p) for p in paths]
+    while queue:
+        path = queue.pop()
+        if path in seen or not os.path.isfile(path):
+            continue
+        seen.add(path)
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        for target in ADOC_INCLUDE.findall(text):
+            target = target.strip()
+            if re.match(r"^[a-zA-Z][\w+.-]*://", target):
+                continue                # the reader leaves a URL alone
+            name = os.path.relpath(path, os.path.abspath(project.sources()))
+            if "{" in target:
+                problems.append(f"{name} includes {target}, a name made from an attribute, "
+                                "which can't be checked before it's read; write the name "
+                                "out")
+                continue
+            included = os.path.join(os.path.dirname(path), target)
+            why = project.unreadable(included)
+            if why:
+                problems.append(f"{name} includes {target}, {why}")
+            else:
+                queue.append(os.path.abspath(included))
+    if problems:
+        for line in problems:
+            say(f"ERROR: {line}.")
+        die(f"Stopping: {len(problems)} include:: line(s) name what the part doesn't read, "
+            f"its own sources (src/{PART}/). Copy each file there and include it from there. "
+            "Nothing was converted.")
+
+
 def read_asciidoc_to_json(base, docs, env, imagesdir=""):
     """An AsciiDoc source, read into the same intermediate a .docx gets.
     asciidoc-source.lua applies imagesdir, moves the sections below the
     title, and drops Asciidoctor's own settings from the metadata."""
     stems = []
     env = dict(env, ASCIIDOC_IMAGESDIR=imagesdir)
+    check_adoc_includes(base, [P(base).source(name) for name in docs])
     for name in docs:
         stem = safe_stem(os.path.splitext(name)[0])
         fixed = adoc_root_index_text(P(base).source(name))
@@ -3178,6 +3233,12 @@ def read_to_json(base, docs, env, work):
                                          WORD_HEADINGS, WORD_DELETIONS, notes)
         for note in notes:
             say(f"WARNING: {name}: word.headings not applied: {note}.")
+        linked = docxrepair.linked_pictures(P(base).source(name))
+        if linked:
+            say(f"WARNING: {name} shows {len(linked)} picture(s) linked to a file outside "
+                f"it ({', '.join(linked[:3])}{', ...' if len(linked) > 3 else ''}), which "
+                "aren't read, and are left out of its page: in Word, insert each picture "
+                "into the document (Insert > Pictures), not as a link to its file.")
         if moved and TRACE:
             say(f"# {name}: {moved} bookmark(s) moved into the paragraphs "
                 "they precede")
@@ -3312,6 +3373,7 @@ def read_hand_pages(base, hand, pages_dir, env, variants=None):
              "-o", target, "--lua-filter=" + HTML_RAW_FILTER],
             env=env, cwd=P(base).run_dir())
         out.append(target)
+    check_reads(base, out)
     return out
 
 
@@ -3348,6 +3410,7 @@ def read_variants(base, target, work, env):
                                           if not os.path.isabs(out) else out)
             portable_media_paths(out, base, name)
         elif name.endswith((".adoc", ".asciidoc")):
+            check_adoc_includes(base, [path])
             run([*pandocrun.PANDOC, "-f", "asciidoc", "-t", "json", path, "-o", out,
                  "--lua-filter=" + MARKDOWN_HTML_FILTER,
                  "--lua-filter=" + ASCIIDOC_FILTER,
@@ -3368,6 +3431,7 @@ def read_variants(base, target, work, env):
                  "--lua-filter=" + MEDIA_FILTER], env=env, cwd=P(base).run_dir())
             settle_markdown(out, base, name, DECK_RUN, report=False)
         raw[stem] = out
+    check_reads(base, list(raw.values()))
     return raw
 
 
@@ -3432,6 +3496,130 @@ def media_references(path):
                                                "data:")))
 
 
+# What a page's raw HTML names a file by: an element's src, href, data,
+# and poster, each candidate of a srcset, and a stylesheet's url(), in a
+# style attribute or a <style> element.
+RAW_NAMED = re.compile(r"""\b(src|href|data|poster|srcset)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""",
+                       re.I)
+CSS_URL = re.compile(r"""url\(\s*("[^"]*"|'[^']*'|[^)\s]*)\s*\)""", re.I)
+NAMED_KEYS = ("src", "srcset", "data", "poster")
+
+
+def named_in_html(text):
+    """Every local file a piece of HTML names, as written: what's after a
+    scheme (http:, data:, mailto:) or begins // or # isn't the book's.
+    An href is a file only where it names one that isn't a page, as a
+    link is (linked_file)."""
+    found = []
+
+    def add(value, link=False):
+        value = html_unescape(value.strip().strip("'\""))
+        if not value or re.match(r"^[a-zA-Z][\w+.-]*:(?!\\)|^//|^#", value) \
+                and not re.match(r"^[a-zA-Z]:[\\/]", value):
+            return
+        if link:
+            parts = linked_file(value)
+            if parts:
+                found.append(parts[0])
+            return
+        found.append(re.match(r"([^#?]*)", value).group(1))
+    for name, value in RAW_NAMED.findall(text or ""):
+        value = value.strip("'\"")
+        if name.lower() == "srcset":
+            for candidate in value.split(","):
+                add(candidate.strip().split(" ")[0] if candidate.strip() else "")
+        else:
+            add(value, link=name.lower() == "href")
+    for value in CSS_URL.findall(text or ""):
+        add(value)
+    return [f for f in found if f]
+
+
+def page_reads(path):
+    """Every local file a page as Pandoc read it names, which a run or a
+    program it starts may open: each picture, each file a link names,
+    and what the page's raw HTML and its elements' style, src, srcset,
+    data, and poster name. As written, %20 and the rest still escaped."""
+    refs = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            kind = node.get("t")
+            content = node.get("c")
+            try:
+                if kind == "Image":
+                    refs.append(content[2][0])
+                elif kind == "Link":
+                    parts = linked_file(content[2][0])
+                    if parts:
+                        refs.append(parts[0])
+                elif kind in ("RawBlock", "RawInline") and \
+                        str(content[0]).lower() in ("html", "html5", "html4"):
+                    refs.extend(named_in_html(content[1]))
+                if kind in ("Image", "Link", "Span", "Div", "Code", "CodeBlock",
+                            "Header", "Table", "Figure"):
+                    attr = content[1] if kind == "Header" else content[0]
+                    for key, value in (attr[2] if isinstance(attr, list) and len(attr) > 2
+                                       else []):
+                        if key.lower() == "style":
+                            refs.extend(named_in_html(f'style="{value}"'))
+                        elif key.lower() in NAMED_KEYS:
+                            refs.extend(named_in_html(f'{key}="{value}"'))
+            except (KeyError, IndexError, TypeError):
+                pass
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    with open(path, encoding="utf-8") as fh:
+        walk(json.load(fh))
+    return sorted(r for r in set(refs)
+                  if not re.match(r"^[a-zA-Z][\w+.-]*:(?![\\/])|^//|^#", r))
+
+
+def check_reads(base, pages):
+    """A page may name only what its part may read (projectpaths'
+    unreadable): its own sources, and what the run extracted or rendered
+    for it. Every page as Pandoc read it is checked before a filter, a
+    builder, or a writer opens what it names, and one that names a file
+    outside, behind a link that leads outside, or under a dot name stops
+    the run, naming each. No setting or option lets one through: a
+    project's pages are read on someone else's machine too, and one
+    naming ../../.ssh/id_rsa would put it in the EPUB (measured with
+    Pandoc 3.14, 2026-11-23)."""
+    project = P(base)
+    if not hasattr(project, "unreadable"):
+        return
+    problems = []
+    for page in pages:
+        if not os.path.isfile(page):
+            continue
+        for ref in page_reads(page):
+            name = unquote(ref)
+            if os.path.isabs(name) or name.startswith(("\\", "~")) \
+                    or re.match(r"^[a-zA-Z]:", name):
+                why = "a full path, where a page names a file from its part's folder"
+            else:
+                why = project.unreadable(project.referenced(name))
+            if why:
+                stem = os.path.basename(page)
+                stem = stem[:-len(INTERMEDIATE)] if stem.endswith(INTERMEDIATE) else \
+                    os.path.splitext(stem)[0]
+                source = PAGE_SOURCES.get(stem, (None, None))[1]
+                line = (f"src/{PART}/{source}" if source else f"The page {stem}") \
+                    + f" names {ref}, {why}."
+                if line not in problems:
+                    problems.append(line)
+    if not problems:
+        return
+    for line in problems:
+        say("ERROR: " + line)
+    die(f"Stopping: {len(problems)} file(s) a page names are outside what the part "
+        f"reads, its own sources (src/{PART}/). Copy each file into src/{PART}/, keeping "
+        "no link to where it was, and name it there. Nothing was converted.")
+
+
 def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
     """A dead image link is invisible in the generated HTML -- Pandoc
     emits an <embed> rather than an <img> for an extension it does not
@@ -3455,6 +3643,7 @@ def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
     # the first under every page that shows either. A file is told from
     # another as the file system tells it, so one named in two ways, as a
     # file system that ignores case finds it, is one.
+    check_reads(base, [P(base).raw(stem) for stem in stems])
     written = {naming: {} for naming in namings if any(naming)}
     for stem in stems:
         intermediate = P(base).raw(stem)
@@ -5270,29 +5459,24 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     outputs = {os.path.abspath(t.output_dir) for t in targets} | {
         os.path.abspath(P(base).media(latexsource.RENDERED))}
 
-    # A version control folder and an operating system's own files aren't
-    # the book's; a .latexmkrc is, with what the book's build needs.
+    # A dot file or folder isn't the book's to build from (a version
+    # control folder, an operating system's own files), and neither is a
+    # latexmkrc, which latexmk runs as Perl, unless --latexmkrc says the
+    # book's own is wanted. A link among the sources leads inside them,
+    # or the run has stopped (projectpaths.outside_links), so the copy's
+    # links find their copies.
+    rc = [n for n in LATEXMKRC_NAMES if os.path.lexists(P(base).source(n))]
+    if rc and not LATEXMKRC:
+        say(f"NOTE: src/{PART}/{rc[0]} isn't read: latexmk would run it as a program. "
+            "--latexmkrc builds the book with it, for a book of your own.")
+
     def leave_out(directory, names):
-        return [n for n in names if n in (".git", ".hg", ".svn", ".DS_Store", "__MACOSX")
+        top = os.path.abspath(directory) == os.path.abspath(P(base).sources())
+        return [n for n in names
+                if (n.startswith(".") and not (top and n in LATEXMKRC_NAMES and LATEXMKRC))
+                or (top and n == "latexmkrc" and not LATEXMKRC) or n == "__MACOSX"
                 or os.path.abspath(os.path.join(directory, n)) in outputs]
     shutil.copytree(P(base).sources(), build, ignore=leave_out, symlinks=True)
-    # A link the book makes to something beside it (figs -> ../shared/figs)
-    # would point beside the copy, where nothing is: it points where the
-    # book's did. A link inside the book still finds its copy.
-    root = os.path.abspath(P(base).sources())
-    for folder, dirs, names in os.walk(build):
-        for name in dirs + names:
-            link = os.path.join(folder, name)
-            if not os.path.islink(link):
-                continue
-            pointed = os.readlink(link)
-            if os.path.isabs(pointed):
-                continue
-            original = os.path.join(root, os.path.relpath(folder, build))
-            resolved = os.path.normpath(os.path.join(original, pointed))
-            if resolved != root and not resolved.startswith(root + os.sep):
-                os.remove(link)
-                os.symlink(resolved, link)
 
     resolved_html = {}
     html_json = os.path.join(work, "table-headers-html.json")
@@ -6985,6 +7169,14 @@ def copy_media(base, output_dir, pages, safe=True, lower=False, scaled=None):
             # a markdown target writes source, whose references are the
             # author's, so its copies keep the author's names.
             dest = os.path.join(output_dir, output_path(unquote(ref), safe, lower))
+            # Never outside the target's folder, whatever the page says:
+            # the read check has stopped a page naming a file outside its
+            # part, and this is the second net.
+            inside = os.path.abspath(output_dir)
+            if not os.path.abspath(dest).startswith(inside.rstrip(os.sep) + os.sep):
+                die(f"A page names {ref}, which would be copied to {dest}, outside the "
+                    "target's folder. Name the file from the part's folder, without "
+                    "../ past it. Nothing more was written.")
             if os.path.abspath(dest) == os.path.abspath(src):
                 continue
             smaller = os.path.join(scaled, unquote(ref)) if scaled else None
@@ -7301,6 +7493,10 @@ def main():
                         help="read, gate, pre-pass, filter, and write the "
                              "reports, then stop: no output directory is "
                              "written and nothing is packaged")
+    parser.add_argument("--latexmkrc", action="store_true",
+                        help="build a LaTeX book's own PDF with the book's .latexmkrc or "
+                             "latexmkrc, which latexmk runs as Perl: for a book of your own, "
+                             "never one from elsewhere")
     parser.add_argument("--rebuild", action="store_true",
                         help="build every target and package, whatever its stamp says "
                              "(as make -B does), keeping the caches in output/work/")
@@ -7327,6 +7523,8 @@ def main():
                              "in one (check-output.py --verbose)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
+    global LATEXMKRC
+    LATEXMKRC = args.latexmkrc
     if args.clean and (args.check_only or args.src_status):
         die(f"--clean empties output/ to build everything, and "
             f"{'--check-only' if args.check_only else '--src-status'} builds nothing. "
@@ -7446,6 +7644,17 @@ def main():
     unpack_upstream(base, PART, check_only=args.check_only, status=args.src_status)
     if args.src_status:
         return 0
+    # A part reads only its own folders: a link among its sources or its
+    # sidecars that leads out of them stops the run before anything is
+    # read through it.
+    linked = projectpaths.outside_links(base, PART)
+    if linked:
+        for link, real in linked:
+            say(f"ERROR: {link} is a link to {real}, which leads out of the part's own "
+                "folder.")
+        die(f"Stopping: {len(linked)} link(s) among the part's sources or sidecars lead out of "
+            f"them, and a part reads only its own folders (src/{PART}/, sidecars/{PART}/). "
+            "Put a copy of each file in the link's place. Nothing was converted.")
     import deckrun
     # A deck's reference document beside the decks is their look, not a
     # deck (slides.reference_doc).

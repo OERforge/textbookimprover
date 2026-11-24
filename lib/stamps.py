@@ -97,8 +97,8 @@ OWN_SECTIONS = {
     "revealjs": ("slides",),
 }
 
-# The dot files a part's sources count: a LaTeX book's .latexmkrc, which
-# its build reads.
+# The dot files a part's sources may count, when the run reads them: a
+# LaTeX book's .latexmkrc, with convert.py's --latexmkrc.
 SOURCES_ALLOWED = (".latexmkrc",)
 
 # What isn't the author's in a part's folder: an editor's backup

@@ -555,6 +555,22 @@ def binder_sources(base, pdfs, skip=()):
     return found, missing
 
 
+def readable(base, path, named):
+    """path, a file the book names (named, as the book names it), when its
+    part may read it; otherwise the run stops, naming it: a part reads its
+    own sources and nothing else, so an \\input, a picture, or a database
+    named outside them, behind a link that leads out, or under a dot name
+    isn't read (projectpaths' unreadable)."""
+    project = P(base)
+    why = project.unreadable(path) if hasattr(project, "unreadable") else None
+    if why:
+        raise projectpaths.Refused(
+            f"The LaTeX book names {named}, {why}. A part reads only its own sources "
+            f"(src/{project.part()}/): copy the file there, keeping no link to where it was, "
+            "and name it there. Nothing was converted.")
+    return path
+
+
 def resolve(base, name, folder=""):
     """A name \\input or \\include gives, as a path relative to base, or
     None when no such file is there. TeX tries the name as written and
@@ -566,6 +582,7 @@ def resolve(base, name, folder=""):
         for candidate in (name, name + ".tex"):
             path = os.path.normpath(os.path.join(where, candidate))
             if os.path.isfile(P(base).source(path)):
+                readable(base, P(base).source(path), name)
                 return path
     return None
 
@@ -5224,10 +5241,12 @@ def resolve_graphic(base, name, dirs, counter=None):
                 if not (ext or os.path.splitext(name)[1]):
                     continue
                 if exact and os.path.isfile(P(base).source(candidate)):
+                    readable(base, P(base).source(candidate), name)
                     return candidate
                 if not exact:
                     found = case_match(P(base).sources(), candidate)
                     if found:
+                        readable(base, P(base).source(found), name)
                         if counter is not None:
                             counter["graphics_case"] = counter.get("graphics_case", 0) + 1
                         return found
@@ -8150,7 +8169,7 @@ def run_bibtex(base, work, folder, keys, style, databases):
         for candidate in (P(base).source(folder, name), P(base).source(name)):
             for path in (candidate, candidate + extension):
                 if path.endswith(extension) and os.path.isfile(path):
-                    return path
+                    return readable(base, path, name)
         return None
     names = []
     for index, database in enumerate(databases, start=1):
@@ -8749,7 +8768,7 @@ def database_paths(base, master, resources):
                           os.path.join(os.path.dirname(master), resource),
                           os.path.join(os.path.dirname(master), resource + ".bib")):
             if os.path.isfile(P(base).source(candidate)):
-                found.append(P(base).source(candidate))
+                found.append(readable(base, P(base).source(candidate), resource))
                 break
     return found
 
