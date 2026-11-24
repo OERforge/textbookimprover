@@ -147,6 +147,7 @@ import zipfile
 from collections import Counter
 from urllib.parse import unquote
 
+import archivedates
 import decks
 import pandocrun
 import docxtarget
@@ -2305,8 +2306,9 @@ def _write(path, infos, parts, texts, added):
                     else parts[info.filename]
                 zout.writestr(info, data)
             for media, svg in added.items():
-                with open(svg, "rb") as fh:
-                    zout.writestr(media, fh.read())
+                # Dated SOURCE_DATE_EPOCH's moment where it's set, as
+                # Pandoc dates the parts it wrote.
+                archivedates.write_file(zout, svg, media)
         os.replace(temporary, path)
     except BaseException:
         if os.path.exists(temporary):

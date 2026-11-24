@@ -1209,6 +1209,69 @@ def check_sandbox():
     ]
 
 
+def check_archivedates():
+    """lib/archivedates.py: a zip member's date from SOURCE_DATE_EPOCH, in
+    UTC, within a zip's years and to its even second; the file's own
+    without it; a mode of 0644 or 0755 whatever the file's; and a tar's
+    members owned by no one, its gzip wrapper with no date or name."""
+    import archivedates
+    work = scratch("archivedates-")
+    plain = os.path.join(work, "plain.txt")
+    runnable = os.path.join(work, "run.sh")
+    for path, mode in ((plain, 0o600), (runnable, 0o750)):
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("text\n")
+        os.chmod(path, mode)
+    os.chmod(runnable, 0o755)
+    os.utime(plain, (1000000000, 1000000000))
+    env = {"SOURCE_DATE_EPOCH": "1763251201"}
+
+    def zipped(environ):
+        path = os.path.join(work, "out.zip")
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archivedates.write_file(archive, plain, "plain.txt", environ)
+            archivedates.write_file(archive, runnable, "run.sh", environ)
+            archivedates.write_bytes(archive, "added.xml", b"<a/>", environ)
+        with zipfile.ZipFile(path) as archive:
+            return [(i.filename, i.date_time, i.external_attr >> 16, archive.read(i))
+                    for i in archive.infolist()]
+    dated, undated = zipped(env), zipped({})
+    tar = os.path.join(work, "out.tar.gz")
+    archivedates.write_tar_gz(tar, [(plain, "p/plain.txt"), (runnable, "p/run.sh")], env)
+    import tarfile
+    with tarfile.open(tar) as archive:
+        members = [(m.name, m.mtime, m.mode, m.uid, m.uname) for m in archive.getmembers()]
+    with open(tar, "rb") as fh:
+        head = fh.read(10)
+    return [
+        ("under SOURCE_DATE_EPOCH, each zip member dated its moment in UTC to the even "
+         "second, 0644 or 0755 whatever its own mode, an added one too",
+         lambda: dated == [("plain.txt", (2025, 11, 16, 0, 0, 0), 0o100644, b"text\n"),
+                           ("run.sh", (2025, 11, 16, 0, 0, 0), 0o100755, b"text\n"),
+                           ("added.xml", (2025, 11, 16, 0, 0, 0), 0o100644, b"<a/>")]
+         or fail(repr(dated))),
+        ("without it, a file's own modification time",
+         lambda: undated[0][1] == time.localtime(1000000000)[:5]
+         + (time.localtime(1000000000)[5] - time.localtime(1000000000)[5] % 2,)
+         or fail(repr(undated[0]))),
+        ("a moment before 1980 or after 2107 is the nearer end of a zip's years",
+         lambda: archivedates.zip_time(0) == (1980, 1, 1, 0, 0, 0)
+         and archivedates.zip_time(2 ** 33) == (2107, 12, 31, 23, 59, 58)
+         or fail(repr((archivedates.zip_time(0), archivedates.zip_time(2 ** 33))))),
+        ("a tar's members dated the moment, owned by no one, 0644 or 0755; the gzip "
+         "wrapper with no date and no name",
+         lambda: members == [("p/plain.txt", 1763251201, 0o644, 0, ""),
+                             ("p/run.sh", 1763251201, 0o755, 0, "")]
+         and head[4:8] == b"\0\0\0\0" and not head[3] & 0x08
+         or fail(repr((members, head)))),
+        ("SOURCE_DATE_EPOCH that isn't a whole number of seconds is none",
+         lambda: archivedates.epoch({"SOURCE_DATE_EPOCH": "soon"}) is None
+         and archivedates.epoch({"SOURCE_DATE_EPOCH": "-5"}) is None
+         and archivedates.epoch({}) is None
+         or fail("an epoch was read")),
+    ]
+
+
 def check_filekinds():
     """What a file is by its first bytes, and whether that's what its name
     says (lib/filekinds.py), on bytes written here."""
@@ -12752,6 +12815,8 @@ GROUPS = [
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
     ("what a page names by URL", check_named_by_url),
     ("util/import-files.py, bringing what a page names into its part", check_import_files),
+    ("lib/archivedates.py, the dates, modes, and owners in TextbookImprover's own zips and "
+     "tars", check_archivedates),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),

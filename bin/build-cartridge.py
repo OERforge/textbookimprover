@@ -81,6 +81,7 @@ from bookcontents import (  # noqa: E402
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import archivedates  # noqa: E402
 import projectpaths  # noqa: E402
 import stamps  # noqa: E402
 import texreads  # noqa: E402
@@ -1682,10 +1683,12 @@ def main():
         with zipfile.ZipFile(cartridge, "w", zipfile.ZIP_DEFLATED) as archive:
             # imsmanifest.xml sits at the package root whatever else
             # does; Common Cartridge requires it there.
-            archive.write(output_path, "imsmanifest.xml")
+            # Each member dated SOURCE_DATE_EPOCH's moment where it's
+            # set, so a package built again under it is the same bytes.
+            archivedates.write_file(archive, output_path, "imsmanifest.xml")
             for ref in file_list[1:]:
-                archive.write(os.path.join(pages_dir, ref),
-                              under_prefix(prefix, ref))
+                archivedates.write_file(archive, os.path.join(pages_dir, ref),
+                                        under_prefix(prefix, ref))
         size = os.path.getsize(cartridge) / 1048576
         print(f"Wrote {projectpaths.placed(cartridge)} ({size:.1f} MB, "
               f"{len(file_list)} entries).")

@@ -90,6 +90,7 @@ import projectpaths  # noqa: E402
 P = projectpaths.of
 try:
     import alttext
+    import archivedates
     import decksave
     import docxrepair
     import docxremediate
@@ -313,7 +314,6 @@ def archive_targets(targets, base):
     beside its folder and named after it (html.zip, remediated.tar.gz),
     the folder inside it. Written whole, then put in place, so a run that
     stops leaves the last one, never half of one."""
-    import tarfile
     import zipfile
     for target in targets:
         kind = str(target["archive"] or "none")
@@ -340,16 +340,16 @@ def archive_targets(targets, base):
         handle, temp = projectpaths.of().temp_file(".archive-", beside=folder)
         os.close(handle)
         try:
+            # Each member dated SOURCE_DATE_EPOCH's moment where it's set,
+            # with a mode of its own and no owner (archivedates.py).
+            members = [(os.path.join(folder, rel), root + "/" + rel.replace(os.sep, "/"))
+                       for rel in files]
             if kind == "zip":
                 with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as archive:
-                    for rel in files:
-                        archive.write(os.path.join(folder, rel),
-                                      root + "/" + rel.replace(os.sep, "/"))
+                    for path_in, name in members:
+                        archivedates.write_file(archive, path_in, name)
             else:
-                with tarfile.open(temp, "w:gz") as archive:
-                    for rel in files:
-                        archive.add(os.path.join(folder, rel),
-                                    root + "/" + rel.replace(os.sep, "/"), recursive=False)
+                archivedates.write_tar_gz(temp, members)
             # mkstemp's file is the owner's alone; an archive is for handing on
             mask = os.umask(0o022)
             os.umask(mask)

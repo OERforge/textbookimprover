@@ -711,6 +711,77 @@ def case_tree_layout(work):
     ]
 
 
+def case_archive_dates(work):
+    """The zip and tar files a run writes itself, a target's archive and a
+    package's cartridge, are the same bytes when the book is built again
+    under the same SOURCE_DATE_EPOCH, later and under another umask: each
+    member dated that moment, with a mode of its own and no owner."""
+    import tarfile
+
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build(umask, *options):
+        return subprocess.run(
+            ["sh", "-c", f"umask {umask}; exec \"$@\"", "build", "python3",
+             os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet",
+             "--rebuild", "--zip", *options],
+            cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251201", TZ="America/New_York"))
+
+    def packed():
+        found = {}
+        for name in ("html.zip", "md.tar.gz", os.path.join("packages", "cartridge")):
+            path = os.path.join(work, "output", name)
+            if os.path.isdir(path):
+                path = next((os.path.join(path, n) for n in sorted(os.listdir(path))
+                             if n.endswith(".imscc")), path)
+            if os.path.isfile(path):
+                with open(path, "rb") as fh:
+                    found[name] = fh.read()
+        return found
+
+    write("project.yaml", "project:\n  identifier: org.example.dates\n  title: Dates\n"
+          "  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  md:\n    format: markdown\n    archive: tar.gz\n"
+          "  html:\n    format: html\n    archive: zip\n")
+    write("src/book/one.md", "# One\n\nA page.\n")
+    first = build("022")
+    before = packed()
+    time.sleep(2.1)
+    second = build("077")
+    after = packed()
+    with zipfile.ZipFile(os.path.join(work, "output", "html.zip")) as archive:
+        zip_members = [(i.date_time, i.external_attr >> 16) for i in archive.infolist()]
+    with tarfile.open(os.path.join(work, "output", "md.tar.gz")) as archive:
+        tar_members = [(m.mtime, m.mode, m.uid, m.gid, m.uname, m.gname)
+                       for m in archive.getmembers()]
+    head = after.get("md.tar.gz", b"")[:10]
+    return [
+        ("a target's zip and tar and a package's cartridge built again later, under another "
+         "umask, are the same bytes under the same SOURCE_DATE_EPOCH",
+         lambda: first.returncode == 0 and second.returncode == 0 and len(before) == 3
+         and before == after
+         or fail(first.stderr[-600:] + second.stderr[-600:] + repr(sorted(before))
+                 + repr([k for k in before if before.get(k) != after.get(k)]))),
+        ("each zip member dated that moment in UTC, whatever the time zone, and 0644",
+         lambda: zip_members and all(m == ((2025, 11, 16, 0, 0, 0), 0o100644)
+                                     for m in zip_members) or fail(repr(zip_members[:3]))),
+        ("each tar member dated that moment, 0644, with no owner, and the gzip wrapper with "
+         "no date and no file's name",
+         lambda: tar_members and all(m == (1763251201, 0o644, 0, 0, "", "")
+                                     for m in tar_members)
+         and head[4:8] == b"\0\0\0\0" and not head[3] & 0x08
+         or fail(repr((tar_members[:3], head)))),
+    ]
+
+
 def case_built_beside(work):
     """In the layout with src/, each target is built beside its folder and
     swapped in when it's built: a page the book no longer has isn't left
@@ -12527,6 +12598,8 @@ CASES = [
     ("a book laid out with src/book/ and sidecars/book/", case_tree_layout),
     ("a book and its decks in one project, each a part", case_two_parts),
     ("a target built beside its folder and swapped in", case_built_beside),
+    ("a target's archive and a cartridge the same bytes when built again",
+     case_archive_dates),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

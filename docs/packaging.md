@@ -59,7 +59,7 @@ New groups are added inside the group named by `grouping.append_to`. Left unset,
 
 On a 420-page book that leaves 34 chapter groups and 8 entries in `Unsorted` (appendices, preface, index, references) rather than everything in one pile. Move those where they belong in the `project-sample.yaml` it writes, and the group disappears on the next run.
 
-Without `--zip` the script prints the equivalent `zip` command. The archive puts `imsmanifest.xml` at the root with media directories beneath, which is what the LMS expects.
+Without `--zip` the script prints the equivalent `zip` command. The archive puts `imsmanifest.xml` at the root with media directories beneath, which is what the LMS expects. Each file in it is dated the moment `SOURCE_DATE_EPOCH` names, where it's set, with a mode of 0644, so a package built again under it, with `packaging.modified` taking that day too, is the same bytes.
 
 ## Validating the manifest
 
