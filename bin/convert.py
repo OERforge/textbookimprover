@@ -4008,8 +4008,10 @@ def enter_sandbox(base, args):
             "which is weaker: a file outside what it shows can't be read, but its name and "
             "size can be seen"
             + (", and the network isn't refused here, Landlock refusing TCP only from its "
-               "version 4 (Linux 6.7)" if version < 4 else "")
-            + ". bubblewrap does better (sudo apt install bubblewrap).")
+               "version 4 (Linux 6.7)" if version < 4 else
+               ", and UDP, a DNS lookup among it, isn't refused")
+            + "; a connection to a socket file on this machine isn't refused either, "
+            "WSL's own among them. bubblewrap does better (sudo apt install bubblewrap).")
     else:
         say("Converting in a sandbox (bubblewrap): the programs the run starts see the "
             "project, the system's programs and fonts, and nothing else of yours, write only "
@@ -4027,7 +4029,14 @@ def enter_sandbox(base, args):
             "home folder, or holds it.")
     command = [sys.executable, os.path.abspath(__file__), "--part", PART, "--locked"] \
         + without_dir(sys.argv[1:])
-    return sandbox.run(kind, command, base, inside, paths)
+    # LibreOffice, saving a deck in another format, makes its socket in
+    # /tmp, which under Landlock a run may do only when it has such a deck.
+    try:
+        saves = bool(decksave.other_decks(base))
+    except OSError:
+        saves = False
+    sockets = sandbox.LIBREOFFICE_SOCKETS if kind == "landlock" and saves else ()
+    return sandbox.run(kind, command, base, inside, paths, sockets)
 
 
 def check_remote(remote):

@@ -464,6 +464,10 @@ FS = {"execute": 1, "write_file": 2, "read_file": 4, "read_dir": 8, "remove_dir"
       "remove_file": 32, "make_char": 64, "make_dir": 128, "make_reg": 256, "make_sock": 512,
       "make_fifo": 1024, "make_block": 2048, "make_sym": 4096, "refer": 8192,
       "truncate": 16384, "ioctl_dev": 32768}
+# What a folder of sockets alone takes: making a socket there and
+# removing one, as LibreOffice makes and removes its own in /tmp, which
+# it can't be told to put elsewhere.
+SOCKETS = FS["make_sock"] | FS["remove_file"]
 FILE_RIGHTS = FS["execute"] | FS["write_file"] | FS["read_file"] | FS["truncate"] \
     | FS["ioctl_dev"]
 READ = FS["execute"] | FS["read_file"] | FS["read_dir"]
@@ -489,11 +493,16 @@ class _PathBeneath(ctypes.Structure):
     _fields_ = [("allowed", ctypes.c_uint64), ("fd", ctypes.c_int32)]
 
 
-def landlock_restrict(readable, writable):
+def landlock_restrict(readable, writable, sockets=(), project=()):
     """Restrict this process, and every program it starts, to reading
     readable and writing writable, with no TCP where the kernel can refuse
     it (version 4 on) and no reaching another process's abstract socket or
-    signalling one outside (version 6 on). Raises Unavailable on failure.
+    signalling one outside (version 6 on); in sockets, only making a
+    socket and removing one (SOCKETS); and project read but not run.
+    Nothing written can be run: a writable folder has every right but
+    executing, so a program can't write one there, or find one among the
+    project's files, and start it (under WSL, a Windows program, which
+    would run outside any sandbox). Raises Unavailable on failure.
     Called in the child before the run inside starts (run's preexec_fn)."""
     version = landlock_version()
     if not version:
@@ -507,7 +516,8 @@ def landlock_restrict(readable, writable):
     if ruleset < 0:
         raise Unavailable(f"Landlock's ruleset: {os.strerror(ctypes.get_errno())}")
     try:
-        for paths, rights in ((readable, READ), (writable, handled)):
+        for paths, rights in ((readable, READ), (writable, handled & ~FS["execute"]),
+                              (sockets, SOCKETS), (project, READ & ~FS["execute"])):
             for path in paths:
                 try:
                     fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
@@ -533,37 +543,53 @@ def landlock_restrict(readable, writable):
 
 
 def landlock_paths(base, paths):
-    """(readable, writable) for Landlock: the system's, /etc's, the shown
-    paths, and the project read-only; output/ and the devices a program
-    writes to writable."""
+    """(readable, writable, project) for Landlock: the system's, /etc's,
+    and the shown paths read-only; output/ and the devices a program
+    writes to writable; and the project, read-only, whose files, like
+    what's written, can't be run (landlock_restrict)."""
     root = os.path.realpath(projectpaths.of(base).top())
     readable = ["/usr", "/proc"] + [os.path.join(os.sep, n) for n in TOP_SYSTEM] \
         + etc_shown() + ["/etc/passwd", "/etc/group", "/etc/hosts", "/dev/urandom",
-                         "/dev/random"] + list(paths) + [root]
+                         "/dev/random"] + [p for p in VAR_READ if os.path.exists(p)] \
+        + list(paths)
     writable = [os.path.realpath(projectpaths.of(base).run_output()), "/dev/null", "/dev/zero", "/dev/full",
                 "/dev/shm", "/dev/tty"]
-    return readable, writable
+    return readable, writable, [root]
+
+
+# What of /var a program reads under Landlock: Debian's LibreOffice keeps
+# its shared extensions' cache there, by a link from /usr/lib/libreoffice,
+# and stops when it's refused (bubblewrap shows no /var, and LibreOffice
+# goes on without what isn't there).
+VAR_READ = ("/var/spool/libreoffice",)
+# Where LibreOffice makes the socket by which a second LibreOffice finds
+# the first, a name it can't be given another place for.
+LIBREOFFICE_SOCKETS = ("/tmp",)
 
 
 # -- running inside -----------------------------------------------------------
 
-def run(kind, command, base, environment_inside, paths):
+def run(kind, command, base, environment_inside, paths, sockets=()):
     """Run command, a list, in base inside the sandbox kind, and wait:
     its exit code. It runs in a session of its own (bubblewrap's
     --new-session, and Landlock's start_new_session), so a book's program
     can't type into the terminal (TIOCSTI) and the keyboard's Ctrl-C
     doesn't reach it: a run stopped while it waits stops what it started
-    (stop), and is stopped itself."""
+    (stop), and is stopped itself. sockets: folders where, under Landlock,
+    a program may make and remove a socket and nothing else
+    (LIBREOFFICE_SOCKETS, for a run that saves a deck through LibreOffice);
+    bubblewrap's /tmp is its own already."""
     root = os.path.realpath(projectpaths.of(base).top())
     os.makedirs(environment_inside["TEXMFVAR"], exist_ok=True)
     os.makedirs(environment_inside["XDG_CACHE_HOME"], exist_ok=True)
     if kind == "bwrap":
         process = subprocess.Popen(bwrap_command(base, command, paths), env=environment_inside)
     else:
-        readable, writable = landlock_paths(base, paths)
+        readable, writable, project = landlock_paths(base, paths)
         process = subprocess.Popen(command, cwd=root, env=environment_inside,
                                    start_new_session=True,
-                                   preexec_fn=lambda: landlock_restrict(readable, writable))
+                                   preexec_fn=lambda: landlock_restrict(readable, writable,
+                                                                        sockets, project))
     try:
         return process.wait()
     except KeyboardInterrupt:

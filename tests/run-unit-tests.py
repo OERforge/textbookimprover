@@ -1118,6 +1118,43 @@ def check_sandbox():
         if saved_inside is not None:
             os.environ[sandbox.INSIDE] = saved_inside
 
+    # Under Landlock, nothing a program writes can be run, and a folder of
+    # sockets takes a socket and nothing else.
+    landlocked = None
+    if "landlock" in kinds:
+        made = os.path.join(base, "output", "made.sh")
+        sockets = os.path.join(shown_dir, "sockets")
+        os.makedirs(sockets, exist_ok=True)
+        with open(os.path.join(sockets, "there.txt"), "w", encoding="utf-8") as fh:
+            fh.write("there\n")
+        tried = textwrap.dedent("""\
+            import os, socket, subprocess, sys
+            made, sockets = sys.argv[1], sys.argv[2]
+            def attempt(action):
+                try:
+                    action()
+                    return "yes"
+                except OSError as exc:
+                    return type(exc).__name__
+            with open(made, "w") as fh:
+                fh.write("#!/bin/sh\\necho ran\\n")
+            os.chmod(made, 0o755)
+            ran = attempt(lambda: subprocess.run([made], check=True, capture_output=True))
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            bound = attempt(lambda: sock.bind(os.path.join(sockets, "a.sock")))
+            removed = attempt(lambda: os.remove(os.path.join(sockets, "a.sock")))
+            wrote = attempt(lambda: open(os.path.join(sockets, "new.txt"), "w").close())
+            read = attempt(lambda: open(os.path.join(sockets, "there.txt")).read())
+            print(ran, bound, removed, wrote, read)
+            """)
+        readable, writable, own = sandbox.landlock_paths(base, sandbox.shown(
+            base, sandbox.environment(base, "landlock"))[0])
+        done = subprocess.run([sys.executable, "-c", tried, made, sockets], cwd=base,
+                              capture_output=True, text=True, timeout=60,
+                              preexec_fn=lambda: sandbox.landlock_restrict(
+                                  readable, writable, [sockets], own))
+        landlocked = (done.stdout.split(), done.stderr[-500:])
+
     # Folders on another drive than the system's: WSL puts Windows' program
     # folders on the path, which the sandbox neither shows nor keeps there.
     tools = os.path.join(shown_dir, "drive-tools")
@@ -1160,6 +1197,11 @@ def check_sandbox():
          and {os.sep, home, os.path.dirname(home)} <= set(left) or fail(f"{paths} {left}")),
         ("a run that says it's in a sandbox it isn't in is refused",
          lambda: "says the run is inside bwrap, and it isn't" in claimed or fail(claimed)),
+        ("under Landlock, a program can't run what it wrote, and in a folder of sockets "
+         "makes and removes a socket but neither writes nor reads a file",
+         lambda: landlocked is None and print("  skip  no Landlock here") is None
+         or landlocked[0] == ["PermissionError", "yes", "yes", "PermissionError",
+                              "PermissionError"] or fail(repr(landlocked))),
         ("a folder on another drive (WSL's /mnt/c, /media, a 9p or drvfs mount) is neither "
          "shown from the path nor kept on the path inside, and one on the system's is",
          lambda: drives == ([True, True, True, False, False, False], False, True, False, True,

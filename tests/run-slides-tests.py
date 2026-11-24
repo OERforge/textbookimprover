@@ -5803,6 +5803,25 @@ def case_other_formats_libreoffice(work):
     notes = [b for b in doc["blocks"] if b["t"] == "Div" and "notes" in b["c"][0][1]]
     yield "and its list and notes are read", len(lists) == 1 and len(lists[0]["c"]) == 2 \
         and len(notes) == 1, [b["t"] for b in doc["blocks"]]
+    # Under Landlock, where bubblewrap isn't here or works: LibreOffice
+    # makes its socket in /tmp, which a run gives it alone, and reads what
+    # Debian keeps of it in /var/spool/libreoffice.
+    if sandbox.landlock_version():
+        odp = os.path.join(laidout.projectpaths.of(folder).sources(), "talk.odp")
+        target = os.path.join(folder, "output", "work", "landlock-talk.pptx")
+        temporary = os.path.join(folder, "output", "work", "tmp")
+        os.makedirs(temporary, exist_ok=True)
+        saving = ("import sys; sys.path.insert(0, sys.argv[1]); import decksave; "
+                  "decksave.save(decksave.libreoffice(), sys.argv[2], sys.argv[3])")
+        inside_env = dict(sandbox.environment(folder, "landlock"), TMPDIR=temporary)
+        shown, _ = sandbox.shown(folder, inside_env)
+        code = sandbox.run("landlock", [sys.executable, "-c", saving, os.path.join(ROOT, "lib"),
+                                        odp, target], folder, inside_env, shown,
+                           sandbox.LIBREOFFICE_SOCKETS)
+        yield "under Landlock, LibreOffice saves it too, with /tmp for its socket alone", \
+            code == 0 and os.path.exists(target), code
+    else:
+        print("  skip  no Landlock here, so LibreOffice isn't tried under it")
 
 
 def case_blank_rows(work):
