@@ -10183,7 +10183,8 @@ def case_unsupported(work):
         except ImportError:
             return skip("no pypdf to read the figure's fonts")
         fixed = place(work, "tagged", "plot.pdf")
-        fixed_linked = place(work, "tagged", "shared", "linked.pdf")
+        # Laid over the book, under the figure's own path, through no link.
+        fixed_linked = place(work, "tagged", "figures", "linked.pdf")
         with open(place(work, "plot.pdf"), "rb") as fh:
             unchanged = fh.read() == original
         with open(place(shared, "linked.pdf"), "rb") as fh:

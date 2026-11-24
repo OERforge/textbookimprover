@@ -866,6 +866,39 @@ def check_reads():
     ]
 
 
+def check_figure_names():
+    """A book's PDF figures in a folder it also links to under another
+    name: found by both names, whichever the disk lists first, and each
+    written once, under its own path."""
+    import latexbuild
+    work = scratch("figure-names-")
+    book = os.path.join(work, "book")
+    os.makedirs(os.path.join(book, "figures"))
+    for name in ("plot.pdf", os.path.join("figures", "linked.pdf")):
+        with open(os.path.join(book, name), "wb") as fh:
+            fh.write(b"%PDF-1.4\n")
+    os.symlink("figures", os.path.join(book, "shared"))
+    # A link back up, which the walk mustn't go round.
+    os.symlink("..", os.path.join(book, "figures", "up"))
+    found = latexbuild.figure_pdfs(book)
+    names = ["figures/linked.pdf", "plot.pdf", "shared/linked.pdf"]
+    chosen = latexbuild.figure_names(book, names)
+    reversed_order = latexbuild.figure_names(book, list(reversed(names)))
+    # Every name through a link: the first.
+    os.symlink("shared", os.path.join(book, "again"))
+    linked = latexbuild.figure_names(book, ["shared/linked.pdf", "again/linked.pdf"])
+    return [
+        ("a figure in a linked folder is found by each name that reaches it, and a link "
+         "back up isn't followed round",
+         lambda: found == names or fail(str(found))),
+        ("and written once, under its own path, through no link, in either order",
+         lambda: chosen == ["figures/linked.pdf", "plot.pdf"]
+         and reversed_order == ["plot.pdf", "figures/linked.pdf"]
+         or fail(f"{chosen}, {reversed_order}")),
+        ("or under the first name, where every name goes through a link",
+         lambda: linked == ["shared/linked.pdf"] or fail(str(linked))),
+    ]
+
 def check_move_to_src():
     work = scratch("move-to-src-")
     tool = os.path.join(ROOT, "util", "move-to-src.py")
@@ -11765,6 +11798,7 @@ GROUPS = [
     ("the rule for a name that becomes a folder or a file", check_naming_rule),
     ("a target's stamp, the five digests of what it's built from", check_stamps),
     ("what a part may read, and the links that lead out of it", check_reads),
+    ("a book's PDF figure reached by two names", check_figure_names),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),

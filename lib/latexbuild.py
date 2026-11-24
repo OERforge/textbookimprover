@@ -204,22 +204,49 @@ def figure_pdfs(root, skip=()):
     """The PDFs under root, relative to it, outside the folders skip names
     (absolute paths) and a version control folder: a book's figures, and
     whatever else it keeps as PDF, which unembedded_fonts tells apart. A
-    folder the book links to is followed, once (figs -> ../shared/figs)."""
+    folder the book links to is followed, under each name that reaches
+    it (figs -> shared/figs gives a PDF there twice, once by each), but
+    never into a folder it's already inside, which a link back up would
+    lead round for ever. Each folder's names are taken in sorted order,
+    not the order the disk lists them in."""
     found = []
     skip = {os.path.abspath(s) for s in skip}
-    seen = set()
-    for folder, dirs, files in os.walk(root, followlinks=True):
-        real = os.path.realpath(folder)
-        if real in seen:
-            dirs[:] = []
-            continue
-        seen.add(real)
-        dirs[:] = [d for d in dirs if d not in (".git", ".hg", ".svn")
-                   and os.path.abspath(os.path.join(folder, d)) not in skip]
-        for name in files:
-            if name.lower().endswith(".pdf"):
-                found.append(os.path.relpath(os.path.join(folder, name), root))
+
+    def walk(folder, inside):
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            return
+        for name in names:
+            path = os.path.join(folder, name)
+            if os.path.isdir(path):
+                if name in (".git", ".hg", ".svn") or os.path.abspath(path) in skip:
+                    continue
+                real = os.path.realpath(path)
+                if real not in inside:
+                    walk(path, inside | {real})
+            elif name.lower().endswith(".pdf"):
+                found.append(os.path.relpath(path, root))
+    walk(root, {os.path.realpath(root)})
     return sorted(found)
+
+
+def figure_names(root, names):
+    """Of names (figure_pdfs'), the ones to write, a file that names reach
+    by more than one name (a folder linked under another) written once:
+    under the file's own path, through no link, or the first name where
+    every name goes through one. So what's written doesn't depend on the
+    order a disk lists a folder in, and a folder laid over the book (a
+    source target's) needn't follow a link. In names' order."""
+    groups = {}
+    for name in names:
+        groups.setdefault(os.path.realpath(os.path.join(root, name)), []).append(name)
+    top = os.path.realpath(root)
+    chosen = set()
+    for real, these in groups.items():
+        own = [n for n in these if os.path.normpath(n) == os.path.relpath(real, top)]
+        chosen.add((own or these)[0])
+    return [n for n in names if n in chosen]
 
 
 def writable_path(out_root, name):
@@ -255,7 +282,8 @@ def embed_figure_fonts(root, out_root, names, done=None, workers=4):
     (None when neither is installed, and nothing is written)."""
     import concurrent.futures
     done = {} if done is None else done
-    wanted = [name for name in names if unembedded_fonts(os.path.join(root, name))]
+    wanted = [name for name in figure_names(root, names)
+              if unembedded_fonts(os.path.join(root, name))]
     tool = embedding_tool()
     if not wanted or tool is None:
         return [], wanted, tool
