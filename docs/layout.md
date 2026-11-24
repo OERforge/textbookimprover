@@ -15,7 +15,8 @@ my-book/
   sidecars/
     book/                 the part's sidecars, under their standard names
   upstream/               a publisher's file or folder a part is unpacked from
-  originals/              reserved
+    slides/               a part's decks swapped for their PowerPoint files
+  originals/              what a tool changed in the sources, as it was
   output/                 everything a run writes; safe to delete
     html/  epub/  pdf/    one folder for each target
     packages/cartridge/   one folder for each package
@@ -33,9 +34,9 @@ my-book/
 
 **A part's sidecars** are in `sidecars/<part>/`, each under its standard name (`image-alt.csv`, `table-headers.csv`, and the rest: [Sidecars and reports](sidecars.md)). The `sidecars:` and `reports:` settings name nothing here, and a run stops at either.
 
-**`upstream/`** holds a file or folder as a publisher sent it: a cartridge, an EPUB, a WARC, a CNXML repository. A part whose `from` names one is unpacked from it ([Unpacking](#unpacking-a-part-from-upstream)).
+**`upstream/`** holds a file or folder as a publisher sent it: a cartridge, an EPUB, a WARC, a CNXML repository. A part whose `from` names one is unpacked from it ([Unpacking](#unpacking-a-part-from-upstream)). `upstream/<part>/` holds a part's decks in ODP or `.ppt` once `util/swap-in-pptx.py` has made each one's PowerPoint file the deck, with a record of each ([Decks in other formats](slides.md#editing-such-a-deck-in-powerpoint)); a run doesn't read it.
 
-**`originals/`** is a name kept for files a tool takes out of the sources. Nothing writes there yet.
+**`originals/<part>/`** keeps what a tool changed in a part's sources, as it was, with a record of each change: `util/import-files.py`'s pages and pictures ([below](#bringing-files-into-a-part)). A run doesn't read it.
 
 ## Parts
 

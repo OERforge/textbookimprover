@@ -444,7 +444,9 @@ def save_other_decks(base, alone, looks=(), check_only=False):
     if found.saved:
         say(f"NOTE: {len(found.saved)} deck(s) here are read as the PowerPoint file a run saved "
             f"from each, kept in {kept} ({listing(found.saved)}), the original being as it was "
-            "then: a run saves one again once its original changes.")
+            "then: a run saves one again once its original changes, and an edit made to the "
+            "PowerPoint file is lost then. To edit a deck in PowerPoint, make its PowerPoint "
+            "file the deck: python3 util/swap-in-pptx.py NAME (docs/slides.md).")
     for name, look in found.looks:
         say(f"NOTE: {name} isn't read: {look}, the name it would be saved as, is the decks' "
             "reference document (slides.reference_doc), which isn't a deck.")
@@ -505,7 +507,9 @@ def save_other_decks(base, alone, looks=(), check_only=False):
             "and the sidecars' rows name it. Correct the original, or the sidecars; a run "
             "saves a deck again once its original changes"
             + (f", as {', '.join(again[:4])}{', ...' if len(again) > 4 else ''} had." if again
-               else "."))
+               else ".")
+            + " To edit a deck in PowerPoint instead, make its PowerPoint file the deck: "
+            "python3 util/swap-in-pptx.py NAME (docs/slides.md).")
     for name, target in saved:
         objects = decksave.objects_without_pictures(decksave.saved_path(base, target))
         if objects:

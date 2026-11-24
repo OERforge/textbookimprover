@@ -5617,6 +5617,113 @@ def case_other_formats(work):
             in result.stderr and len(calls()) == asked \
             and not os.path.exists(place(markdown, "lecture.pptx")), result.stderr[-600:]
 
+    # util/swap-in-pptx.py: the PowerPoint file a run saved made the deck.
+    swap = folder_of("swap", "talk.odp")
+    tool = os.path.join(ROOT, "util", "swap-in-pptx.py")
+
+    def swapping(*flags, where=swap):
+        return subprocess.run(["python3", tool, *flags], cwd=where, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL)
+
+    original = place(swap, "talk.odp")
+    stored = os.path.join(swap, "upstream", "slides")
+    result = swapping("talk.odp")
+    yield "swap-in-pptx.py stops on a deck no run has saved yet, changing nothing", \
+        result.returncode == 1 and "no run has saved it as PowerPoint yet" in result.stdout \
+        and os.path.isfile(original) and not os.path.exists(stored), result.stdout[-500:]
+    result = run(swap)
+    asked = len(calls())
+    result = swapping("--dry-run", "talk.odp")
+    yield "with --dry-run it says what it would do, and does nothing", \
+        result.returncode == 0 and "talk.odp: output/work/parts/slides/talk.pptx copied to " \
+        "src/slides/talk.pptx, and talk.odp moved to upstream/slides/talk.odp." in result.stdout \
+        and os.path.isfile(original) and not os.path.exists(place(swap, "talk.pptx")), \
+        result.stdout[-500:]
+    with open(original, "rb") as fh:
+        before = fh.read()
+    with open(kept(swap, "talk.pptx"), "rb") as fh:
+        saved = fh.read()
+    result = swapping("talk.odp")
+    with open(place(swap, "talk.pptx"), "rb") as fh:
+        swapped = fh.read()
+    with open(os.path.join(stored, "talk.odp"), "rb") as fh:
+        moved = fh.read()
+    with open(os.path.join(stored, "replaced-decks.csv"), encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    yield "it copies the run's PowerPoint file into the sources and moves the original to " \
+        "upstream/<part>/, recording both by hash", result.returncode == 0 \
+        and swapped == saved and moved == before and not os.path.exists(original) \
+        and len(rows) == 1 and rows[0]["deck"] == "talk.odp" and rows[0]["now"] == "talk.pptx" \
+        and rows[0]["sha256"] == hashlib.sha256(before).hexdigest() \
+        and rows[0]["now_sha256"] == hashlib.sha256(saved).hexdigest() \
+        and rows[0]["from"] == "output/work/parts/slides/talk.pptx", result.stdout[-500:]
+    result = run(swap)
+    yield "and a run then reads that PowerPoint file as the deck, LibreOffice not asked", \
+        result.returncode == 0 and len(calls()) == asked and "deck(s) here are read as the " \
+        "PowerPoint file" not in result.stderr and "Saved 1 deck" not in result.stderr \
+        and os.path.exists(place(swap, "remediated", "talk.pptx")), result.stderr[-600:]
+    odp_file(original)
+    result = swapping("talk.odp")
+    yield "a deck whose PowerPoint file is among the sources already is left alone", \
+        result.returncode == 1 and "src/slides/talk.pptx is there already" in result.stdout \
+        and os.path.isfile(original), result.stdout[-500:]
+    os.remove(place(swap, "talk.pptx"))
+    result = swapping("talk.odp")
+    yield "and so is one whose original is in upstream/<part>/ already, which is never replaced", \
+        result.returncode == 1 and "upstream/slides/talk.odp is there already" in result.stdout, \
+        result.stdout[-500:]
+    os.remove(original)
+    second = place(swap, "second.odp")
+    odp_file(second)
+    run(swap)
+    with zipfile.ZipFile(second, "a") as zf:
+        zf.writestr("changed.txt", "a change")
+    result = swapping("second.odp")
+    yield "one changed since a run saved it isn't swapped, since the saved file is out of date", \
+        result.returncode == 1 and "the original has changed since a run saved it" \
+        in result.stdout and os.path.isfile(second), result.stdout[-500:]
+    mine = place(work, "mine.pptx")
+    clean_deck(mine)
+    result = swapping("second.odp", "--from", mine)
+    yield "--from takes a PowerPoint file of one's own, and says to check rows keyed by number", \
+        result.returncode == 0 and os.path.isfile(place(swap, "second.pptx")) \
+        and os.path.isfile(os.path.join(stored, "second.odp")) \
+        and "check the sidecars' rows that name a slide or a shape by its number" \
+        in result.stdout, result.stdout[-500:]
+    third = place(swap, "third.odp")
+    odp_file(third)
+    notdeck = place(work, "not-a-deck.pptx")
+    with open(notdeck, "w") as fh:
+        fh.write("text")
+    result = swapping("third.odp", "--from", notdeck)
+    yield "a --from file that isn't a PowerPoint file is refused", result.returncode == 1 \
+        and "isn't a PowerPoint file" in result.stdout and os.path.isfile(third), \
+        result.stdout[-500:]
+    linked = place(swap, "linked.odp")
+    os.symlink(third, linked)
+    result = swapping("linked.odp", "--from", mine)
+    yield "nor is a deck that's a link", result.returncode == 1 and "is a link" \
+        in result.stdout, result.stdout[-500:]
+    os.remove(linked)
+    other = folder_of("swap-other", "talk.odp")
+    run(other)
+    os.makedirs(os.path.join(other, "upstream", "slides"))
+    with open(os.path.join(other, "upstream", "slides", "page.html"), "w") as fh:
+        fh.write("<p>an upstream folder</p>")
+    result = swapping("talk.odp", where=other)
+    yield "an upstream/<part>/ that isn't this tool's is left alone", result.returncode == 1 \
+        and "without this tool's record" in result.stdout \
+        and os.path.isfile(place(other, "talk.odp")), result.stdout[-500:]
+    named = folder_of("swap-named", "talk.odp")
+    run(named)
+    with open(place(named, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  identifier: org.example.named\n  title: Named\n  parts:\n"
+                 "    slides:\n      kind: slides\n      from: upstream/slides/decks.zip\n")
+    result = swapping("talk.odp", where=named)
+    yield "and so is one a part's from names", result.returncode == 1 \
+        and "a part's from names upstream/slides/decks.zip" in result.stdout, \
+        result.stdout[-500:]
+
     # What decksave.py finds for itself.
     plain = place(work, "plan")
     os.makedirs(plain)
