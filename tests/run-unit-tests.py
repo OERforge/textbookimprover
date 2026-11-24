@@ -548,6 +548,80 @@ def check_stamps():
     write(os.path.join(one, "templates", "book.css"), "p { margin: 0 }\n")
     top_missing = stamps.top_digest(one, "book", ["templates/book.css", "templates/gone.css"])
 
+    # The settings files aren't read at the top: what they say is in the
+    # settings digest, by what it resolves to.
+    with open(os.path.join(one, "conversion.yaml"), encoding="utf-8") as fh:
+        settings_text = fh.read()
+    write(os.path.join(one, "conversion.yaml"), "# a comment\n" + settings_text)
+    top_comment = stamps.top_digest(one, "book", ["templates/book.css"])
+    write(os.path.join(one, "conversion.yaml"), settings_text)
+
+    # The files a target's settings name, and what the environment gives
+    # in a setting's place.
+    documents = [oerconfig.load_document(os.path.join(one, name))
+                 for name in ("project.yaml", "conversion.yaml")]
+    named = {target: stamps.named_settings(
+        conversion, oerconfig.resolve(conversion, project_schema, documents,
+                                      target=target).settings, fmt)
+        for target, fmt in (("html", "html"), ("pdf", "pdf"))}
+    variables = (stamps.environment_values("pdf", {"OER_PDF_VIA": "pandoc", "HOME": "/h"}),
+                 stamps.environment_values("html", {"OER_PDF_VIA": "pandoc"}))
+
+    # A link to a folder elsewhere in the project, and one out of it.
+    shared = os.path.join(one, "shared", "figs")
+    write(os.path.join(shared, "a.svg"), "<svg/>\n")
+    os.symlink(os.path.join("..", "..", "shared", "figs"), os.path.join(source, "figs"))
+    outside = os.path.join(work, "outside")
+    write(os.path.join(outside, "b.svg"), "<svg/>\n")
+    os.symlink(outside, os.path.join(source, "away"))
+    linked_before = stamps.tree_digest(source, root=one)
+    unrooted_before = stamps.tree_digest(source)
+    write(os.path.join(shared, "a.svg"), "<svg>changed</svg>\n")
+    write(os.path.join(outside, "b.svg"), "<svg>changed</svg>\n")
+    linked_after = stamps.tree_digest(source, root=one)
+    unrooted_after = stamps.tree_digest(source)
+    write(os.path.join(shared, "a.svg"), "<svg/>\n")
+    write(os.path.join(outside, "b.svg"), "<svg/>\n")
+    out_only = stamps.tree_digest(source, root=one)
+    os.remove(os.path.join(source, "figs"))
+    os.remove(os.path.join(source, "away"))
+
+    # What a run reads of its own files: never through a link, and never
+    # a pipe, in the stamps or the sources.
+    recorded_link = os.path.join(work, "stamps-linked.json")
+    os.mkfifo(os.path.join(source, "pipe"))
+    piped = stamps.tree_digest(source)
+    os.remove(os.path.join(source, "pipe"))
+
+    # --clean's emptying: only an output/ a run made, all but its marker
+    # and the lock, and nothing through a link.
+    import projectpaths
+
+    def refused(call):
+        try:
+            call()
+        except projectpaths.Refused:
+            return True
+        return False
+    made = os.path.join(work, "made")
+    write(os.path.join(made, "src", "book", "a.md"), "# A\n")
+    write(os.path.join(made, "output", "html", "a.html"), "<p>A</p>\n")
+    kept_away = os.path.join(work, "kept-away")
+    write(os.path.join(kept_away, "keep.txt"), "keep\n")
+    unmarked_refused = refused(lambda: projectpaths.clean_output(made))
+    write(os.path.join(made, "output", projectpaths.MARKER), projectpaths.MARKER_TEXT)
+    write(os.path.join(made, "output", "work", "lock"), "1\n")
+    write(os.path.join(made, "output", "work", "parts", "book", "a.json"), "{}\n")
+    os.symlink(kept_away, os.path.join(made, "output", "linked"))
+    emptied = projectpaths.clean_output(made)
+    left = sorted(os.listdir(os.path.join(made, "output"))), \
+        sorted(os.listdir(os.path.join(made, "output", "work")))
+    link_made = os.path.join(work, "link-made")
+    os.makedirs(os.path.join(link_made, "src", "book"))
+    write(os.path.join(kept_away, projectpaths.MARKER), projectpaths.MARKER_TEXT)
+    os.symlink(kept_away, os.path.join(link_made, "output"))
+    link_refused = refused(lambda: projectpaths.clean_output(link_made))
+
     # TextbookImprover's own digest, from a copy of its folders.
     own = os.path.join(work, "own")
     for folder in stamps.OWN_FOLDERS:
@@ -576,6 +650,20 @@ def check_stamps():
     again = stamps.OutlineCache(os.path.join(work, "outlines.json")).digest(toc, reader)
     write(toc, "%PDF-1.7 rebuilt, the same bookmarks\n")
     rebuilt = cache.digest(toc, reader)
+    # Kept by its path in the project: a copied project's cache answers.
+    in_one = os.path.join(one, "output", "pdf", "book.pdf")
+    write(in_one, "%PDF-1.7 one\n")
+    read_in_copy = []
+
+    def counted(path):
+        read_in_copy.append(path)
+        return [(0, "Chapter 1"), (1, "1.1 Sampling")]
+    stamps.OutlineCache(os.path.join(one, "outlines.json"), one).digest(in_one, counted)
+    copied_cache = os.path.join(work, "copied")
+    shutil.copytree(one, copied_cache, symlinks=True)
+    stamps.OutlineCache(os.path.join(copied_cache, "outlines.json"), copied_cache).digest(
+        os.path.join(copied_cache, "output", "pdf", "book.pdf"), counted)
+    copied_reads = len(read_in_copy) - 1
 
     def stamp(settings=html_one, sources=before):
         return stamps.Stamp(settings, sources, top, own_before, stamps.options_digest({}))
@@ -586,6 +674,7 @@ def check_stamps():
         tampered = json.load(fh)
     tampered["sources"] = "0" * 64
     write(recorded + "-t", json.dumps(tampered))
+    os.symlink(recorded, recorded_link)
     write(recorded + "-half", '{"settings": "')
 
     # Each builder of one format reads only the format sections its stamp
@@ -667,6 +756,39 @@ def check_stamps():
          {"textbookimprover", "tools", "packages", "python"}),
         ("each builder of one format reads only the format sections its stamp keeps",
          lambda: not beyond or fail(f"got: {beyond}")),
+        ("a comment in a settings file changes nothing read at the top: the settings "
+         "count by what they resolve to",
+         lambda: top_comment == top),
+        ("the files a target's settings name are its own sections' (the pages' stylesheet "
+         "for the pages, not the PDF), never where it's written or a sidecar's place",
+         lambda: named == {"html": ["templates/book.css"], "pdf": []} or fail(str(named))),
+        ("the environment counts for a PDF in a setting's place, as it's set, and not for "
+         "the pages",
+         lambda: variables == ({"OER_PDF_VIA": "pandoc"}, {}) or fail(str(variables))),
+        ("a link to a folder elsewhere in the project counts what's there; one out of the "
+         "project only where it points",
+         lambda: linked_after != linked_before and unrooted_after == unrooted_before
+         and out_only == linked_before or fail("links")),
+        ("a --toc file's outline is kept by its path in the project, so a copied "
+         "project's cache answers without reading it",
+         lambda: copied_reads == 0 or fail(f"got {copied_reads} reads")),
+        ("why a run builds: nothing recorded, or the parts that changed, named for a "
+         "target or a package",
+         lambda: stamps.why(None, stamp()) == "nothing records an earlier build of it"
+         and stamps.why(back, stamp(settings=html_css, sources=added))
+         == "its settings and its part's sources changed"
+         and stamps.why(back, stamp(sources=added), "package")
+         == "the target it's made from changed"),
+        ("a stamp read through a link is no stamp, and a pipe among the sources is counted "
+         "without being read",
+         lambda: stamps.read_stamp(recorded_link) is None and piped != before
+         and stamps.read_stamp(recorded) is not None),
+        ("--clean empties only an output/ a run made, keeping its marker and the lock, "
+         "deleting a link in it and not what it leads to, and never one that's a link",
+         lambda: unmarked_refused and link_refused and emptied == 3
+         and left == ([projectpaths.MARKER, "work"], ["lock"])
+         and os.path.isfile(os.path.join(kept_away, "keep.txt"))
+         or fail(str((unmarked_refused, link_refused, emptied, left)))),
     ]
 
 

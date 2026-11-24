@@ -67,6 +67,22 @@ Everything a run writes is under `output/`, and nothing there is yours to edit: 
 
 **A target is built beside its folder and swapped in whole.** A run builds each target under `output/work/`, and puts the finished folder in the earlier one's place when that target's build is done. So a build that fails, or a run you stop, leaves each target's folder either as it was or new, never half-written. A target built before the one that failed has its new folder. The next run clears what a stopped one left, and says so if it had to put a folder back.
 
+**A target is built again only when what it's built from has changed.** A run records each target's stamp when it's built: a digest of five things, by their content and not by when a file was saved.
+
+- **Its settings,** as they resolve for it, but for the sections of another format's (`html.*` for an EPUB). So a change to one target's settings rebuilds that target, `html.css` rebuilds the pages and a deck's page and not the EPUB or the PDF, a default every target reads rebuilds them all, and a comment rebuilds nothing. `SOURCE_DATE_EPOCH` counts, and so do `OER_PDF_VIA` and `OER_MEASURES` for a PDF and `REVEALJS_DIR` for a presentation, when they're set.
+- **Its part's sources:** every file under `src/<part>/` but backups (`name~`, `#name#`), Windows' own files, and dot files other than `.latexmkrc`. A folder there that's a link to another folder in the project counts what's in it.
+- **Its sidecars and the files its settings name:** `sidecars/<part>/`, and a stylesheet, template, reference document, header or footer, or `latex.macros` file. Nothing else at the top counts, so notes or a `.git/` there rebuild nothing, and neither does another part's sidecar.
+- **The software:** TextbookImprover itself, Pandoc, and the programs and Python packages that write the target, by version; for a PDF, and every target of a LaTeX book, TeX Live as well.
+- **The options that change it.** None of `convert.py`'s does yet; a package's are below.
+
+A run says which targets are up to date, and for each one it builds, what changed ("html: built, since its part's sources changed."). A part with a target to build is read for all its targets, so its reports cover every one, and only the targets that changed are built (a PowerPoint deck's copies are made whenever the part's other targets are, being made as the decks are read). A part whose targets are all up to date isn't read, so its reports aren't written again, but for the output check's when it's asked for with other options (`--wcag` after a run without): its targets' folders are checked as they are. The stamps are in `output/work/stamps/`, recorded once a part's run ends well, so a target whose build failed, and any the run built before it failed, are built again next time. A project copied or checked out elsewhere has the same stamps, and builds nothing.
+
+**A package likewise.** Its stamp is its packaging settings, the stamp of the `html` target it's made from, and the packager's options that change it: `--zip`, `--include-all-html`, `--no-validate`, and `--toc`, by the file's outline (each entry's level and title) rather than its bytes. So a PDF built again with the same bookmarks doesn't make the cartridge again. `build-cartridge.py` run by hand builds the package whatever its stamp, and deletes the stamp, so the next run builds it too.
+
+**`--rebuild`** builds every target and package whatever its stamp, each beside its folder as always, and keeps what's cached under `output/work/` (the pages Pandoc read, rendered drawings). It's for what a stamp can't see: a font installed, or a program the stamp doesn't ask, updated.
+
+**`--clean`** empties `output/` first, its caches too, and then builds everything. It empties only an `output/` a run made, and never through a link: a link in `output/` is deleted, not what it leads to, and a run refuses an `output/` that is a link or holds files without the mark, as it always does.
+
 **One run at a time.** A run holds a lock while it goes, and a second run started in the same project stops. `build-epub.py`, `build-pdf.py`, and `build-cartridge.py` run by hand hold the same lock, so none of them writes while a run goes, and each makes the run's checks of the folder first. (There's no lock on Windows itself.)
 
 **An `output/` a run didn't make is left alone.** A run marks the `output/` it makes (`output/.textbookimprover`), and stops at one that holds files and has no mark, since it would otherwise delete folders there.

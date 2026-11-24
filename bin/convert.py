@@ -313,7 +313,7 @@ def archive_targets(targets, base):
     for target in targets:
         kind = str(target["archive"] or "none")
         folder = os.path.abspath(target.output_dir)
-        if kind == "none" or not os.path.isdir(folder):
+        if kind == "none" or not os.path.isdir(folder) or target.current:
             continue
         if folder == os.path.abspath(P(base).sources()) or \
                 os.path.abspath(P(base).sources()).startswith(folder + os.sep):
@@ -576,12 +576,22 @@ class Target:
                                             ("markdown", "asciidoc", "docx")
                                             else "split")
         self.pages_dir = None        # where its filtered intermediates are
+        # What it's built from (stamp_targets), where that's recorded, and
+        # whether this run built it.
+        self.stamp = None
+        self.stamp_path = None
+        self.swapped = False
+        self.current = False         # up to date, and not built this run
 
     def put_in_place(self, written=()):
         """The target's folder as this run built it, put where it's kept
         (projectpaths.put_in_place), and written, the files the build
         named in it, as they're named there."""
         built = os.path.abspath(self.output_dir)
+        # Built, and so swapped in: its stamp is recorded once the part's
+        # run has succeeded (record_stamps), never for a folder an
+        # earlier run left.
+        self.swapped = self.swapped or os.path.isdir(built)
         self.output_dir = os.path.normpath(
             P(self.base).put_in_place(self.name, self.resolved["output_dir"]))
         if os.path.abspath(self.output_dir) == built:
@@ -594,6 +604,209 @@ class Target:
         if key in self.derived:
             return self.derived[key]
         return self.resolved[key]
+
+
+# --------------------------------------------------------------------------
+# 0.5 what's built: each target's stamp
+# --------------------------------------------------------------------------
+
+def target_named_files(target, base, schema, latex_book=False):
+    """Each file a target's settings name and its build reads, as the run
+    resolves it: its path settings (a stylesheet, a template, a reference
+    document) in the sections it reads, a header or footer that names a
+    file, and latex.macros. One the settings may not name, or that isn't
+    there, is counted by its path, as missing."""
+    import stamps
+    values = stamps.named_settings(schema, target.resolved.settings, target.format)
+    for key in ("header", "footer"):
+        named = pagefooter.named_file(target[key], base)
+        if named:
+            values.append(named)
+    if target.format in ("pdf", "latex") or latex_book:
+        macros = str(target["latex.macros"] or "").strip()
+        if macros:
+            values.append(macros)
+    found = []
+    for value in values:
+        # One the settings may not name isn't read, here or by the build,
+        # which stops at it; its value is in the settings digest.
+        if os.path.isabs(value):
+            if P(base).inside(value):
+                found.append(value)
+            continue
+        try:
+            found.append(P(base).named(value, PART))
+        except projectpaths.Refused:
+            continue
+    return found
+
+
+def stamp_targets(base, targets, latex_book=False):
+    """Each target's stamp, its five digests (lib/stamps.py), and where
+    it's recorded: settings, the part's sources, what it reads at the
+    project's top, the software, and its options. latex_book for a LaTeX
+    book's, every one of which TeX's programs draw for."""
+    import stamps
+    schema = oerconfig.load_schema(os.path.join(HERE, "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(
+        os.path.join(os.path.dirname(HERE), "lib", "schema-project.yaml"))
+    root = os.path.abspath(P(base).top())
+    sources = stamps.tree_digest(P(base).sources(), allow=stamps.SOURCES_ALLOWED, root=root)
+    # packaging.yaml's project: block, which conversion holds the book's
+    # names to, and reads for them where project.yaml isn't there.
+    packaged = oerconfig.inline_project(P(base).packaging_file()) or {}
+    for target in targets:
+        extra = {"derived": target.derived, "packaging_project": packaged,
+                 "environment": stamps.environment_values(target.format)}
+        target.stamp = stamps.Stamp(
+            settings=stamps.settings_digest(schema, project_schema, target.resolved, root,
+                                            target.format, extra=extra),
+            sources=sources,
+            top=stamps.top_digest(root, PART, target_named_files(target, base, schema,
+                                                                 latex_book)),
+            software=stamps.software_digest(stamps.software(target.format, latex_book)),
+            # No option of this script's changes a target: the packager's
+            # are counted in a package's stamp.
+            options=stamps.options_digest({}))
+        target.stamp_path = P(base).stamp_file(stamps.stamp_name("target", target.name))
+
+
+def target_present(target):
+    """Whether what a target's last build left is where it's kept: its
+    folder, and the archive its archive setting asks for."""
+    if not os.path.isdir(target.place) or os.path.islink(target.place):
+        return False
+    kind = str(target["archive"] or "none")
+    return kind == "none" or os.path.isfile(
+        target.place + (".zip" if kind == "zip" else ".tar.gz"))
+
+
+def targets_to_build(targets, rebuild=False, together=()):
+    """The targets this run builds, and those up to date: a target whose
+    stamp is the one recorded at its last successful build, and whose
+    folder is there, isn't built, unless rebuild (--rebuild). A target of
+    a format in together is built whenever another is, since it's made
+    in the same step as the part's reports (a PowerPoint deck's copies).
+    Each one built is said to be, and why; each up to date is marked
+    current, and its folder left as it is."""
+    import stamps
+    if rebuild:
+        for target in targets:
+            say(f"{target.name}: built, since --rebuild asks for it.")
+        return list(targets), []
+    build, current, why = [], [], {}
+    for target in targets:
+        old = stamps.read_stamp(target.stamp_path)
+        if old is not None and not stamps.changed(old, target.stamp) \
+                and target_present(target):
+            current.append(target)
+        else:
+            build.append(target)
+            why[target.name] = stamps.why(old, target.stamp)
+    if build:
+        for target in [t for t in current if t.format in together]:
+            current.remove(target)
+            build.append(target)
+            why[target.name] = "the part's other targets are, and its copies are made with them"
+    for target in targets:
+        if target.name in why:
+            say(f"{target.name}: built, since {why[target.name]}.")
+    for target in current:
+        target.current = True
+    if current:
+        one = len(current) == 1
+        say("Up to date, and not built: " + ", ".join(t.name for t in current)
+            + (" (its stamp is its last build's; --rebuild builds it anyway)." if one else
+               " (their stamps are their last builds'; --rebuild builds them anyway)."))
+    return build, current
+
+
+def record_stamps(targets):
+    """Each stamp of a target this run built and put in place, recorded
+    once the part's run has succeeded, so a build that fails records
+    none and is tried again next time."""
+    import stamps
+    for target in targets:
+        if target.stamp is not None and target.swapped and target_present(target):
+            stamps.write_stamp(target.stamp_path, target.stamp)
+
+
+def kept_outputs(target):
+    """What the output check reads of a target this run didn't build,
+    from its folder, so the part's report still covers every target:
+    its pages, EPUBs, PDFs, or PowerPoint files."""
+    wanted = {"html": ".html", "revealjs": ".html", "epub3": ".epub", "pdf": ".pdf",
+              "pptx": ".pptx"}.get(target.format)
+    if not wanted or not os.path.isdir(target.place):
+        return []
+    found = []
+    for here, dirs, names in os.walk(target.place):
+        dirs[:] = sorted(d for d in dirs if not os.path.islink(os.path.join(here, d)))
+        found += [os.path.join(here, n) for n in sorted(names)
+                  if n.lower().endswith(wanted) and os.path.isfile(os.path.join(here, n))]
+    return found
+
+
+# What the output check finds depends on, beside the outputs: its flags,
+# and which validators the environment names.
+CHECK_VARIABLES = ("EPUBCHECK_JAR", "VNU_JAR", "VERAPDF", "VERAPDF_WCAG")
+
+
+def check_record(args):
+    """What the part's output check was last run with, as recorded beside
+    the stamps: a run whose targets are all up to date checks them again
+    only when this has changed (recheck_outputs)."""
+    return {"flags": output_check_flags(args, True),
+            "environment": {name: os.environ.get(name) for name in CHECK_VARIABLES}}
+
+
+def check_record_path(base):
+    return P(base).stamp_file(f"check-{PART}.json")
+
+
+def write_check_record(base, args):
+    import stamps
+    stamps._write_json(check_record_path(base), check_record(args))
+
+
+def recheck_outputs(base, targets, args, slides=False):
+    """A part whose targets are all up to date isn't read, and its reports
+    aren't written again, but for the output check's, when it's asked
+    for with other flags or other validators than it was last run with
+    (--wcag after a run without, say): the targets' folders are checked
+    as they are, into the part's report. A part of decks says so, and
+    --rebuild checks them."""
+    import stamps
+    last = stamps.read_json(check_record_path(base))
+    if last == check_record(args) or not os.path.isfile(CHECK_TOOL):
+        return
+    if slides:
+        say("NOTE: the output check isn't run again on the decks' outputs, which are up to "
+            "date; --rebuild builds them and checks them as asked.")
+        return
+    found = {fmt: [p for t in targets if t.format == fmt for p in kept_outputs(t)]
+             for fmt in ("html", "epub3", "pdf")}
+    report = P(base).report(targets[0]["reports.output_check"])
+    command = [sys.executable, CHECK_TOOL, "--report", report] \
+        + output_check_flags(args, any(found.values())) + found["html"]
+    for epub in found["epub3"]:
+        command += ["--epub", epub]
+    for pdf in found["pdf"]:
+        command += ["--pdf", pdf]
+    run(command, check=False)
+    write_check_record(base, args)
+
+
+def kept_losses(report, targets):
+    """The rows of the fidelity report an earlier run wrote for targets
+    this run didn't build, as write_fidelity takes them, so the report
+    still covers them."""
+    names = {t.name for t in targets}
+    if not names or not os.path.isfile(report):
+        return []
+    with open(report, encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        rows = list(csv.reader(fh))
+    return [tuple(row[:4]) for row in rows[1:] if len(row) >= 4 and row[0] in names]
 
 
 def book_sources(base):
@@ -667,6 +880,9 @@ def slides_run(base, decks, targets, project, paths, reports, args, first, archi
         return code
     if not args.check_only and code == 0:
         archive_targets([t for t in targets if t.format == "source"], base)
+        record_stamps(targets)
+        if projectpaths.builds_beside():
+            write_check_record(base, args)
     elif not args.check_only and any(str(t["archive"] or "none") != "none" for t in targets):
         say("NOTE: nothing was archived, since a deck couldn't be read or a copy couldn't be "
             "read back; the copies that were written are in their folders.")
@@ -7085,6 +7301,12 @@ def main():
                         help="read, gate, pre-pass, filter, and write the "
                              "reports, then stop: no output directory is "
                              "written and nothing is packaged")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="build every target and package, whatever its stamp says "
+                             "(as make -B does), keeping the caches in output/work/")
+    parser.add_argument("--clean", action="store_true",
+                        help="empty output/ first, its caches too, and build everything; "
+                             "only an output/ a run made, never through a link")
     parser.add_argument("--allow-unknown-keys", action="store_true",
                         help="report settings this version does not know "
                              "about instead of refusing them")
@@ -7105,6 +7327,10 @@ def main():
                              "in one (check-output.py --verbose)")
     args, passthrough = parser.parse_known_args()
     TRACE = not args.quiet
+    if args.clean and (args.check_only or args.src_status):
+        die(f"--clean empties output/ to build everything, and "
+            f"{'--check-only' if args.check_only else '--src-status'} builds nothing. "
+            "Nothing was converted.")
     if args.verbose and not args.wcag:
         import pdfcheck
         say(pdfcheck.WCAG_ALONE)
@@ -7168,6 +7394,13 @@ def main():
         # output/ is the run's own, and one run at a time writes it.
         projectpaths.claim_output(base)
         projectpaths.lock(base)
+        if args.clean:
+            # Emptied by the run that holds the lock, before anything is
+            # put in it; a part's run that a project's run started finds
+            # it emptied.
+            emptied = projectpaths.clean_output(base)
+            say(f"--clean: output/ is emptied ({emptied} thing(s) in it, caches too), "
+                "and everything is built.")
     # The run's temporary files, and those of every program it starts,
     # are kept in the project and cleared by the next run.
     projectpaths.use_tmp(base, empty=not args.locked)
@@ -7329,6 +7562,24 @@ def main():
                          ("reading_order", "reading-order.csv"),
                          ("languages", "languages.csv")):
         check_sidecar(paths[key], f"sidecars.{key}", default, base)
+    # What's built, once a deck in another format is saved as PowerPoint
+    # beside it and the sidecars are UTF-8: a target whose stamp matches
+    # its last build's isn't, and a part whose targets are all up to date
+    # isn't read, though its package is still asked whether it is.
+    # A part with a target to build is read for all of them, so that its
+    # reports cover every one; the up-to-date ones aren't built.
+    every = list(targets)
+    current = []
+    if projectpaths.builds_beside() and not args.check_only:
+        stamp_targets(base, targets, latex_book_here(base))
+        build, current = targets_to_build(
+            targets, rebuild=args.rebuild,
+            together=("source",) if slides and not DECK_RUN else ())
+        if not build:
+            recheck_outputs(base, every, args, slides=slides)
+            if slides:
+                return 1 if SAVE_FAILED else 0
+            return package_book(base, every, [], project, passthrough, args)
     reports = {key: P(base).report(first[f"reports.{key}"])
                for key in ("table_captions_missing", "image_alt_missing",
                            "bare_links_new", "fidelity",
@@ -7627,6 +7878,8 @@ def main():
         losses = []
         renv = dict(env, HEADER_INCLUDES_FILE=css_header)
         for target in targets:
+            if target.current:
+                continue
             if target.format == "source":
                 written[target.name] = remediate_sources(
                     target, base, docs, paths, env, html_stems,
@@ -7730,7 +7983,7 @@ def main():
         # ---- 5.5 EPUBs, per epub3 target -------------------------------------
         epubs = []
         for target in targets:
-            if target.format != "epub3":
+            if target.format != "epub3" or target.current:
                 continue
             found = os.path.join(work, f"fidelity-{target.name}.tsv")
             if os.path.exists(found):
@@ -7758,7 +8011,7 @@ def main():
         # ---- 5.6 PDFs, per pdf target ----------------------------------------
         pdfs = []
         for target in targets:
-            if target.format != "pdf":
+            if target.format != "pdf" or target.current:
                 continue
             if DECK_RUN:
                 # A PDF per deck, not one of the whole folder.
@@ -7792,7 +8045,7 @@ def main():
         # ---- 5.61 PowerPoint files, per pptx target: a deck's own --------
         pptxs = []
         for target in targets:
-            if target.format == "pptx":
+            if target.format == "pptx" and not target.current:
                 if PPTX_RUN:
                     say(f"WARNING: target {target.name} rebuilds {len(stems)} PowerPoint "
                         f"deck(s) on slides.reference_doc, "
@@ -7810,13 +8063,13 @@ def main():
         # ---- 5.62 reveal.js presentations, per revealjs target -----------
         presentations = []
         for target in targets:
-            if target.format == "revealjs":
+            if target.format == "revealjs" and not target.current:
                 presentations += target.put_in_place(deck_presentations(
                     target, [s for s in stems if s not in hand_stems], base, language))
         # ---- 5.65 LaTeX, per latex target: the PDF target's own LaTeX,
         # a master and a file per chapter, for an author to go on with.
         for target in targets:
-            if target.format != "latex":
+            if target.format != "latex" or target.current:
                 continue
             named, title = name_book_target(target, base,
                                             pages_by_dir[target.pages_dir])
@@ -7832,8 +8085,9 @@ def main():
             if result.returncode:
                 die(f"The LaTeX for target {target.name} wasn't written.")
             target.put_in_place()
-        # After the EPUBs, which report their losses as they're built.
-        write_fidelity(losses, reports["fidelity"])
+        # After the EPUBs, which report their losses as they're built; an
+        # up-to-date target's are the last run's.
+        write_fidelity(kept_losses(reports["fidelity"], current) + losses, reports["fidelity"])
 
         # ---- 5.7 check, per target -------------------------------------------
         # Findings go to one report beside the others and never stop the
@@ -7842,6 +8096,14 @@ def main():
         # as Playwright, for --wcag on pages, may be installed.
         checked = [p for pages in written.values() for p in pages if p.endswith(".html")] \
             + list(presentations)
+        # The targets up to date are checked as their folders hold them,
+        # so the part's report covers every target, not this run's alone.
+        for target in current:
+            kept = kept_outputs(target)
+            if target.format in ("html", "revealjs"):
+                checked += kept
+            elif kept:
+                {"epub3": epubs, "pdf": pdfs, "pptx": pptxs}[target.format].extend(kept)
         command = [sys.executable, CHECK_TOOL, "--report", reports["output_check"]] \
             + output_check_flags(args, bool(checked or epubs or pdfs))
         # A PowerPoint deck's copies were checked before it was converted,
@@ -7864,6 +8126,8 @@ def main():
             command += ["--pptx", pptx]
         if os.path.isfile(CHECK_TOOL):
             run(command, check=False)
+            if projectpaths.builds_beside():
+                write_check_record(base, args)
         if args.wcag and not (checked or epubs or pdfs):
             # After the check's verdict, where the WCAG checks' lines go.
             say("  The WCAG checks not run: the run made no page, EPUB, or PDF.")
@@ -7876,12 +8140,23 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
     if not PPTX_RUN:
         archive_targets(targets, base)
+        record_stamps(targets)
     elif pptx_code == 0:
         archive_targets(pptx_targets, base)
+        record_stamps(pptx_targets)
     elif any(str(t["archive"] or "none") != "none" for t in pptx_targets):
         say("NOTE: nothing was archived, since a deck couldn't be read or a copy couldn't be "
             "read back; what was written is in each target's folder.")
+    return package_book(base, every, targets, project, passthrough, args,
+                        pages_by_dir=pages_by_dir, code=pptx_code)
 
+
+def package_book(base, every, built, project, passthrough, args, pages_by_dir=None, code=0):
+    """The run's last step, its packages: each built by build-cartridge.py
+    from the pages of the html target its includes names, which asks
+    each package's stamp whether it's up to date. every is the part's
+    targets, built those this run built (none when every one was up to
+    date); code is what the run returns otherwise."""
     # ---- 6. the cartridge --------------------------------------------------
     # Handed off to build-cartridge.py, which is read-only with respect to
     # page content and can be run on its own against any directory of
@@ -7894,8 +8169,10 @@ def main():
         # Decks are packaged beside a book, or as a course of their own,
         # once a package can hold more than one target (ROADMAP.md).
         say("Slides aren't packaged yet; each target's folder holds its decks.")
-        return unnamed or pptx_code
-    html_targets = [t for t in targets if t.format == "html"]
+        return unnamed or code
+    # The part's html targets, built this run or up to date, whose pages
+    # are in their folders.
+    html_targets = [t for t in every if t.format == "html"]
     if not os.path.isfile(CARTRIDGE_TOOL) or not html_targets:
         say(f"No {CARTRIDGE_TOOL}, so skipping the manifest."
             if not os.path.isfile(CARTRIDGE_TOOL) else
@@ -7909,7 +8186,7 @@ def main():
                 P(base).packaging_file())
         if unnamed_here:
             contents = project.get("contents") or contents_from_tree(
-                book_tree(project, pages_by_dir[targets[0].pages_dir])[0])
+                book_tree(project, pages_by_dir[built[0].pages_dir])[0])
             path, used = write_project_sample(
                 project, contents, hint_contents=not project.get("contents"))
             say(f"Wrote {path}" + (f", with {', '.join(used)} from "
@@ -7931,7 +8208,8 @@ def main():
             f"{PROJECT_NAME}, or a {PACKAGING_NAME} with a project: block, "
             "would build the cartridge.")
         return unnamed
-    command = ["python3", CARTRIDGE_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS]
+    command = ["python3", CARTRIDGE_TOOL, "-d", base, *PART_ARGS, *BESIDE_ARGS] \
+        + (["--rebuild"] if args.rebuild else [])
     # Each package, one run of the packager. In the layout with src/ the
     # packager finds a package's pages itself, in the folder of the html
     # target its includes names (or the project's first), so this run

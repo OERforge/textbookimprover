@@ -16,6 +16,8 @@ A folder that Google Drive, OneDrive, or Dropbox syncs, reached from WSL under `
 
 ## Troubleshooting
 
+**`Up to date, and not built: html, pdf`, after a change you expected to see** — a target is built again only when what its stamp counts has changed: its settings, its part's sources, its sidecars and the files its settings name, the software by version, and its options ([A project's folders](layout.md#what-a-run-writes)). A font installed, a program updated without its version changing, or a file a template reads that no setting names isn't among them. `convert.py --rebuild` builds every target whatever its stamp; `--clean` empties `output/` first, caches too.
+
 **`import: command not found`, then syntax errors** — a Python script was run with `bash` or `sh` (where ImageMagick is installed, the first error is its `import` program's instead). Everything in `bin/` and `util/` is Python: `python3 $T/bin/convert.py`.
 
 **`/usr/bin/env: 'python3\r': No such file or directory`** — the script has Windows line endings (CRLF), as a file saved by a Windows editor has, or one checked out by Git for Windows with `core.autocrlf` on, and it was run by its own name. `python3 $T/bin/convert.py` runs it all the same. To put the file right, `sed -i 's/\r$//' convert.py`, and `git config --global core.autocrlf input` keeps a later checkout as the repository has it.

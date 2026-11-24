@@ -886,6 +886,216 @@ def case_built_beside(work):
     ]
 
 
+def case_stamps(work):
+    """A target is built again only when what it's built from changed,
+    by content: a second run builds nothing, a chapter its part's
+    targets, a deck the other part's, a sidecar its part's, a stylesheet
+    the pages and not the EPUB, a default every target; a --toc file
+    rebuilt with the same outline repackages nothing; --rebuild builds
+    everything and keeps the caches; --clean empties output/ first, and
+    only an output/ a run made; a build that fails records no stamp; and
+    a project copied elsewhere builds nothing."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text, folder=None):
+        path = os.path.join(folder or work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def build(*options, folder=None, env=None):
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet", *options],
+            cwd=folder or work, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200", TZ="UTC", **(env or {})))
+        said = done.stdout + done.stderr
+        built = set(re.findall(r"^(\w[\w-]*): built, since", said, re.M))
+        current = set()
+        for line in re.findall(r"^Up to date, and not built: ([^(]*) \(", said, re.M):
+            current |= {name.strip() for name in line.split(",")}
+        package = "built" if "Package cartridge: built" in said else \
+            "current" if "Package cartridge: up to date" in said else None
+        return done, built, current, package
+
+    def summary(result):
+        return (result[0].returncode, sorted(result[1]), sorted(result[2]), result[3])
+
+    settings = ("targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+                "  handout:\n    format: html\n    part: slides\n")
+    write("project.yaml", "project:\n  identifier: org.example.stamps\n  title: Stamps\n"
+          "  contents:\n    - one\n    - two\n  parts:\n    book:\n      kind: book\n"
+          "    slides:\n      kind: slides\n")
+    write("conversion.yaml", settings)
+    write("templates/book.css", "p { margin: 0 }\n")
+    write("src/book/one.md", "# One\n\nFirst page.\n")
+    write("src/book/two.md", "# Two\n\nSecond page.\n")
+    write("src/slides/deck.md", "---\ntitle: A Deck\n---\n\n# A slide\n\n- a point\n")
+    write("sidecars/book/image-alt.csv", "Image,Alt,Source,Drafted by,Reviewed\n")
+    first = build()
+    second = build()
+    stamps_kept = sorted(os.listdir(os.path.join(work, "output", "work", "stamps")))
+    # The output check, asked for with other flags, checks the outputs as
+    # they are, once.
+    wcag = build("--wcag")
+    wcag_again = build("--wcag")
+    write("src/book/one.md", "# One\n\nFirst page, again.\n")
+    chapter = build()
+    write("src/slides/deck.md", "---\ntitle: A Deck\n---\n\n# A slide\n\n- another point\n")
+    deck = build()
+    write("sidecars/book/image-alt.csv", "Image,Alt,Source,Drafted by,Reviewed\n"
+          "nothing.png,Nothing,one,me,yes\n")
+    sidecar = build()
+    # The pages' stylesheet for every target: a target of another format
+    # doesn't read html.*.
+    write("conversion.yaml", "defaults:\n  html:\n    css: templates/book.css\n" + settings)
+    css = build()
+    write("templates/book.css", "p { margin: 1em }\n")
+    css_file = build()
+    write("conversion.yaml", "# the same settings, and a comment\n"
+          + read(work, "conversion.yaml"))
+    comment = build()
+    write("conversion.yaml", read(work, "conversion.yaml").replace(
+        "defaults:\n", "defaults:\n  tables:\n    wrap: false\n", 1))
+    default = build()
+
+    # A --toc file rebuilt with the same outline, and then with another.
+    toc = os.path.join(work, "toc")
+    write("one.md", "# One\n\nA body.\n\n# Two\n\nAnother.\n", toc)
+    def outline_file(body):
+        write("one.md", body, toc)
+        subprocess.run(["pandoc", "one.md", "-o", "book.epub", "--metadata", "title=Toc"],
+                       cwd=toc, check=True, capture_output=True,
+                       env=dict(os.environ, SOURCE_DATE_EPOCH="1763251200"))
+    outline_file("# One\n\nA body.\n\n# Two\n\nAnother.\n")
+    toc_file = os.path.join(toc, "book.epub")
+    with_toc = build("--toc", toc_file)
+    outline_file("# One\n\nA different body.\n\n# Two\n\nAnother still.\n")
+    same_outline = build("--toc", toc_file)
+    outline_file("# One\n\nA body.\n\n# Three\n\nAnother.\n")
+    other_outline = build("--toc", toc_file)
+
+    # --rebuild, with a cache kept; --clean, with none.
+    cache = os.path.join(work, "output", "work", "parts", "book", "cached.txt")
+    write(cache, "a cache\n")
+    rebuilt = build("--rebuild")
+    cache_kept = os.path.isfile(cache)
+    cleaned = build("--clean")
+    after_clean = (os.path.isfile(cache), sorted(os.listdir(os.path.join(work, "output"))))
+
+    # A build that fails: a stand-in Pandoc that writes no page of the
+    # html target, after the epub's pages are filtered.
+    write("src/book/two.md", "# Two\n\nSecond page, again.\n")
+    stand_in = os.path.join(os.path.dirname(work), os.path.basename(work) + "-pandoc")
+    os.makedirs(stand_in)
+    with open(os.path.join(stand_in, "pandoc"), "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\ncase \"$*\" in\n  *staging/targets/html/*) exit 7 ;;\nesac\n"
+                 f"exec {shlex.quote(shutil.which('pandoc'))} \"$@\"\n")
+    os.chmod(os.path.join(stand_in, "pandoc"), 0o755)
+    html_stamp = os.path.join(work, "output", "work", "stamps", "target-html.json")
+    with open(html_stamp, encoding="utf-8") as fh:
+        stamp_before = fh.read()
+    failed = build(env={"PATH": stand_in + os.pathsep + os.environ["PATH"]})
+    with open(html_stamp, encoding="utf-8") as fh:
+        stamp_after = fh.read()
+    after_failure = build()
+
+    # The project copied elsewhere.
+    copy = os.path.join(os.path.dirname(work), os.path.basename(work) + "-copy")
+    shutil.copytree(work, copy, symlinks=True)
+    copied = build(folder=copy)
+
+    # --clean refused: output/ a link, and output/ holding files a run
+    # didn't make.
+    linked = os.path.join(os.path.dirname(work), os.path.basename(work) + "-linked")
+    os.makedirs(os.path.join(linked, "src", "book"))
+    write("src/book/one.md", "# One\n", linked)
+    elsewhere = os.path.join(os.path.dirname(work), os.path.basename(work) + "-elsewhere")
+    write("keep.txt", "keep me\n", elsewhere)
+    os.symlink(elsewhere, os.path.join(linked, "output"))
+    through_link = build("--clean", folder=linked)
+    unmarked = os.path.join(os.path.dirname(work), os.path.basename(work) + "-unmarked")
+    os.makedirs(os.path.join(unmarked, "src", "book"))
+    write("src/book/one.md", "# One\n", unmarked)
+    write("output/keep.txt", "keep me\n", unmarked)
+    not_made = build("--clean", folder=unmarked)
+    # The stamps' folder as a link: the run stops before writing there.
+    stamps_folder = os.path.join(copy, "output", "work", "stamps")
+    shutil.rmtree(stamps_folder)
+    os.symlink(elsewhere, stamps_folder)
+    stamps_linked = build(folder=copy)
+    return [
+        ("a first run builds every target and the package, a second nothing, and says so",
+         lambda: summary(first) == (0, ["epub", "handout", "html"], [], "built")
+         and summary(second) == (0, [], ["epub", "handout", "html"], "current")
+         and stamps_kept == ["check-book.json", "check-slides.json", "package-cartridge.json",
+                             "target-epub.json", "target-handout.json", "target-html.json"]
+         or fail(str((summary(first), summary(second), stamps_kept))
+                 + first[0].stderr[-300:])),
+        ("an up-to-date part's outputs are checked again when the check is asked for with "
+         "other flags, once, and its decks' say they aren't",
+         lambda: "Output check:" not in second[0].stderr + second[0].stdout
+         and "Output check: 2 page(s) and 1 EPUB(s)" in wcag[0].stderr + wcag[0].stdout
+         and "the output check isn't run again on the decks' outputs" in wcag[0].stderr
+         and "Output check:" not in wcag_again[0].stderr + wcag_again[0].stdout
+         and summary(wcag) == (0, [], ["epub", "handout", "html"], "current")
+         or fail((wcag[0].stdout + wcag[0].stderr)[-500:])),
+        ("a changed chapter rebuilds its part's targets and the package, and says what "
+         "changed; a changed deck its part's alone",
+         lambda: summary(chapter) == (0, ["epub", "html"], ["handout"], "built")
+         and "html: built, since its part's sources changed." in chapter[0].stderr
+         + chapter[0].stdout
+         and summary(deck) == (0, ["handout"], ["epub", "html"], "current")
+         or fail(str((summary(chapter), summary(deck))))),
+        ("a changed sidecar rebuilds its part's targets",
+         lambda: summary(sidecar) == (0, ["epub", "html"], ["handout"], "built")
+         or fail(str(summary(sidecar)))),
+        ("html.css set, and the stylesheet it names changed, rebuild the pages, the decks' "
+         "too, and not the EPUB; a comment in conversion.yaml rebuilds nothing; a default "
+         "every target",
+         lambda: summary(css) == (0, ["handout", "html"], ["epub"], "built")
+         and summary(css_file) == (0, ["handout", "html"], ["epub"], "built")
+         and summary(comment) == (0, [], ["epub", "handout", "html"], "current")
+         and summary(default) == (0, ["epub", "handout", "html"], [], "built")
+         or fail(str((summary(css), summary(css_file), summary(comment),
+                      summary(default))))),
+        ("--toc repackages the cartridge, a --toc file rebuilt with the same outline "
+         "doesn't, and one with another outline does",
+         lambda: summary(with_toc)[3] == "built" and summary(same_outline)[3] == "current"
+         and summary(other_outline)[3] == "built"
+         or fail(str((summary(with_toc), summary(same_outline), summary(other_outline)))
+                 + same_outline[0].stdout[-300:])),
+        ("--rebuild builds every target and the package and keeps the caches; --clean "
+         "empties output/ first, the caches too, keeping its marker",
+         lambda: summary(rebuilt) == (0, ["epub", "handout", "html"], [], "built")
+         and cache_kept and summary(cleaned) == (0, ["epub", "handout", "html"], [], "built")
+         and "--clean: output/ is emptied" in cleaned[0].stderr + cleaned[0].stdout
+         and not after_clean[0] and ".textbookimprover" in after_clean[1]
+         or fail(str((summary(rebuilt), cache_kept, summary(cleaned), after_clean)))),
+        ("a build that fails records no stamp for the targets it built or didn't, and "
+         "the next run builds them",
+         lambda: failed[0].returncode != 0 and stamp_after == stamp_before
+         and summary(after_failure) == (0, ["epub", "html"], ["handout"], "built")
+         or fail(str((failed[0].returncode, stamp_after == stamp_before,
+                      summary(after_failure))))),
+        ("a project copied elsewhere builds nothing",
+         lambda: summary(copied) == (0, [], ["epub", "handout", "html"], "current")
+         or fail(str(summary(copied)) + copied[0].stderr[-300:])),
+        ("--clean is refused on an output/ that's a link and on one a run didn't make, "
+         "and deletes nothing",
+         lambda: through_link[0].returncode != 0 and not_made[0].returncode != 0
+         and os.path.isfile(os.path.join(elsewhere, "keep.txt"))
+         and os.path.isfile(os.path.join(unmarked, "output", "keep.txt"))
+         and "is a link" in through_link[0].stderr and "wasn't made by a run"
+         in not_made[0].stderr
+         or fail(through_link[0].stderr[-300:] + not_made[0].stderr[-300:])),
+        ("a stamps folder that's a link stops the run, and nothing is written where it leads",
+         lambda: stamps_linked[0].returncode != 0 and "is a link or a file" in
+         stamps_linked[0].stderr and sorted(os.listdir(elsewhere)) == ["keep.txt"]
+         or fail(stamps_linked[0].stderr[-300:] + str(os.listdir(elsewhere)))),
+    ]
+
+
 def case_two_parts(work):
     """A project whose src/ holds a book and decks builds each part in a
     run of its own: each target from its part, each part's reports and
@@ -11632,6 +11842,7 @@ CASES = [
     ("a book laid out with src/book/ and sidecars/book/", case_tree_layout),
     ("a book and its decks in one project, each a part", case_two_parts),
     ("a target built beside its folder and swapped in", case_built_beside),
+    ("a target built again only when what it's built from changed", case_stamps),
     ("two books in one project, each a course of its own", case_two_books),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),

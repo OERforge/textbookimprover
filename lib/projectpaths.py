@@ -423,6 +423,20 @@ class Tree(Project):
             return os.path.join(self._made(*PACKAGE_STAGING, package), str(name))
         return os.path.join(self._made("output", "packages", package), str(name))
 
+    def package_name(self, package=None):
+        """The name a package's folder has: the one given, or the part's
+        default (cartridge, or cartridge-<part>)."""
+        return self._package(package)
+
+    def package_place(self, package=None):
+        """Where a package's folder is kept, built or not."""
+        return self._in("output", "packages", self._package(package))
+
+    def stamp_file(self, name):
+        """Where a target's or a package's stamp is kept, in
+        output/work/stamps/ (lib/stamps.py's stamp_name gives the name)."""
+        return self._in(*STAMPS, str(name))
+
     def run_dir(self, part=None):
         part = self.part(part)
         return self._made("output", "work", "parts", part)
@@ -862,6 +876,7 @@ def forget(folder):
 STAGING = ("output", "work", "staging", "targets")
 PACKAGE_STAGING = ("output", "work", "staging", "packages")
 REPLACED = ("output", "work", "replaced")
+STAMPS = ("output", "work", "stamps")
 _STAGED_IN = ((os.path.join(*STAGING) + os.sep, "output"),
               (os.path.join(*PACKAGE_STAGING) + os.sep, os.path.join("output", "packages")))
 _BESIDE = [False]
@@ -956,10 +971,11 @@ def settle(folder):
         return []
     back = []
     kept = project.top(*REPLACED)
-    for path in (kept, project.top("output", "work", "staging")):
+    for path in (kept, project.top("output", "work", "staging"), project.top(*STAMPS)):
         if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
             raise Refused(f"{os.path.abspath(path)} is a link or a file, where a run keeps "
-                          "the folders it's building. Move it away and run this again.")
+                          "the folders it's building or its stamps. Move it away and run "
+                          "this again.")
     def restore(held, place_in, label):
         for name in sorted(os.listdir(held)):
             was = os.path.join(held, name)
@@ -979,6 +995,39 @@ def settle(folder):
         restore(kept, ("output",), "")
     _delete(project.top("output", "work", "staging"))
     return back
+
+
+def clean_output(folder, nothing="Nothing was converted."):
+    """Empty the project's output/ for --clean, all but its marker and
+    the lock this run holds, and say how many things were in it. Only an
+    output/ a run made, with the marker, after claim_output and lock: one
+    that's a link, or holds files without the marker, is refused there,
+    and here too, so nothing in it is deleted. Nothing is followed through
+    a link: a link inside output/ is deleted, not what it points to."""
+    project = of(folder)
+    if not isinstance(project, Tree):
+        raise Refused(f"--clean empties a project's output/, and {os.path.abspath(folder)} "
+                      f"isn't laid out as one. {nothing}")
+    output = project.top("output")
+    if os.path.islink(output) or not os.path.isdir(output) \
+            or not os.path.isfile(os.path.join(output, MARKER)) \
+            or os.path.islink(os.path.join(output, MARKER)):
+        raise Refused(f"--clean empties only an output/ a run made, which has {MARKER}, "
+                      f"and {os.path.abspath(output)} is a link or has none. {nothing}")
+    emptied = 0
+    for entry in sorted(os.listdir(output)):
+        path = os.path.join(output, entry)
+        if entry == MARKER:
+            continue
+        if entry == "work" and os.path.isdir(path) and not os.path.islink(path):
+            for inner in sorted(os.listdir(path)):
+                if inner != "lock":
+                    _delete(os.path.join(path, inner))
+                    emptied += 1
+            continue
+        _delete(path)
+        emptied += 1
+    return emptied
 
 
 # -- temporary files ---------------------------------------------------------

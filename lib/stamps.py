@@ -16,21 +16,27 @@ the time a file was saved.
         ...build, then...
         stamps.write_stamp(path, stamp)
 
-Nothing calls this yet. It's for the project layout to come, where each
-part's sources are in src/<part>/, its sidecars in sidecars/<part>/, and a
-target is built beside its folder and swapped in: a run will build a
-target only when one of its five digests has changed, and say which.
+convert.py stamps each target this way, and build-cartridge.py each
+package, in a project laid out with src/: each part's sources are in
+src/<part>/, its sidecars in sidecars/<part>/, and a target is built
+beside its folder and swapped in. A run builds a target only when one of
+its five digests has changed, and says which; the stamps are kept in
+output/work/stamps/, one file per target and package.
 
 THE FIVE
 
   settings  the target's settings as resolved, project-wide and its own,
             less every format section but its own, each path relative to
-            the project; and SOURCE_DATE_EPOCH, which isn't a setting but
-            changes the dates inside an output.
+            the project; SOURCE_DATE_EPOCH, which isn't a setting but
+            changes the dates inside an output; and what a run takes from
+            the environment in a setting's place (OUTPUT_VARIABLES). The
+            settings files count here, by what they resolve to, and not
+            by their bytes, so a change to one target's settings rebuilds
+            that target alone.
   sources   every file under the part's folder, by its path there and its
             bytes, but for what SKIPPED says isn't the author's.
-  top       what the target reads outside src/: the three settings files,
-            the part's sidecars, and each file a setting names.
+  top       what the target reads outside src/: the part's sidecars and
+            each file a setting names.
   software  TextbookImprover's own code, Pandoc, and, where a target uses
             them (a PDF, and every target of a LaTeX book), TeX, the
             drawing and PDF programs, LibreOffice, and the Python packages
@@ -91,6 +97,10 @@ OWN_SECTIONS = {
     "revealjs": ("slides",),
 }
 
+# The dot files a part's sources count: a LaTeX book's .latexmkrc, which
+# its build reads.
+SOURCES_ALLOWED = (".latexmkrc",)
+
 # What isn't the author's in a part's folder: an editor's backup
 # (name~), Emacs's autosave (#name#), Windows' thumbnails and folder
 # settings, and the Zone.Identifier stream Windows leaves beside a file
@@ -121,6 +131,37 @@ VERSION_COMMANDS = {
     "pdftex": ["pdftex", "--version"],
     "pdftocairo": ["pdftocairo", "-v"],
     "gs": ["gs", "--version"],
+}
+
+# What a run takes from the environment that changes a target of a
+# format, in place of a setting: the two that reach build-pdf.py (the
+# suites set them, and so may a person), and the copy of reveal.js a
+# presentation is given. Counted in the settings digest when they're
+# set, so a run with one rebuilds what it changes, and the next run
+# without it rebuilds again.
+OUTPUT_VARIABLES = {
+    "pdf": ("OER_MEASURES", "OER_PDF_VIA"),
+    "latex": ("OER_MEASURES", "OER_PDF_VIA"),
+    "revealjs": ("REVEALJS_DIR",),
+}
+# The variables among them that name a folder whose files go into the
+# output (a copy of reveal.js beside the presentations), counted by what
+# the folder holds as well as by its name.
+FOLDER_VARIABLES = ("REVEALJS_DIR",)
+
+# The path settings that don't name a file a target reads: where it's
+# written, and the sidecars' and reports' places, which a run fixes.
+NOT_READ = ("output_dir", "filename", "sidecars", "reports")
+
+# What each of the five is called when a run says why it builds, for a
+# target and for a package.
+NAMES = {
+    "target": {"settings": "its settings", "sources": "its part's sources",
+               "top": "its sidecars or a file its settings name",
+               "software": "the software", "options": "its options"},
+    "package": {"settings": "its packaging settings", "sources": "the target it's made from",
+                "top": "a file its settings name", "software": "the software",
+                "options": "its options"},
 }
 
 # The folders TextbookImprover's own digest is made from.
@@ -161,16 +202,21 @@ def skipped(name, is_folder=False, allow=()):
             or name in SKIPPED_NAMES or name.endswith(":Zone.Identifier"))
 
 
-def tree_entries(folder, allow=()):
+def tree_entries(folder, allow=(), root=None):
     """Each file under folder that the stamp counts, as [path, digest], its
     path relative to folder with / between the names, sorted. A link is
-    counted by where it points and, for a file, by the bytes there too; a
-    link to a folder isn't followed, since the read checks stop a link
-    that leads outside the project and one inside is counted where it
-    leads."""
+    counted by where it points and, for a file, by the bytes there too. A
+    link to a folder inside folder isn't followed, since what it leads to
+    is counted where it is. One to a folder elsewhere in the project, root,
+    has what's there counted under the link's path, so a changed file in
+    it is a change; a link inside that folder is counted by where it
+    points alone. One leading out of the project is counted by where it
+    points, since a run's read checks refuse it."""
     entries = []
     if not os.path.isdir(folder):
         return entries
+    inside = os.path.realpath(folder)
+    top = os.path.realpath(root) if root else None
     for here, dirs, names in os.walk(folder):
         dirs[:] = sorted(d for d in dirs if not skipped(d, True, allow))
         for name in sorted(names) + [d for d in dirs if os.path.islink(os.path.join(here, d))]:
@@ -184,17 +230,29 @@ def tree_entries(folder, allow=()):
                 target = os.readlink(path)
                 content = file_digest(path) if os.path.isfile(path) else ""
                 entries.append([relative, "link:" + target + ":" + content])
-            else:
+                real = os.path.realpath(path)
+                if top and os.path.isdir(path) and not _within(real, inside) \
+                        and _within(real, top):
+                    entries += [[relative + "/" + p, d] for p, d in tree_entries(real, allow)]
+            elif os.path.isfile(path):
                 entries.append([relative, file_digest(path)])
+            else:
+                # A pipe or a device is never read, which would wait
+                # forever or never end.
+                entries.append([relative, "not a file"])
         # A linked folder is counted above, as a link, and not walked.
         dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(here, d))]
     entries.sort()
     return entries
 
 
-def tree_digest(folder, allow=()):
+def _within(path, folder):
+    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
+
+
+def tree_digest(folder, allow=(), root=None):
     """The digest of a part's sources: every file tree_entries counts."""
-    return text_digest(tree_entries(folder, allow))
+    return text_digest(tree_entries(folder, allow, root))
 
 
 # --------------------------------------------------------------------------
@@ -264,26 +322,71 @@ def settings_digest(schema, project_schema, resolved, root, fmt, epoch=None, ext
                                        epoch, extra))
 
 
-SETTINGS_FILES = ("project.yaml", "conversion.yaml", "packaging.yaml")
+def named_settings(schema, settings, fmt):
+    """The value of each path setting a target of this format reads a file
+    by (a stylesheet, a template, a reference document), less those of
+    the format sections it doesn't read and NOT_READ's, as the settings
+    give it, for the caller to resolve."""
+    keep = own_sections(fmt)
+    found = []
+
+    def walk(node, values, top):
+        for name, child in (node.keys or {}).items():
+            if top and (name in NOT_READ or (name in FORMAT_SECTIONS and name not in keep)):
+                continue
+            value = (values or {}).get(name)
+            if child.is_section:
+                if isinstance(value, dict):
+                    walk(child, value, False)
+            elif child.type == "path" and isinstance(value, str) and value.strip():
+                found.append(value)
+            elif child.type == "list" and child.item == "path" and isinstance(value, list):
+                found.extend(v for v in value if isinstance(v, str) and v.strip())
+    walk(schema.root, settings, True)
+    return found
+
+
+def environment_values(fmt, environ=None):
+    """What the environment gives in a setting's place for a target of
+    this format (OUTPUT_VARIABLES), the variables that are set."""
+    environ = os.environ if environ is None else environ
+    found = {}
+    for name in OUTPUT_VARIABLES.get(fmt, ()):
+        if name not in environ:
+            continue
+        found[name] = environ[name]
+        if name in FOLDER_VARIABLES and os.path.isdir(environ[name]):
+            found[name] += ":" + tree_digest(environ[name])
+    return found
 
 
 def top_entries(root, part, named=()):
     """What a target reads outside its part's sources, as [path, digest]:
-    the settings files, the part's sidecars, and each file named (by a
-    setting, resolved), each path relative to root. A file that isn't
-    there is counted as missing, so making it is a change."""
-    entries = []
-    for name in SETTINGS_FILES:
-        path = os.path.join(root, name)
-        entries.append([name, file_digest(path) if os.path.isfile(path) else "missing"])
+    the part's sidecars, and each file named (by a setting, resolved),
+    each path relative to root. A file that isn't there is counted as
+    missing, so making it is a change. The settings files aren't counted
+    here: what they say is the settings digest's, by what it resolves to,
+    so a comment changes nothing and one target's setting rebuilds that
+    target alone."""
     sidecars = os.path.join(root, "sidecars", part)
-    entries += [["sidecars/" + part + "/" + path, digest]
-                for path, digest in tree_entries(sidecars)]
+    return [["sidecars/" + part + "/" + path, digest]
+            for path, digest in tree_entries(sidecars)] + named_entries(root, named)
+
+
+def named_entries(root, named=()):
+    """Each file named, as [path, digest], its path relative to root
+    where it's inside it; one that isn't there is counted as missing."""
+    entries = []
     for path in sorted(set(named)):
         full = path if os.path.isabs(path) else os.path.join(root, path)
         key = _relative(os.path.abspath(full), root)
         entries.append([key, file_digest(full) if os.path.isfile(full) else "missing"])
     return entries
+
+
+def named_digest(root, named=()):
+    """The digest of the files named, for a package's files (top)."""
+    return text_digest(named_entries(root, named))
 
 
 def top_digest(root, part, named=()):
@@ -419,20 +522,19 @@ class OutlineCache:
     346-page tagged PDF of 7.5 MB, with pypdf 6.17.0 (measured
     2026-11-18); hashing the file is quicker."""
 
-    def __init__(self, path):
+    def __init__(self, path, root=None):
         self.path = path
-        try:
-            with open(path, encoding="utf-8") as fh:
-                self.known = json.load(fh)
-            if not isinstance(self.known, dict):
-                self.known = {}
-        except (OSError, ValueError):
+        self.root = root
+        self.known = read_json(path)
+        if not isinstance(self.known, dict):
             self.known = {}
 
     def digest(self, path, reader):
         """The outline digest of the file at path, reader(path) giving its
         entries when they aren't known for its bytes."""
-        key = os.path.abspath(path)
+        # By its path in the project, where it's in one, so a copied
+        # project's cache still answers.
+        key = _relative(os.path.abspath(path), self.root) if self.root else os.path.abspath(path)
         content = file_digest(path)
         known = self.known.get(key)
         if isinstance(known, dict) and known.get("file") == content:
@@ -475,16 +577,47 @@ def changed(old, new):
     return [name for name in PARTS if old.parts.get(name) != new.parts.get(name)]
 
 
+def why(old, new, kind="target"):
+    """Why a target or a package is built, in a few words: it has no stamp
+    from a build, or which of the five changed."""
+    if old is None:
+        return "nothing records an earlier build of it"
+    names = [NAMES[kind][name] for name in changed(old, new)]
+    if not names:
+        return "nothing it's made from changed, but its folder is missing"
+    listed = names[0] if len(names) == 1 else (
+        " and ".join(names) if len(names) == 2 else ", ".join(names[:-1]) + ", and " + names[-1])
+    return listed + " changed"
+
+
 def read_stamp(path):
     """The stamp recorded at path, or None where there's none or it can't
     be read, which builds the target again."""
+    values = read_json(path)
     try:
-        with open(path, encoding="utf-8") as fh:
-            values = json.load(fh)
         stamp = Stamp.from_dict(values)
-    except (OSError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
     return stamp if values.get("stamp") == stamp.digest else None
+
+
+# A stamp is a few hundred bytes, an outline cache a few kilobytes a file.
+LARGEST = 4 << 20
+
+
+def read_json(path):
+    """What a file of the run's own in output/work/ holds, or None where
+    there's none, it can't be read, or it isn't the run's: a link, a
+    pipe or device, or a file too large to be one, each of which a
+    project made elsewhere could hold."""
+    try:
+        if os.path.islink(path) or not os.path.isfile(path) \
+                or os.path.getsize(path) > LARGEST:
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
 
 
 def write_stamp(path, stamp):

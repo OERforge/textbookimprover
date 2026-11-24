@@ -4458,17 +4458,22 @@ def case_unmade_images(work):
 
     # A pdftocairo that fails on every file, as on a PDF it can't read,
     # saying so after a warning and before another error, as pdftocairo
-    # does; each run noted.
+    # does; each run noted but the one that asks its version, for the
+    # targets' stamps.
     runs = work + "-runs.txt"
     with open(place(tools, "pdftocairo"), "w") as fh:
-        fh.write("#!/bin/sh\necho \"$@\" >> %s\n"
+        fh.write("#!/bin/sh\nif [ \"$1\" = -v ]; then echo 'pdftocairo version 0' >&2; "
+                 "exit 0; fi\necho \"$@\" >> %s\n"
                  "echo 'Syntax Warning: May not be a PDF file (continuing anyway)' >&2\n"
                  "echo 'Syntax Error: Couldn'\"'\"'t find trailer dictionary' >&2\n"
                  "echo 'Syntax Error: Couldn'\"'\"'t read xref table' >&2\n"
                  "exit 1\n" % shlex.quote(runs))
     os.chmod(place(tools, "pdftocairo"), 0o755)
     again = work + "-failing"
-    shutil.copytree(work, again, ignore=shutil.ignore_patterns("html", "word", "back"))
+    # A copy of the book alone, without what its run left in output/,
+    # which a copied project would find up to date.
+    shutil.copytree(work, again, ignore=shutil.ignore_patterns("html", "word", "back",
+                                                               "output"))
     failing = convert(again, env=lacking)
     failed_said = failing.stdout + failing.stderr
     failed_page = page_of(again)
@@ -4484,7 +4489,8 @@ def case_unmade_images(work):
             return skip("no pdftocairo to make a PDF image an SVG (sudo apt install "
                         "poppler-utils)")
         if not made_page:
-            shutil.copytree(work, made, ignore=shutil.ignore_patterns("html", "word", "back"))
+            shutil.copytree(work, made, ignore=shutil.ignore_patterns("html", "word", "back",
+                                                                      "output"))
             os.remove(place(tools, "pdftocairo"))
             os.symlink(real, place(tools, "pdftocairo"))
             convert(made, env=lacking)

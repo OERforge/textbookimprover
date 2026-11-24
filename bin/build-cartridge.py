@@ -82,6 +82,7 @@ from bookcontents import (  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import projectpaths  # noqa: E402
+import stamps  # noqa: E402
 
 P = projectpaths.of
 try:
@@ -939,6 +940,56 @@ def build_manifest(config, tree, page_files, common_files):
 # main
 # --------------------------------------------------------------------------
 
+def package_stamp_path(base, package):
+    """Where a package's stamp is kept (lib/stamps.py)."""
+    return P(base).stamp_file(stamps.stamp_name("package", P(base).package_name(package)))
+
+
+def forget_package_stamp(base, package):
+    """A run by hand builds whatever it's asked, which its stamp doesn't
+    record: the stamp goes, so the next run from convert.py builds the
+    package again."""
+    if not hasattr(P(base), "stamp_file"):
+        return
+    path = package_stamp_path(base, package)
+    if os.path.isfile(path) and not os.path.islink(path):
+        os.remove(path)
+
+
+def package_stamp(base, package, found, schema, project_schema, resolved, args):
+    """A package's stamp (lib/stamps.py), and the one recorded at its last
+    build or None: its packaging settings; the stamp of the html target
+    it's made from, which stands for its pages; the files it names; the
+    software; and the options that change it, the --toc file by its
+    outline, so a PDF rebuilt with the same bookmarks changes nothing."""
+    root = os.path.abspath(P(base).top())
+    held = stamps.read_stamp(P(base).stamp_file(stamps.stamp_name("target", found[0]))) \
+        if found else None
+    toc = None
+    if args.toc:
+        reader = epub_outline if args.toc.lower().endswith(".epub") else pdf_outline
+
+        def read(path):
+            # One that can't be read is said so where the outline's used.
+            try:
+                return reader(path)
+            except SystemExit:
+                return [(-1, "no outline")]
+        toc = stamps.OutlineCache(P(base).stamp_file("outlines.json"), root).digest(
+            args.toc, read) if os.path.isfile(args.toc) else "missing"
+    options = {"--toc": toc, "--include-all-html": bool(args.include_all_html),
+               "--zip": bool(args.zip), "--no-validate": bool(args.no_validate)}
+    stamp = stamps.Stamp(
+        settings=stamps.settings_digest(schema, project_schema, resolved, root, "package"),
+        sources=held.digest if held else "none",
+        # What packaging names beside the pages, a thumbnail or a linked
+        # document, once it names any.
+        top=stamps.named_digest(root, ()),
+        software=stamps.software_digest(()),
+        options=stamps.options_digest(options))
+    return stamp, stamps.read_stamp(package_stamp_path(base, package))
+
+
 def build_day(environ=None):
     """The day a manifest gives when modified doesn't say one: the day
     SOURCE_DATE_EPOCH names, in UTC, where it's set, so that a book built
@@ -1010,6 +1061,8 @@ def main():
     # From convert.py, in a run that builds each package beside its
     # folder and swaps it in: write it there.
     parser.add_argument("--beside", action="store_true", help=argparse.SUPPRESS)
+    # From convert.py's --rebuild: build the package whatever its stamp.
+    parser.add_argument("--rebuild", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     why = projectpaths.not_a_project(args.dir)
     if why:
@@ -1225,6 +1278,36 @@ def main():
             if key not in REQUIRED:
                 notes.append(f"manifest.{key} defaulted to {value!r}.")
     config["manifest"] = manifest
+
+    # ---- what's built: the package's stamp -------------------------------
+    # In a run from convert.py, which builds beside, a package whose stamp
+    # is its last build's, and whose folder is there, isn't built again;
+    # run by hand, it is, and the stamp no longer says what's there.
+    stamp = None
+    if not (args.check or args.init or fatal):
+        if args.beside:
+            stamp, old = package_stamp(base, package, found, schema, project_schema,
+                                       resolved, args)
+            name = P(base).package_name(package)
+            place = P(base).package_place(package)
+            there = os.path.isfile(os.path.join(place, "imsmanifest.xml")) and (
+                not args.zip or os.path.isfile(os.path.join(place, manifest["cartridge"])))
+            if not args.rebuild and old is not None and not stamps.changed(old, stamp) \
+                    and there and not os.path.islink(place):
+                print(f"Package {name}: up to date, and not built (its stamp is its last "
+                      "build's; --rebuild builds it anyway).")
+                # The folder it would have been built in, made empty above.
+                folder = os.path.dirname(output_path)
+                while os.path.basename(folder) != "work" and os.path.isdir(folder) \
+                        and not os.path.islink(folder) and not os.listdir(folder):
+                    os.rmdir(folder)
+                    folder = os.path.dirname(folder)
+                return 0
+            print(f"Package {name}: built, since "
+                  + ("--rebuild asks for it" if args.rebuild else
+                     stamps.why(old, stamp, "package")) + ".")
+        else:
+            forget_package_stamp(base, package)
 
     # ---- contents --------------------------------------------------------
     available = set(stems)
@@ -1606,6 +1689,8 @@ def main():
     # Built beside the package's folder, in a run that does: put in its
     # place whole, now that the build is done.
     P(base).put_package_in_place(package)
+    if stamp is not None:
+        stamps.write_stamp(package_stamp_path(base, package), stamp)
     return 0
 
 
