@@ -45,8 +45,10 @@ http: or https: alone, sends no cookie or password, follows up to five
 redirects, each checked again, takes no more than 50 MB, waits no more
 than a minute for each answer, and refuses an address that isn't on the
 public internet (this machine, its network, a link-local address),
-checked before it connects and of the address it connected to. Through a proxy, the
-proxy is what connects, so only the first check is made.
+checked before it connects and of the address it connected to. Through
+a proxy, the proxy is what connects, so only the first check is made. A
+picture asked for over http:, at its own address or a redirect's, is
+fetched with a warning, since anyone on the way could have answered.
 
 A LaTeX book's \\input and pictures, and a Word file's pictures, aren't
 read: a LaTeX book's names are its own to change, and a Word file's
@@ -285,6 +287,7 @@ class Import:
         self.rows = []           # the record's rows
         self.left = []           # what stays as it is, and why
         self.notes = []
+        self.warnings = []       # pictures fetched over http:
 
     def shown(self, path):
         return os.path.relpath(path, self.root).replace(os.sep, "/")
@@ -434,7 +437,16 @@ class Import:
             raise Stop("a picture named by URL; --fetch saves it into the part")
         full = "https:" + url if url.startswith("//") else url
         if full not in self.copies:
-            data = self.fetcher(full)
+            chain = []
+            data = self.fetcher(full, chain=chain)
+            hop = plaintext(chain)
+            if hop:
+                self.warnings.append(
+                    f"{full} was fetched over http:"
+                    + (f" (a redirect, {hop})" if hop != full else "")
+                    + ", not https:, so what came could have been changed on the way: its "
+                    "kind is checked, and what it shows can't be. Use an https: address for "
+                    "it if there is one, or check the picture.")
             found = filekinds.sniff(data[:filekinds.HEAD])
             if found not in filekinds.PICTURES:
                 raise Stop(f"and what it gave is {filekinds.WORDS.get(found, found)}, not a "
@@ -482,6 +494,8 @@ class Import:
                 "its own kind's extension")
         for line in self.left:
             say("LEFT: " + line)
+        for line in self.warnings:
+            say("WARNING: " + line)
         for line in self.notes:
             say("NOTE: " + line)
         if not (self.rows or self.left):
@@ -582,11 +596,15 @@ def checked_connection(secure, allowed):
     return Checked
 
 
-def fetch_url(url, allowed=public, limit=MAX_BYTES, timeout=TIMEOUT):
+def fetch_url(url, allowed=public, limit=MAX_BYTES, timeout=TIMEOUT, chain=None):
     """A picture's bytes, fetched from url: http: or https:, no cookie or
     password, up to five redirects, each address checked, no more than
-    limit bytes. Stop on anything else."""
+    limit bytes. Stop on anything else. chain, a list, is given each URL
+    asked for, the redirects' too, in order (plaintext says whether one
+    was over http:)."""
     for _ in range(REDIRECTS + 1):
+        if chain is not None:
+            chain.append(url)
         parts = urllib.parse.urlsplit(url)
         scheme = parts.scheme.lower()
         if scheme not in ("http", "https"):
@@ -651,6 +669,16 @@ def fetch_url(url, allowed=public, limit=MAX_BYTES, timeout=TIMEOUT):
         finally:
             conn.close()
     raise Stop(f"more than {REDIRECTS} redirects")
+
+
+def plaintext(chain):
+    """The first URL of a fetch's chain asked for over http:, which anyone
+    on the way could have answered for the server, or None when every one
+    was https:."""
+    for url in chain:
+        if urllib.parse.urlsplit(url).scheme.lower() == "http":
+            return url
+    return None
 
 
 def main(argv=None):

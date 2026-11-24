@@ -40,8 +40,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import atexit
+import contextlib
 import hashlib
 import importlib.util
+import io
 import subprocess
 import os
 import csv
@@ -973,8 +975,9 @@ def check_sandbox():
     bubblewrap's and Landlock's, reads the project and what it's shown,
     writes output/ alone, and can't read a file elsewhere, reach a port on
     this machine, or see a variable the run didn't keep; what's shown is
-    never the whole file system, the home folder, or a folder holding it;
-    and a run that says it's inside when it isn't is refused."""
+    never the whole file system, the home folder, or a folder holding it,
+    nor a folder of the path on another drive; and a run that says it's
+    inside when it isn't is refused."""
     import sandbox
     work = scratch("sandbox-")
     base = os.path.join(work, "project")
@@ -1074,20 +1077,30 @@ def check_sandbox():
         return found
     ended = {}
     for kind in kinds:
-        started = subprocess.Popen([sys.executable, launcher, os.path.join(ROOT, "lib"), kind,
-                                    base, shown_dir])
-        for _ in range(100):
-            if sleepers():
-                break
-            time.sleep(0.1)
-        seen = bool(sleepers())
-        started.send_signal(signal.SIGTERM)
-        code = started.wait(timeout=60)
+        # Up to a minute for the program inside to start, on a loaded
+        # machine, and what the run said and how long it took when it
+        # doesn't.
+        said_path = os.path.join(shown_dir, f"launch-{kind}.txt")
+        with open(said_path, "w", encoding="utf-8") as said_fh:
+            began = time.monotonic()
+            started = subprocess.Popen([sys.executable, launcher, os.path.join(ROOT, "lib"),
+                                        kind, base, shown_dir], stdout=said_fh,
+                                       stderr=subprocess.STDOUT)
+            for _ in range(600):
+                if sleepers():
+                    break
+                time.sleep(0.1)
+            seen = bool(sleepers())
+            waited = round(time.monotonic() - began, 1)
+            started.send_signal(signal.SIGTERM)
+            code = started.wait(timeout=60)
         for _ in range(50):
             if not sleepers():
                 break
             time.sleep(0.1)
-        ended[kind] = (seen, code, sleepers())
+        with open(said_path, encoding="utf-8", errors="replace") as fh:
+            said = fh.read()[-1500:]
+        ended[kind] = (seen, code, sleepers(), waited, said)
         for pid in sleepers():
             os.kill(int(pid), signal.SIGKILL)
     home = os.path.realpath(os.path.expanduser("~"))
@@ -1104,6 +1117,26 @@ def check_sandbox():
         os.environ.pop(sandbox.INSIDE, None)
         if saved_inside is not None:
             os.environ[sandbox.INSIDE] = saved_inside
+
+    # Folders on another drive than the system's: WSL puts Windows' program
+    # folders on the path, which the sandbox neither shows nor keeps there.
+    tools = os.path.join(shown_dir, "drive-tools")
+    os.makedirs(tools, exist_ok=True)
+    real_tools = os.path.realpath(tools)
+    saved_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join(["/mnt/c/Windows/System32", tools, "/usr/bin"])
+    try:
+        drives = ([sandbox.on_other_drive(p, mounts) for p, mounts in (
+            ("/mnt/c/Windows", []), ("/media/usb/tools", []), (tools, [(real_tools, "9p")]),
+            ("/usr/bin", [(real_tools, "9p")]), (tools, [(real_tools, "ext4")]),
+            ("/usr/bin", [("/", "9p")]))],
+            real_tools in sandbox.program_folders([(real_tools, "drvfs")]),
+            real_tools in sandbox.program_folders([]),
+            "/mnt/c" in sandbox.environment(base, "bwrap")["PATH"],
+            tools in sandbox.environment(base, "bwrap")["PATH"].split(os.pathsep),
+            "/usr/bin" in sandbox.environment(base, "bwrap")["PATH"].split(os.pathsep))
+    finally:
+        os.environ["PATH"] = saved_path
 
     def each(kind):
         code, found, wrote = results[kind]
@@ -1127,6 +1160,10 @@ def check_sandbox():
          and {os.sep, home, os.path.dirname(home)} <= set(left) or fail(f"{paths} {left}")),
         ("a run that says it's in a sandbox it isn't in is refused",
          lambda: "says the run is inside bwrap, and it isn't" in claimed or fail(claimed)),
+        ("a folder on another drive (WSL's /mnt/c, /media, a 9p or drvfs mount) is neither "
+         "shown from the path nor kept on the path inside, and one on the system's is",
+         lambda: drives == ([True, True, True, False, False, False], False, True, False, True,
+                            True) or fail(repr(drives))),
     ]
 
 
@@ -1650,12 +1687,22 @@ def check_import_files():
             fetched("/big.png", limit=len(png) * 10)
         unsaid = fetched("/unsaid.png", limit=len(png) * 10)
         planned = imports.Import(remote, None, [], True,
-                                 fetcher=lambda url: imports.fetch_url(url, allowed=loopback))
+                                 fetcher=lambda url, **kw: imports.fetch_url(url, allowed=loopback, **kw))
         planned.plan()
+        planned_said = io.StringIO()
+        with contextlib.redirect_stdout(planned_said):
+            planned.report()
         planned.execute()
+        # Each URL asked for, a redirect's too, for the warning of http:.
+        chain = []
+        try:
+            imports.fetch_url(f"http://127.0.0.1:{port}/moved.png",
+                              allowed=lambda address: address.startswith("127."), chain=chain)
+        except imports.Stop:
+            pass
         not_picture = imports.Import(
             project("not-picture", {"src/book/r.md": f"![p](http://127.0.0.1:{port}/page.png)\n"}),
-            None, [], True, fetcher=lambda url: imports.fetch_url(url, allowed=loopback))
+            None, [], True, fetcher=lambda url, **kw: imports.fetch_url(url, allowed=loopback, **kw))
         not_picture.plan()
         # The address connected to is checked too, before a byte is sent,
         # whatever the name resolved to beforehand.
@@ -1743,6 +1790,15 @@ def check_import_files():
         ("and the address it connected to is checked before a byte is sent",
          lambda: "its server is at 127.0.0.1, which isn't on the public internet"
          in peer_refused or fail(peer_refused)),
+        ("a picture fetched over http: is warned of, and one whose address or any redirect "
+         "is http: is found so, one all https: not",
+         lambda: f"WARNING: http://127.0.0.1:{port}/pic.png was fetched over http:, not "
+         "https:, so what came could have been changed on the way" in planned_said.getvalue()
+         and chain == [f"http://127.0.0.1:{port}/moved.png", f"http://127.0.0.2:{port}/pic.png"]
+         and imports.plaintext(["https://a.example/x", "http://b.example/y",
+                                "https://c.example/z"]) == "http://b.example/y"
+         and imports.plaintext(["https://a.example/x", "https://c.example/z"]) is None
+         or fail(repr((planned_said.getvalue(), chain)))),
     ]
 
 

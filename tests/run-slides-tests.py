@@ -5213,7 +5213,7 @@ def case_round_trip(work):
 # format runs without LibreOffice: its arguments logged, and --convert-to
 # pptx --outdir DIR FILE answered with the deck FAKE_SOFFICE_DECK names,
 # copied to DIR under FILE's name; FAKE_SOFFICE_MODE fail exits 1 saying
-# why, nothing exits 0 having written nothing, garbage writes a file that
+# why after Java's warning, nothing exits 0 having written nothing, garbage writes a file that
 # isn't PowerPoint's, and hang starts a program of its own, as soffice
 # starts soffice.bin, its process id in FAKE_SOFFICE_LOG.pid, and waits.
 FAKE_SOFFICE = r'''#!/usr/bin/env python3
@@ -5223,6 +5223,9 @@ with open(os.environ["FAKE_SOFFICE_LOG"], "a") as fh:
     fh.write("\t".join(args) + "\n")
 mode = os.environ.get("FAKE_SOFFICE_MODE", "ok")
 if mode == "fail":
+    # Java's warning first, as LibreOffice gives it on most machines.
+    print("Warning: failed to launch javaldx - java may not function correctly",
+          file=sys.stderr)
     print("Error: source file could not be loaded", file=sys.stderr)
     sys.exit(1)
 if mode == "nothing":
@@ -5437,8 +5440,8 @@ def case_other_formats(work):
         "%s, which isn't a program here: sudo apt install libreoffice-impress. Or save each " \
         "as PowerPoint yourself" % missing in result.stderr, result.stderr[-500:]
     result = run(folder, FAKE_SOFFICE_MODE="fail")
-    yield "a deck LibreOffice can't save is named, saying why, with nothing left beside it, " \
-        "and the rest are read, the run's status 1", \
+    yield "a deck LibreOffice can't save is named, saying why, past its warning about Java, " \
+        "with nothing left beside it, and the rest are read, the run's status 1", \
         result.returncode == 1 and "ERROR: older.ppt couldn't be saved as PowerPoint: " \
         "LibreOffice wrote no PowerPoint file (exit status 1; Error: source file could not be " \
         "loaded; a deck saved with a password can't be, and LibreOffice needs its Impress " \

@@ -49,6 +49,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import ctypes
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -203,13 +204,62 @@ def etc_shown():
                   if n in SHOWN_ETC or n.startswith(ETC_PREFIXES))
 
 
-def program_folders():
+# Mounts of another machine's drives: WSL's of Windows' (drvfs, over 9p),
+# and a virtual machine's shared folder (9p).
+OTHER_DRIVES = ("9p", "v9fs", "drvfs")
+
+
+def _mounts():
+    """(mount point, its file system's type) for each mount, from
+    /proc/self/mounts, its octal escapes read; [] where it can't be read."""
+    if "mounts" not in _CACHE:
+        found = []
+        try:
+            with open("/proc/self/mounts", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    fields = line.split()
+                    if len(fields) >= 3:
+                        point = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)),
+                                       fields[1])
+                        found.append((point, fields[2]))
+        except OSError:
+            pass
+        _CACHE["mounts"] = found
+    return _CACHE["mounts"]
+
+
+_CACHE = {}
+
+
+def on_other_drive(path, mounts=None):
+    """Whether a folder is on another drive than the system's: under /mnt
+    or /media, where WSL mounts Windows' drives and a desktop a removable
+    one, or on a mount of another machine's drive (OTHER_DRIVES). WSL puts
+    Windows' own program folders on the path (/mnt/c/Windows/System32 and
+    the rest): the sandbox shows none of them, and they leave its path, as
+    --allow-read refuses /mnt and /media unless told otherwise."""
+    if not path or not os.path.isabs(path):
+        return False
+    plain = os.path.abspath(path)
+    if any(_under(plain, top) for top in ("/mnt", "/media")):
+        return True
+    real = os.path.realpath(plain)
+    if any(_under(real, top) for top in ("/mnt", "/media")):
+        return True
+    return any(kind in OTHER_DRIVES and point != os.sep and _under(real, point)
+               for point, kind in (_mounts() if mounts is None else mounts))
+
+
+def program_folders(mounts=None):
     """The folders of the programs on the path, and of what a link there
     leads to, outside /usr: a tool installed in the home folder or /opt,
-    reached through a link in ~/.local/bin."""
+    reached through a link in ~/.local/bin. A folder on another drive
+    (on_other_drive) isn't one, and isn't looked into, which under WSL
+    would read Windows' folders over its slow file system on every run."""
     found = []
     for folder in os.environ.get("PATH", "").split(os.pathsep):
-        if not folder or not os.path.isabs(folder) or not os.path.isdir(folder):
+        if not folder or not os.path.isabs(folder) or on_other_drive(folder, mounts) \
+                or not os.path.isdir(folder):
             continue
         real = os.path.realpath(folder)
         if _under(real, "/usr"):
@@ -224,7 +274,8 @@ def program_folders():
             if not os.path.islink(path):
                 continue
             target = os.path.realpath(path)
-            if _under(target, "/usr") or not os.path.exists(target):
+            if _under(target, "/usr") or on_other_drive(target, mounts) \
+                    or not os.path.exists(target):
                 continue
             parent = os.path.dirname(target)
             # A program in a bin/ folder is shown with the install around it.
@@ -341,6 +392,9 @@ def environment(base, kind, extra=()):
     tree is read-only inside."""
     kept = {k: v for k, v in os.environ.items()
             if k in KEPT or k.startswith(KEPT_PREFIXES) or k in extra}
+    if "PATH" in kept:
+        kept["PATH"] = os.pathsep.join(p for p in kept["PATH"].split(os.pathsep)
+                                       if p and not on_other_drive(p))
     work = os.path.realpath(projectpaths.of(base).run_work())
     kept["TEXMFVAR"] = os.path.join(work, "texmf-var")
     kept["XDG_CACHE_HOME"] = os.path.join(work, "cache")

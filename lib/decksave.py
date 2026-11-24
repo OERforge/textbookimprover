@@ -85,6 +85,9 @@ ODP_TYPE = b"application/vnd.oasis.opendocument.presentation"
 # How long one deck may take: LibreOffice saved each of 13 real decks,
 # up to 9 MB, in about two seconds.
 TIMEOUT = 300
+# What LibreOffice says whether it saves a deck or not: its warning that it
+# found no Java, which a save doesn't need.
+NOT_WHY = re.compile(r"javaldx|java may not function", re.I)
 # What each deck saved as PowerPoint was saved from, in the part's work
 # folder: {its PowerPoint name: {"from": the deck, "sha256": its digest}}.
 RECORD = "saved-decks.json"
@@ -304,9 +307,14 @@ def save(program, path, target):
             raise SaveError(f"LibreOffice took more than {TIMEOUT} seconds")
         written = os.path.join(out, powerpoint_name(os.path.basename(path)))
         if not os.path.isfile(written) or not zipfile.is_zipfile(written):
-            said = [line.strip() for line in (stderr.strip() or stdout.strip()).splitlines()
+            said = [line.strip() for line in (stderr + "\n" + stdout).splitlines()
                     if line.strip()]
-            why = ([f"exit status {run.returncode}"] if run.returncode else []) + said[:1]
+            # LibreOffice warns of Java on most machines, saves or not
+            # ("failed to launch javaldx"), so what it said besides is
+            # what says why, up to three lines of it.
+            told = [line for line in said if not NOT_WHY.search(line)]
+            why = ([f"exit status {run.returncode}"] if run.returncode else []) \
+                + (told or said)[:3]
             hint = ("; a deck saved with a password can't be, and LibreOffice needs its Impress "
                     "(libreoffice-impress) for any" if any("could not be loaded" in line
                                                            for line in said) else "")
