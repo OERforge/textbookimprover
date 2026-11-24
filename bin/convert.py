@@ -115,6 +115,7 @@ try:
     import sidecars
     from sidecars import math_keep_rows
     import texreads
+    import filekinds
     import wcag
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
@@ -3641,6 +3642,55 @@ def page_reads(path):
                   if not re.match(r"^[a-zA-Z][\w+.-]*:(?![\\/])|^//|^#", r))
 
 
+def kind_problems(paths, shown):
+    """(stops, slips) for files that aren't what their names say
+    (filekinds): a line for each file another kind of file than its name
+    says, which stops the run, and for each picture of another kind of
+    picture, which it warns of. shown(path) is how a file is named."""
+    stops, slips = [], []
+    for path in paths:
+        found = filekinds.mismatch(path)
+        # A deck's own reading names one that isn't a deck of its kind,
+        # saying what it is, and converts the others (decksave, deckrun).
+        if found is None or found[1] == "deck":
+            continue
+        line = filekinds.said(path, *found, shown=shown(path)) + "."
+        (slips if filekinds.picture_slip(found[0], found[1]) else stops).append(line)
+    return stops, slips
+
+
+def say_kinds(stops, slips):
+    """Warn of the slips, and stop on the rest (kind_problems)."""
+    for line in slips:
+        say(f"WARNING: {line} A program that reads the picture by its bytes shows it, "
+            "but a page or an EPUB declares it by its name: save it under its own kind's "
+            "extension, and name it so.")
+    if stops:
+        for line in stops:
+            say("ERROR: " + line)
+        die(f"Stopping: {len(stops)} file(s) aren't what their names say, and the programs "
+            "that open a picture, a medium, or a source trust its name: a web page saved "
+            "under a picture's name, a program, or an archive is opened as what it isn't. "
+            "Put the file it was meant to be in its place. Nothing was converted.")
+
+
+def check_kinds(base):
+    """Every file among the part's sources whose name this run knows read
+    for its first bytes before any program opens it (filekinds): a
+    picture, a medium, or a source that's another kind of file stops the
+    run, with no way past; a picture of another kind is warned of. Dot
+    names are passed over, as the part's reading passes over them."""
+    project = P(base)
+    folder = project.sources()
+    paths = []
+    for top, folders, files in os.walk(folder):
+        folders[:] = sorted(f for f in folders if not f.startswith(".")
+                            and not os.path.islink(os.path.join(top, f)))
+        paths += [os.path.join(top, n) for n in sorted(files) if not n.startswith(".")]
+    say_kinds(*kind_problems(paths, lambda path: f"src/{PART}/"
+                             + os.path.relpath(path, folder)))
+
+
 def check_reads(base, pages):
     """A page may name only what its part may read (projectpaths'
     unreadable): its own sources, and what the run extracted or rendered
@@ -3654,7 +3704,8 @@ def check_reads(base, pages):
     project = P(base)
     if not hasattr(project, "unreadable"):
         return
-    problems = []
+    problems, made = [], []
+    sources = os.path.realpath(project.sources())
     for page in pages:
         if not os.path.isfile(page):
             continue
@@ -3664,7 +3715,14 @@ def check_reads(base, pages):
                     or re.match(r"^[a-zA-Z]:", name):
                 why = "a full path, where a page names a file from its part's folder"
             else:
-                why = project.unreadable(project.referenced(name))
+                path = project.referenced(name)
+                why = project.unreadable(path)
+                # What the run extracted or rendered for the part, which
+                # check_kinds didn't read among the sources.
+                real = os.path.realpath(path)
+                if not why and os.path.isfile(path) and real not in made \
+                        and not real.startswith(sources + os.sep):
+                    made.append(real)
             if why:
                 stem = os.path.basename(page)
                 stem = stem[:-len(INTERMEDIATE)] if stem.endswith(INTERMEDIATE) else \
@@ -3674,13 +3732,14 @@ def check_reads(base, pages):
                     + f" names {ref}, {why}."
                 if line not in problems:
                     problems.append(line)
-    if not problems:
-        return
-    for line in problems:
-        say("ERROR: " + line)
-    die(f"Stopping: {len(problems)} file(s) a page names are outside what the part "
-        f"reads, its own sources (src/{PART}/). Copy each file into src/{PART}/, keeping "
-        "no link to where it was, and name it there. Nothing was converted.")
+    if problems:
+        for line in problems:
+            say("ERROR: " + line)
+        die(f"Stopping: {len(problems)} file(s) a page names are outside what the part "
+            f"reads, its own sources (src/{PART}/). Copy each file into src/{PART}/, keeping "
+            "no link to where it was, and name it there. Nothing was converted.")
+    top = os.path.realpath(project.top())
+    say_kinds(*kind_problems(made, lambda path: os.path.relpath(path, top)))
 
 
 def media_gate(base, stems, media_rows, report_path, namings=((True, False),)):
@@ -7758,6 +7817,7 @@ def main():
         die(f"Stopping: {len(linked)} link(s) among the part's sources or sidecars lead out of "
             f"them, and a part reads only its own folders (src/{PART}/, sidecars/{PART}/). "
             "Put a copy of each file in the link's place. Nothing was converted.")
+    check_kinds(base)
     import deckrun
     # A deck's reference document beside the decks is their look, not a
     # deck (slides.reference_doc).

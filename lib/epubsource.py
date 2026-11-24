@@ -44,6 +44,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, unquote, urldefrag
 
+import filekinds
+
 NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container",
       "opf": "http://www.idpf.org/2007/opf",
       "dc": "http://purl.org/dc/elements/1.1/",
@@ -56,9 +58,6 @@ PAGE_TYPES = ("application/xhtml+xml", "text/html")
 # shows. A manifest's media-type is the publisher's claim; an exporter
 # that could not fetch an image has been seen to package the server's
 # error page under an image's name and declare it text/html.
-SIGNATURES = ((b"\x89PNG", "image/png"), (b"\xff\xd8\xff", "image/jpeg"),
-              (b"GIF8", "image/gif"), (b"RIFF", "image/webp"),
-              (b"<svg", "image/svg+xml"), (b"<?xml", "image/svg+xml"))
 
 
 class Package:
@@ -166,16 +165,9 @@ class Package:
 
 def sniff(data):
     """The media type the bytes have, or None when they are not something
-    a page can show."""
-    head = data[:256].lstrip()
-    for magic, kind in SIGNATURES:
-        if head.startswith(magic):
-            if kind == "image/webp" and b"WEBP" not in head[:16]:
-                continue
-            if magic == b"<?xml" and b"<svg" not in data[:2048]:
-                continue
-            return kind
-    return None
+    a page can show: PNG, JPEG, GIF, WebP, or SVG, by lib/filekinds.py's
+    reading of their first bytes."""
+    return filekinds.media_type(data[:filekinds.HEAD])
 
 
 REFERENCE = re.compile(

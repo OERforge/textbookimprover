@@ -1096,6 +1096,76 @@ def case_stamps(work):
     ]
 
 
+def case_kinds(work):
+    """A file whose first bytes aren't what its name says stops the run
+    before any program opens it: a web page under a picture's name a page
+    names, a program among the sources no page names, a Word file that's
+    text, and a Word file's own picture that's a web page, which the run
+    extracts; a PNG named .jpg is warned of, and the run goes on."""
+    def fail(message):
+        raise AssertionError(message)
+
+    def project(name, files):
+        folder = os.path.join(work, name)
+        for path, data in dict({"project.yaml": b"project:\n  identifier: org.example.kinds\n"
+                                b"  title: Kinds\n",
+                                "conversion.yaml": b"targets:\n  html:\n    format: html\n"},
+                               **files).items():
+            full = os.path.join(folder, path)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "wb") as fh:
+                fh.write(data)
+        done = subprocess.run(
+            ["python3", os.path.join(BIN, "convert.py"), "--quick", "--quiet"],
+            cwd=folder, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        return folder, done, done.stdout + done.stderr
+
+    html = b"<!DOCTYPE html><html><body><form>Sign in</form></body></html>\n"
+    page, page_run, page_said = project("page", {
+        "src/book/one.md": b"# One\n\n![a picture](assets/signin.png)\n",
+        "src/book/assets/signin.png": html})
+    loose, loose_run, loose_said = project("loose", {
+        "src/book/one.md": b"# One\n\nWords.\n",
+        "src/book/assets/tool.gif": b"\x7fELF\x02\x01\x01" + b"\x00" * 32})
+    word, word_run, word_said = project("word", {"src/book/one.docx": b"Not a Word file.\n"})
+    with zipfile.ZipFile(os.path.join(FIXTURES, "media-a.docx")) as source:
+        parts = {item.filename: source.read(item.filename) for item in source.infolist()}
+    parts["word/media/image1.png"] = html
+    held = io.BytesIO()
+    with zipfile.ZipFile(held, "w", zipfile.ZIP_DEFLATED) as copy:
+        for name, data in parts.items():
+            copy.writestr(name, data)
+    inner, inner_run, inner_said = project("inner", {"src/book/media-a.docx": held.getvalue()})
+    png = b"\x89PNG\r\n\x1a\n" + bytes.fromhex(
+        "0000000d4948445200000001000000010806000000"
+        "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+    slip, slip_run, slip_said = project("slip", {
+        "src/book/one.md": b"# One\n\n![a picture](assets/dot.jpg)\n",
+        "src/book/assets/dot.jpg": png})
+    stopped = "aren't what their names say"
+    return [
+        ("a web page under a picture's name a page names stops the run, naming it, and "
+         "nothing is built",
+         lambda: page_run.returncode != 0 and "ERROR: src/book/assets/signin.png is named as "
+         "a PNG picture, and its first bytes are a web page (HTML)." in page_said
+         and stopped in page_said and not os.path.exists(os.path.join(page, "output", "html"))
+         or fail(page_said[-600:])),
+        ("so does a program among the sources that no page names, and a Word file that's text",
+         lambda: loose_run.returncode != 0 and word_run.returncode != 0
+         and "src/book/assets/tool.gif is named as a GIF picture, and its first bytes are a "
+         "program (ELF)." in loose_said
+         and "src/book/one.docx is named as a Word file, and its first bytes are text."
+         in word_said or fail(loose_said[-400:] + word_said[-400:])),
+        ("and a Word file's own picture that's a web page, as the run extracts it",
+         lambda: inner_run.returncode != 0 and "image1.png is named as a PNG picture, and its "
+         "first bytes are a web page (HTML)." in inner_said and stopped in inner_said
+         or fail(inner_said[-600:])),
+        ("a PNG named .jpg is warned of, and the run goes on",
+         lambda: slip_run.returncode == 0 and "WARNING: src/book/assets/dot.jpg is named as a "
+         "JPEG picture, and its first bytes are a PNG picture." in slip_said
+         or fail(slip_said[-600:])),
+    ]
+
 def case_latex_reads(work):
     """The LaTeX a book supplies reads only what its part may: a page's raw
     LaTeX naming a file outside stops the PDF before LaTeX runs, naming
@@ -12132,6 +12202,7 @@ CASES = [
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),
+    ("a file that isn't what its name says stops the run", case_kinds),
     ("two books in one project, each a course of its own", case_two_books),
     ("an HTML source", case_html_source),
     ("an AsciiDoc source", case_asciidoc),

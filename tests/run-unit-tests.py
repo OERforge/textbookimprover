@@ -866,6 +866,79 @@ def check_reads():
     ]
 
 
+def check_filekinds():
+    """What a file is by its first bytes, and whether that's what its name
+    says (lib/filekinds.py), on bytes written here."""
+    import filekinds
+    import epubsource
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+    heads = {
+        "png": png, "jpeg": b"\xff\xd8\xff\xe0\x00\x10JFIF", "gif": b"GIF89a\x01\x00",
+        "webp": b"RIFF\x24\x00\x00\x00WEBPVP8 ", "svg": b"\xef\xbb\xbf<?xml version='1.0'?>\n"
+        b"<!-- made by hand -->\n<svg xmlns='http://www.w3.org/2000/svg'/>",
+        "pdf": b"%PDF-1.7\n%\xe2\xe3", "postscript": b"%!PS-Adobe-3.0 EPSF-3.0\n",
+        "tiff": b"II*\x00\x08\x00", "zip": b"PK\x03\x04\x14\x00", "ole":
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "html": b"\n  <!DOCTYPE html><html><body>",
+        "elf": b"\x7fELF\x02\x01", "pe": b"MZ\x90\x00" + b"\x00" * 56 + b"\x40\x00\x00\x00"
+        + b"PE\x00\x00", "script": b"#!/bin/sh\nrm -rf ~\n", "empty": b"",
+        "mp4": b"\x00\x00\x00\x18ftypmp42", "ogg": b"OggS\x00\x02",
+    }
+    sniffed = {kind: filekinds.sniff(head) for kind, head in heads.items()}
+    # Text that begins as a short signature does, and stays text.
+    text = [filekinds.sniff(t) for t in (b"MZ is a word\n", b"BMI over time\n",
+                                         b"ID3 tags\n", b"BZh then text\n",
+                                         b"%!TEX program = lualatex\n", b"Words.\n")]
+    work = scratch("filekinds-")
+
+    def write(name, data):
+        path = os.path.join(work, name)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+    files = {
+        "page.png": heads["html"], "real.png": png, "slip.jpg": png,
+        "shell.svg": heads["script"], "nothing.png": b"\x00\x01\x02\x03",
+        "empty.png": b"", "late.pdf": b"junk before\n%PDF-1.4\n",
+        "book.md": heads["zip"], "word.docx": b"plain text\n", "deck.pptx": heads["zip"],
+        "book.tex": b"%!TEX program = lualatex\n\\documentclass{book}\n",
+        "page.html": heads["html"], "clip.mp4": heads["html"], "data.xyz": heads["elf"],
+    }
+    found = {name: filekinds.mismatch(write(name, data)) for name, data in files.items()}
+    said = filekinds.said("src/book/page.png", *found["page.png"])
+    media = {kind: epubsource.sniff(heads[kind]) for kind in ("png", "jpeg", "gif", "webp",
+                                                              "svg", "pdf", "html")}
+    return [
+        ("each kind is known by its first bytes: pictures, a PDF, PostScript, archives, an "
+         "old Office file, a web page, programs, a script, media, and an empty file",
+         lambda: all(sniffed[k] == k for k in heads) or fail(str(sniffed))),
+        ("text that begins as a short signature does is text: MZ, BM, ID3, BZh, and TeX's "
+         "%!TEX line among them",
+         lambda: text == ["text", "text", "text", "text", "postscript", "text"]
+         or fail(str(text))),
+        ("a web page, a script, nothing known, and an empty file under a picture's name, a "
+         "medium's, or a source's are found, and a PNG named .jpg is a picture of another "
+         "kind",
+         lambda: found["page.png"][0] == "html" and found["shell.svg"][0] == "script"
+         and found["nothing.png"][0] is None and found["empty.png"][0] == "empty"
+         and found["book.md"][0] == "zip" and found["word.docx"][0] == "text"
+         and found["clip.mp4"][0] == "html"
+         and filekinds.picture_slip(*found["slip.jpg"][:2])
+         and not filekinds.picture_slip(*found["page.png"][:2])
+         or fail(str(found))),
+        ("and what's what its name says isn't: a picture, a PDF whose header follows other "
+         "bytes, a deck, LaTeX beginning with %!TEX, a page, and a name the table doesn't know",
+         lambda: not any(found[n] for n in ("real.png", "late.pdf", "deck.pptx", "book.tex",
+                                            "page.html", "data.xyz")) or fail(str(found))),
+        ("each is said by its name and its bytes",
+         lambda: said == "src/book/page.png is named as a PNG picture, and its first bytes "
+         "are a web page (HTML)" or fail(said)),
+        ("epubsource.sniff gives the media type of a picture a page can show, and nothing "
+         "for another kind",
+         lambda: media == {"png": "image/png", "jpeg": "image/jpeg", "gif": "image/gif",
+                           "webp": "image/webp", "svg": "image/svg+xml", "pdf": None,
+                           "html": None} or fail(str(media))),
+    ]
+
 def check_texreads():
     """The scan of the LaTeX a book supplies, and LaTeX's own list of what
     it opened (lib/texreads.py), on text and files written here."""
@@ -11934,6 +12007,7 @@ GROUPS = [
     ("a book's PDF figure reached by two names", check_figure_names),
     ("the LaTeX a book supplies, scanned, and LaTeX's own list of what it opened",
      check_texreads),
+    ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("util/move-to-src.py, on each layout today's books use", check_move_to_src),
     ("lib/projectpaths.py, where a project's files are", check_project_paths),
     ("a report's rows", check_report_rows),
