@@ -938,6 +938,70 @@ def case_build_record_latex(work):
     ]
 
 
+def case_people_cartridge(work):
+    """The book's people in the cartridge's manifest: the authors as
+    author, the adapters and then the editors as editor, the publisher as
+    publisher with the date, each a vCard with the name's parts, the
+    affiliation, and the iD; a name's comma and semicolon escaped and its
+    ampersand the XML's; and the manifest valid against Common Cartridge
+    1.1."""
+    import importlib.util
+    import xml.etree.ElementTree as ET
+
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    write("project.yaml", "project:\n  identifier: org.example.people\n  title: People\n"
+          "  authors:\n    - name: 'Szarka, Robert; Jr.'\n      given: Robert\n"
+          "      family: Szarka\n      orcid: 0000-0002-1825-0097\n"
+          "      affiliation: {name: Shepherd University, ror: 05dxps055}\n"
+          "    - B. Writer & Co\n  adapters: [Ana Adapter]\n  editors: [E. Ditor]\n"
+          "  contributors:\n    - {name: Ill Ustrator, role: ill}\n"
+          "  publisher: {name: OERforge Press, ror: 02mhbdp94}\n  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n")
+    write("src/book/one.md", "# One\n\nText.\n")
+    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
+                           "--quiet"], cwd=work, capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    manifest = os.path.join(work, "output", "packages", "cartridge", "imsmanifest.xml")
+    found = []
+    if os.path.isfile(manifest):
+        ns = {"l": "http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest"}
+        root = ET.parse(manifest).getroot()
+        for contribute in root.iterfind(".//l:lifeCycle/l:contribute", ns):
+            found.append((contribute.findtext("l:role/l:value", "", ns),
+                          [e.text for e in contribute.iterfind("l:entity", ns)],
+                          contribute.findtext("l:date/l:dateTime", "", ns)))
+    spec = importlib.util.spec_from_file_location(
+        "validator", os.path.join(BIN, "validate-manifest.py"))
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    valid = validator.validate_with_schema(manifest) if os.path.isfile(manifest) else (False, [])
+    roles = [role for role, _, _ in found]
+    first = found[0][1] if found else []
+    return [
+        ("each kind of person a contribute in its role, the publisher's dated",
+         lambda: done.returncode == 0 and roles == ["author", "editor", "editor", "publisher"]
+         and [len(e) for _, e, _ in found] == [2, 1, 1, 1] and found[-1][2]
+         and not found[0][2] or fail(repr(found) + done.stderr[-400:])),
+        ("an author's vCard with the name escaped, its parts, the affiliation, and the iD",
+         lambda: first and first[0] == "BEGIN:VCARD\nVERSION:3.0\nFN:Szarka\\, Robert\\; Jr."
+         "\nN:Szarka;Robert;;;\nORG:Shepherd University\n"
+         "URL:https://orcid.org/0000-0002-1825-0097\nEND:VCARD"
+         and "FN:B. Writer & Co\nN:;;;;" in first[1] or fail(repr(first))),
+        ("the publisher's vCard its name as ORG and its ROR ID as URL",
+         lambda: found and "ORG:OERforge Press\nURL:https://ror.org/02mhbdp94" in found[-1][1][0]
+         or fail(repr(found))),
+        ("the manifest valid against Common Cartridge 1.1",
+         lambda: valid is None or valid[0] or fail(repr(valid))),
+    ]
+
+
 def case_build_record_packages(work):
     """The build record says how a package's pages were placed: with
     --include-all-html, a page contents doesn't name put under the
@@ -12957,6 +13021,7 @@ CASES = [
     ("the build record, of what LaTeX built a PDF with", case_build_record_latex),
     ("the build record, of how a package's pages were placed", case_build_record_packages),
     ("the build record, of a program a limit stopped", case_build_record_stops),
+    ("the book's people in the cartridge", case_people_cartridge),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

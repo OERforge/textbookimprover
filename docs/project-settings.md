@@ -26,7 +26,7 @@ A sentence or two about the book, used wherever a package format asks for one.
 
 **`publisher`**—`organization`; default `""` (empty)
 
-Who published the book: a name, or a mapping with name and ror, the organization's ROR ID (https://ror.org/05dxps055 or 05dxps055), checked for its checksum. An EPUB records the name as its publisher.
+Who published the book: a name, or a mapping with name and ror, the organization's ROR ID (https://ror.org/05dxps055 or 05dxps055), checked for its checksum. An EPUB records the name as its publisher, and a cartridge's manifest the publisher, with the date.
 
 **`license`**—`string`; default `""` (empty)
 
@@ -38,19 +38,19 @@ Number the book's structure the way a printed book does: groups and top-level pa
 
 **`authors`**—`list`; default `[]`
 
-Who wrote the book, one entry each: a name, as a reader should see it, or a mapping with name and, as you like, given and family (the parts of the name, which nothing works out for you), orcid (an ORCID iD, 0000-0002-1825-0097 or its address, checked for its check digit), and affiliation (a name, or a mapping with name and ror). An EPUB records each as a creator, an author, filed under "family, given" where both are given; a PDF names each as its author. For an OpenStax book the publisher is usually the right entry.
+Who wrote the book, one entry each: a name, as a reader should see it, or a mapping with name and, as you like, given and family (the parts of the name, which nothing works out for you), orcid (an ORCID iD, 0000-0002-1825-0097 or its address, checked for its check digit), and affiliation (a name, or a mapping with name and ror). An EPUB records each as a creator, an author, filed under "family, given" where both are given; a PDF names each as its author; a cartridge's manifest gives each, as a vCard, as an author. For an OpenStax book the publisher is usually the right entry.
 
 **`adapters`**—`list`; default `[]`
 
-Who adapted another's book into this one, each written as an author is. An EPUB records each as a creator, an adapter, after the authors.
+Who adapted another's book into this one, each written as an author is. An EPUB records each as a creator, an adapter, after the authors; a cartridge's manifest as an editor, the nearest of its roles.
 
 **`editors`**—`list`; default `[]`
 
-Who edited the book, each written as an author is. An EPUB records each as a creator, an editor, after the adapters.
+Who edited the book, each written as an author is. An EPUB records each as a creator, an editor, after the adapters, and a cartridge's manifest as an editor.
 
 **`contributors`**—`list`; default `[]`
 
-Who else had a hand in the book, each a mapping written as an author's is, with a role: a MARC relator, by its code (ill) or its term (illustrator), from the Library of Congress's list (https://www.loc.gov/marc/relators/relaterm.html). An EPUB records each as a contributor in that role.
+Who else had a hand in the book, each a mapping written as an author's is, with a role: a MARC relator, by its code (ill) or its term (illustrator), from the Library of Congress's list (https://www.loc.gov/marc/relators/relaterm.html). An EPUB records each as a contributor in that role; a cartridge's manifest has no place for one.
 
 **`passthrough`**—`path`; default `_pt`
 

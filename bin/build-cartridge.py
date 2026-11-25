@@ -82,6 +82,7 @@ from bookcontents import (  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import archivedates  # noqa: E402
+import people  # noqa: E402
 import projectpaths  # noqa: E402
 import stamps  # noqa: E402
 import texreads  # noqa: E402
@@ -733,12 +734,7 @@ MANIFEST_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
         <lomimscc:language>{language}</lomimscc:language>
 {keywords}      </lomimscc:general>
       <lomimscc:lifeCycle>
-        <lomimscc:contribute>
-          <lomimscc:date>
-            <lomimscc:dateTime>{modified}</lomimscc:dateTime>
-          </lomimscc:date>
-        </lomimscc:contribute>
-      </lomimscc:lifeCycle>
+{contributes}      </lomimscc:lifeCycle>
     </lomimscc:lom>
   </metadata>
   <organizations>
@@ -864,6 +860,42 @@ PARTS = {}      # piece stem -> (source stem, part number, parent titles)
 ROLES = {}      # page stem -> role, for a page that was not split
 
 
+def contributes(project, modified):
+    """The manifest's lifeCycle: a contribute for each kind of the book's
+    people, its role one of the fifteen the CC 1.1 profile takes, and each
+    person or organization an entity, a vCard (lib/people.py). The
+    authors are author; the adapters, then the editors, editor, the
+    nearest the profile has for an adapter; and the publisher publisher,
+    with the date, which a book with no publisher gives a contribute of
+    its own, as before. Contributors in other roles have none of the
+    profile's that fits, and aren't written."""
+    def contribute(role, entities, date=None):
+        out = "        <lomimscc:contribute>\n"
+        if role:
+            out += ("          <lomimscc:role>\n"
+                    f"            <lomimscc:value>{role}</lomimscc:value>\n"
+                    "          </lomimscc:role>\n")
+        for entity in entities:
+            out += f"          <lomimscc:entity>{xml_escape(entity)}</lomimscc:entity>\n"
+        if date:
+            out += ("          <lomimscc:date>\n"
+                    f"            <lomimscc:dateTime>{date}</lomimscc:dateTime>\n"
+                    "          </lomimscc:date>\n")
+        return out + "        </lomimscc:contribute>\n"
+    out = ""
+    for key, role in (("authors", "author"), ("adapters", "editor"), ("editors", "editor")):
+        entities = [people.vcard(person) for person in project.get(key) or []
+                    if people.name(person)]
+        if entities:
+            out += contribute(role, entities)
+    publisher = project.get("publisher")
+    if people.name(publisher):
+        out += contribute("publisher", [people.vcard(publisher, organization=True)], modified)
+    else:
+        out += contribute(None, [], modified)
+    return out
+
+
 def build_manifest(config, tree, page_files, common_files):
     """Assemble imsmanifest.xml.
 
@@ -894,8 +926,9 @@ def build_manifest(config, tree, page_files, common_files):
         description=xml_escape(manifest.get("description", "")),
         language=xml_escape(manifest.get("language", "en")),
         version=xml_escape(str(manifest.get("version", "1.0"))),
-        modified=manifest.get("modified") or build_day(),
         keywords=keywords,
+        contributes=contributes(config.get("project") or {},
+                                manifest.get("modified") or build_day()),
     )
 
     organization = config.get("organization") or {}

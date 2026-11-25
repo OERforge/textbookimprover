@@ -47,6 +47,9 @@ ORCID_RE = re.compile(r"^(?:https?://orcid\.org/)?(\d{4})-?(\d{4})-?(\d{4})-?(\d
 # (no i, l, o, or u), and two digits of checksum.
 ROR_RE = re.compile(r"^(?:https?://ror\.org/)?(0[0-9a-hjkmnp-tv-z]{6})(\d{2})$", re.I)
 CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz"
+# A control character has no place in a name, and breaks the XML and the
+# vCards a name is written into.
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 PERSON_KEYS = ("name", "given", "family", "orcid", "affiliation")
 CONTRIBUTOR_KEYS = PERSON_KEYS + ("role",)
@@ -199,6 +202,36 @@ def file_as(entry):
     return None
 
 
+def _vcard_text(text):
+    """text escaped as a vCard's value is (RFC 2426, 4: a backslash, a
+    comma, and a semicolon each after a backslash)."""
+    return re.sub(r"([\\,;])", r"\\\1", str(text))
+
+
+def vcard(entry, organization=False):
+    """A person or an organization as a vCard 3.0 (RFC 2426), as IEEE
+    LOM's contribute takes one for its entity: FN and N, which 3.0
+    requires, N's family and given parts where the mapping sets them; the
+    affiliation's name as ORG, or the organization's own; and the ORCID iD,
+    or the ROR ID, as URL."""
+    lines = ["BEGIN:VCARD", "VERSION:3.0", "FN:" + _vcard_text(name(entry))]
+    mapping = entry if isinstance(entry, dict) else {}
+    if organization:
+        lines.append("N:;;;;")
+        lines.append("ORG:" + _vcard_text(name(entry)))
+        if mapping.get("ror"):
+            lines.append("URL:" + mapping["ror"])
+    else:
+        lines.append("N:%s;%s;;;" % (_vcard_text(mapping.get("family") or ""),
+                                       _vcard_text(mapping.get("given") or "")))
+        if name(mapping.get("affiliation")):
+            lines.append("ORG:" + _vcard_text(name(mapping["affiliation"])))
+        if mapping.get("orcid"):
+            lines.append("URL:" + mapping["orcid"])
+    lines.append("END:VCARD")
+    return "\n".join(lines)
+
+
 def names(entries):
     """The names of a list of people, empty ones left out."""
     return [n for n in (name(e) for e in entries or []) if n]
@@ -212,6 +245,8 @@ def _check(value, where, kind):
         return None, [f"{where} is {value!r}; give a name, or a mapping with name"]
     if not isinstance(value, dict):
         text = str(value).strip()
+        if CONTROL.search(text):
+            return None, [f"{where} is {text!r}, which holds a control character"]
         if kind == "contributor":
             return None, [f"{where} is {text!r}; a contributor is a mapping with name and "
                           "role, the role a MARC relator (ill or illustrator, say)"]
@@ -239,6 +274,9 @@ def _check(value, where, kind):
             problems.append(f"{where}'s {key} is {item!r}; give it as text")
             continue
         text = str(item).strip()
+        if CONTROL.search(text):
+            problems.append(f"{where}'s {key} is {text!r}, which holds a control character")
+            continue
         if key == "orcid":
             try:
                 text = orcid(text)

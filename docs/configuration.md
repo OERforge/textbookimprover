@@ -64,7 +64,7 @@ project:
   publisher: {name: Shepherd University, ror: https://ror.org/05dxps055}
 ```
 
-An ORCID iD is checked for its check digit and a ROR ID for its checksum, and a contributor's `role` must be a [MARC relator](https://www.loc.gov/marc/relators/relaterm.html), by its term or its code. A mistake stops the run, naming the entry (`authors' second entry's orcid`). An EPUB records the authors, the adapters, and the editors as its creators, in that order, as `aut`, `adp`, and `edt`, each filed under "family, given" where both are given, and the contributors in their roles; a PDF names the authors as its author. The iDs and affiliations go nowhere yet: the cartridge's metadata and the archive's description are to carry them.
+An ORCID iD is checked for its check digit and a ROR ID for its checksum, and a contributor's `role` must be a [MARC relator](https://www.loc.gov/marc/relators/relaterm.html), by its term or its code. A mistake stops the run, naming the entry (`authors' second entry's orcid`). An EPUB records the authors, the adapters, and the editors as its creators, in that order, as `aut`, `adp`, and `edt`, each filed under "family, given" where both are given, and the contributors in their roles; a PDF names the authors as its author. A cartridge's manifest gives each kind its contribute, in the nearest of the fifteen roles the Common Cartridge 1.1 profile takes: the authors `author`, the adapters and then the editors `editor`, and the publisher `publisher`, with the date; each person or organization is a vCard, with the name's parts, the affiliation, and the ORCID iD or ROR ID. The contributors, whose roles the profile has no place for, aren't in it.
 
 ### Targets
 
