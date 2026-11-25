@@ -159,7 +159,33 @@ class ConfigError(Exception):
     """A problem in a configuration or schema file, phrased for a user."""
 
 
-class StrictLoader(yaml.SafeLoader):
+def _timestamp(loader, node):
+    """A YAML timestamp as PyYAML's safe loader reads it, or, where it has
+    a timestamp's shape and isn't a real moment (2026-02-30, 2026-13-01),
+    its text, for the setting's own check to name: PyYAML raised
+    ValueError, which no reader caught, and the run stopped with a
+    traceback."""
+    try:
+        return yaml.constructor.SafeConstructor.construct_yaml_timestamp(loader, node)
+    except ValueError:
+        return loader.construct_scalar(node)
+
+
+class SafeLoader(yaml.SafeLoader):
+    """PyYAML's safe loader, a timestamp that isn't a real moment read as
+    its text (_timestamp)."""
+
+
+SafeLoader.add_constructor("tag:yaml.org,2002:timestamp", _timestamp)
+
+
+def safe_load(stream):
+    """yaml.safe_load, with SafeLoader: what every reader of a project's
+    files uses."""
+    return yaml.load(stream, Loader=SafeLoader)
+
+
+class StrictLoader(SafeLoader):
     """A YAML loader that refuses a mapping with the same key twice.
 
     PyYAML keeps the last one and says nothing. That is a poor bargain
@@ -641,9 +667,13 @@ def _coerce(node, value, where, problems):
         text = str(value).strip()
         if text == "":
             return node.default
-        if not DATE_RE.match(text):
+        try:
+            real = DATE_RE.match(text) and datetime.date.fromisoformat(text)
+        except ValueError:
+            real = None
+        if not real:
             problems.append(f"{where}: {node.path} is {value!r}; dates are "
-                            "written as YYYY-MM-DD")
+                            "written as YYYY-MM-DD, a day the calendar has")
             return node.default
         return text
 
@@ -978,7 +1008,7 @@ def declared_targets(path):
     there, can't be read, or declares none."""
     try:
         with open(path, encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+            data = safe_load(fh) or {}
     except (OSError, yaml.YAMLError):
         return {}
     declared = data.get("targets") if isinstance(data, dict) else None
@@ -1463,7 +1493,7 @@ def inline_project(path):
         return None
     try:
         with open(path, encoding="utf-8") as handle:
-            data = yaml.safe_load(handle)
+            data = safe_load(handle)
     except (OSError, yaml.YAMLError):
         return None
     block = data.get("project") if isinstance(data, dict) else None
@@ -1479,7 +1509,7 @@ def reference_docs(path):
         return []
     try:
         with open(path, encoding="utf-8") as handle:
-            data = yaml.safe_load(handle)
+            data = safe_load(handle)
     except (OSError, yaml.YAMLError):
         return []
     if not isinstance(data, dict):

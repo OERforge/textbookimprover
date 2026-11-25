@@ -75,6 +75,7 @@ import unpacking  # noqa: E402
 P = projectpaths.of
 try:
     import yaml
+    import oerconfig
     import sidecars
     from bookcontents import (guess_contents, walk_contents,
                               contents_from_tree, expand_split_sources,
@@ -154,7 +155,7 @@ def source_part(book, target):
     its part: in conversion.yaml, or the project's own."""
     try:
         with open(P(book).config_file(), encoding="utf-8") as fh:
-            block = ((yaml.safe_load(fh) or {}).get("targets") or {}).get(target) or {}
+            block = ((oerconfig.safe_load(fh) or {}).get("targets") or {}).get(target) or {}
     except (OSError, yaml.YAMLError, AttributeError):
         block = {}
     named = str(block.get("part") or "").strip() if isinstance(block, dict) else ""
@@ -225,7 +226,7 @@ def main():
     document = {}
     if os.path.isfile(project_path):
         with open(project_path, encoding="utf-8") as fh:
-            document = yaml.safe_load(fh) or {}
+            document = oerconfig.safe_load(fh) or {}
     project = document.get("project") or {}
     # A part's own identifier, title, contents, and numbering are the
     # new book's; the parts themselves were the old project's.

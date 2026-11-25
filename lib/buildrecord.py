@@ -303,9 +303,10 @@ def _fragments(base):
 
 def _project(base):
     import yaml
+    import oerconfig
     try:
         with open(projectpaths.of(base).project_file(), encoding="utf-8") as fh:
-            values = (yaml.safe_load(fh) or {}).get("project") or {}
+            values = (oerconfig.safe_load(fh) or {}).get("project") or {}
     except (OSError, yaml.YAMLError, AttributeError):
         values = {}
     if not isinstance(values, dict):

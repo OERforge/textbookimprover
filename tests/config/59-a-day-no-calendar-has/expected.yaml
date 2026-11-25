@@ -1,0 +1,3 @@
+# YAML reads an unquoted 2026-02-30 as a date and PyYAML fails on it;
+# the setting names it, where the run had stopped with a traceback.
+error: "modified is '2026-02-30'; dates are written as YYYY-MM-DD"

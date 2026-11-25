@@ -396,6 +396,33 @@ def case_jekyll(work):
     ]
 
 
+
+def case_jekyll_front_matter(work):
+    """Front matter a Jekyll site's page has that PyYAML can't read as a
+    mapping, or with a date no calendar has: the page left out and said
+    to be, and the dated one a page, where each had stopped the run with
+    a traceback."""
+    src = os.path.join(work, "site")
+    for name, text in {"_config.yml": "title: Dated\ndate: 2026-02-30\n",
+                       "index.md": "---\ntitle: Home\ndate: 2026-13-01\n---\nHome.\n",
+                       "broken.md": "---\ntitle: [unclosed\n---\nText.\n",
+                       "listed.md": "---\n- a list\n---\nText.\n"}.items():
+        os.makedirs(src, exist_ok=True)
+        with open(os.path.join(src, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    out = os.path.join(work, "book")
+    result = subprocess.run(["python3", os.path.join(BIN, "unpack-jekyll.py"),
+                             src, "-o", out, "--part", "book"], capture_output=True, text=True)
+    report = read(P(out).report("unpack-report.csv")) if result.returncode == 0 else ""
+    return [
+        ("the run succeeds", lambda: result.returncode == 0 or fail(result.stderr[-800:])),
+        ("the page dated 2026-13-01 a page, and the others left out",
+         lambda: sorted(n for n in os.listdir(P(out).sources()) if n.endswith(".md"))
+         == ["index.md"] or fail(repr(os.listdir(P(out).sources())))),
+        ("each page left out said to be, its front matter not a mapping",
+         lambda: report.count("front-matter-unread") == 2 or fail(report)),
+    ]
+
 SMALL_CARTRIDGE = """<?xml version="1.0" encoding="UTF-8"?>
 <manifest identifier="m" xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1">
 <metadata><schema>IMS Common Cartridge</schema><schemaversion>1.1.0</schemaversion>
@@ -726,6 +753,7 @@ CASES = [
     ("a declared page that was split", case_split_source),
     ("converting what was unpacked", case_convert),
     ("a Jekyll site's Markdown", case_jekyll),
+    ("a Jekyll site's front matter that can't be read", case_jekyll_front_matter),
     ("an unpacker writing a part of a project", case_part),
     ("a run unpacking a part's upstream file", case_from),
 ]

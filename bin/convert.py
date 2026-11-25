@@ -998,7 +998,7 @@ def project_parts(base):
     import yaml
     try:
         with open(P(base).project_file(), encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+            data = oerconfig.safe_load(fh) or {}
     except (OSError, yaml.YAMLError):
         data = {}                 # load_targets says what's wrong with it
     block = data.get("project") if isinstance(data, dict) else None
@@ -1041,7 +1041,7 @@ def old_places(base):
     import yaml
     try:
         with open(P(base).config_file(), encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+            data = oerconfig.safe_load(fh) or {}
     except (OSError, yaml.YAMLError):
         return []
     found = []
@@ -1061,7 +1061,7 @@ def part_setting(base, part, key):
     import yaml
     try:
         with open(P(base).project_file(), encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+            data = oerconfig.safe_load(fh) or {}
     except (OSError, yaml.YAMLError):
         return None
     try:
@@ -1322,7 +1322,7 @@ def part_folders(base):
         return
     try:
         with open(P(base).project_file(), encoding="utf-8") as fh:
-            parts = (yaml.safe_load(fh) or {})["project"]["parts"]
+            parts = (oerconfig.safe_load(fh) or {})["project"]["parts"]
         named = [str(name) for name, value in parts.items()
                  if isinstance(value, dict) and value.get("from")
                  and projectpaths.PART_NAME.match(str(name))]
@@ -1358,7 +1358,7 @@ def targets_parts(base, default):
     import yaml
     try:
         with open(P(base).config_file(), encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+            data = oerconfig.safe_load(fh) or {}
     except (OSError, yaml.YAMLError):
         data = {}
     declared = data.get("targets") if isinstance(data, dict) else None

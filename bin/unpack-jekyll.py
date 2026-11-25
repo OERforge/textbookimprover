@@ -67,6 +67,7 @@ P = projectpaths.of
 try:
     import yaml
     from names import safe_stem
+    from oerconfig import safe_load
     from unpacking import Placed, add_part_option, write_report, summarize
 except ImportError as exc:
     sys.exit(f"Cannot find the library ({exc}). It should be in a lib/ "
@@ -243,7 +244,12 @@ def main():
     config = {}
     if os.path.isfile(os.path.join(src, "_config.yml")):
         with open(os.path.join(src, "_config.yml"), encoding="utf-8") as fh:
-            config = yaml.safe_load(fh) or {}
+            try:
+                config = safe_load(fh) or {}
+            except yaml.YAMLError as exc:
+                sys.exit(f"{args.source}'s _config.yml isn't valid YAML: {exc}")
+        if not isinstance(config, dict):
+            config = {}
 
     pages, notes = [], []
     for directory, dirs, files in os.walk(src):
@@ -261,7 +267,14 @@ def main():
                 notes.append((relative, "no-front-matter",
                               "not a page of the site; left out"))
                 continue
-            meta = yaml.safe_load(m.group(1)) or {}
+            try:
+                meta = safe_load(m.group(1)) or {}
+            except yaml.YAMLError:
+                meta = None
+            if not isinstance(meta, dict):
+                notes.append((relative, "front-matter-unread",
+                              "its front matter isn't a YAML mapping; left out"))
+                continue
             pages.append({"relative": relative, "name": page_name(relative),
                           "meta": meta, "body": text[m.end():],
                           "title": str(meta.get("title") or page_name(relative))})

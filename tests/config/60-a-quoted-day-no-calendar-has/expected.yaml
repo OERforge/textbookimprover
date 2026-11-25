@@ -1,0 +1,2 @@
+# A quoted day has the shape of a date, and the calendar is asked too.
+error: "modified is '2026-02-30'; dates are written as YYYY-MM-DD"
