@@ -727,6 +727,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # Started by a run: the programs it starts get the run's processor
+    # time (lib/limits.py).
+    import limits
+    limits.inherit()
     try:
         sys.exit(main())
     except KeyboardInterrupt:

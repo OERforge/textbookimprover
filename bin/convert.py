@@ -8102,7 +8102,8 @@ def main():
     LATEXMKRC = args.latexmkrc
     ALLOW_REMOTE = args.allow_remote_pictures
     # The limits first, so that every program this run starts, and the run
-    # in the sandbox, has them (lib/limits.py).
+    # in the sandbox, has them: the memory for this run too, the processor
+    # time for the programs it starts alone (lib/limits.py).
     global LIMITS
     try:
         LIMITS = limits.Limits.given(args.max_memory, args.max_time, args.jobs)

@@ -1622,5 +1622,8 @@ def unseen(result, seen, mode="light"):
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--worker"]:
+        # Chromium gets the run's processor time (lib/limits.py).
+        import limits
+        limits.inherit()
         sys.exit(worker_main())
     sys.exit("axecheck.py is run by check-output.py and audit.py; --worker is theirs.")

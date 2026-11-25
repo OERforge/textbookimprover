@@ -906,8 +906,13 @@ def check_limits():
         no_jobs = str(exc)
     work = scratch("limits-")
     probe = os.path.join(work, "probe.py")
+    # A shell's limit once it's set: the limit is set on a program just
+    # after it starts, so a shell that reads it at once can read none on a
+    # busy machine (measured: three of six runs while the suites ran).
+    waited = ("WAITED = 'for i in 1 2 3 4 5 6 7 8 9 10; do t=$(ulimit -t); "
+              "[ \"$t\" != unlimited ] && break; sleep 0.2; done; echo $t'\n")
     with open(probe, "w", encoding="utf-8") as fh:
-        fh.write(textwrap.dedent("""\
+        fh.write(waited + textwrap.dedent("""\
             import json, os, resource, subprocess, sys
             sys.path.insert(0, sys.argv[1])
             import limits
@@ -923,11 +928,35 @@ def check_limits():
                                   "ghcrts": os.environ.get("GHCRTS"),
                                   "data": resource.getrlimit(resource.RLIMIT_DATA),
                                   "java": limits.java_options()}))
+            elif mode == "own":
+                # A script of TextbookImprover's own, as the folder it's in
+                # stands for TextbookImprover's here.
+                limits.OWN_ROOT = sys.argv[3]
+                limits.Limits(None, 7, machine=8 << 30).apply()
+                shell = subprocess.run(["sh", "-c", WAITED], capture_output=True,
+                                       text=True).stdout.strip()
+                inner = subprocess.run([sys.executable, "-I",
+                                        os.path.join(sys.argv[3], "inner.py"), sys.argv[1]],
+                                       capture_output=True, text=True)
+                print(json.dumps({"self": resource.getrlimit(resource.RLIMIT_CPU),
+                                  "shell": shell, "inner": inner.stdout.strip(),
+                                  "said": inner.stderr[-300:]}))
             else:
                 limits.Limits(None, 1, machine=8 << 30).apply()
                 done = subprocess.run([sys.executable, "-c", "while True: pass"])
                 print(json.dumps({"code": done.returncode,
                                   "why": limits.Limits(None, 1).why(done.returncode)}))
+            """))
+    with open(os.path.join(work, "inner.py"), "w", encoding="utf-8") as fh:
+        fh.write(waited + textwrap.dedent("""\
+            import os, resource, subprocess, sys
+            sys.path.insert(0, sys.argv[1])
+            import limits
+            own = resource.getrlimit(resource.RLIMIT_CPU)[0]
+            limits.inherit()
+            shell = subprocess.run(["sh", "-c", WAITED], capture_output=True,
+                                   text=True).stdout.strip()
+            print(own == resource.RLIM_INFINITY, os.environ.get(limits.TIME_VARIABLE), shell)
             """))
     env = dict(os.environ, GHCRTS="-A8m")
 
@@ -940,6 +969,30 @@ def check_limits():
             return {"stderr": done.stderr[-500:]}
     memory = probed("memory") if shutil.which("pandoc") else None
     cpu = probed("cpu")
+    own = probed("own") if hasattr(__import__("resource"), "prlimit") else None
+    named = [limits.own_script(c) for c in (
+        ["python3", os.path.join(ROOT, "bin", "build-pdf.py"), "-d", "."],
+        ["bwrap", "--ro-bind", "/usr", "/usr", sys.executable, "-I",
+         os.path.join(ROOT, "bin", "convert.py")],
+        [sys.executable, "-c", "print(1)"], ["pandoc", "--lua-filter",
+                                            os.path.join(ROOT, "bin", "pdf-target.lua")],
+        ["python3", os.path.join(work, "elsewhere.py")], "python3 bin/convert.py")]
+    # Each script a run starts gives the programs it starts the run's
+    # processor time: the tools convert.py names, its unpackers, and
+    # axe-core's worker.
+    with open(os.path.join(ROOT, "bin", "convert.py"), encoding="utf-8") as fh:
+        driver = fh.read()
+    started = sorted(set(re.findall(r'^[A-Z_]+_TOOL = os\.path\.join\(HERE, "([\w-]+\.py)"\)',
+                                    driver, re.M))
+                     | set(re.findall(r'"(unpack-[\w-]+\.py)"', driver)))
+    uninherited = []
+    for name in started:
+        with open(os.path.join(ROOT, "bin", name), encoding="utf-8") as fh:
+            if "limits.inherit()" not in fh.read():
+                uninherited.append(name)
+    with open(os.path.join(ROOT, "lib", "axecheck.py"), encoding="utf-8") as fh:
+        if "limits.inherit()" not in fh.read():
+            uninherited.append("axecheck.py")
     pandoc_why = limits.Limits(300 << 20).why(251, "/usr/bin/pandoc")
     return [
         ("sizes and times read as given, 0 for none, and one that doesn't read refused",
@@ -967,6 +1020,16 @@ def check_limits():
         ("a loop stopped by its processor time, and said so",
          lambda: cpu.get("code") == -signal.SIGXCPU and "--max-time" in cpu.get("why", "")
          or fail(repr(cpu))),
+        ("the processor time for the programs a run starts, not for the run or a script of "
+         "its own, which gives it to those it starts in turn",
+         lambda: own is None or (own.get("self", [0])[0] == -1 and own.get("shell") == "7"
+                                 and own.get("inner") == "True 7 7")
+         or fail(repr(own))),
+        ("a script of TextbookImprover's own is one run by Python from its folder, through a "
+         "sandbox's launcher too, and nothing else is",
+         lambda: named == [True, True, False, False, False, False] or fail(repr(named))),
+        ("each script a run starts gives the programs it starts the run's processor time",
+         lambda: len(started) >= 11 and not uninherited or fail(f"{started} {uninherited}")),
     ]
 
 

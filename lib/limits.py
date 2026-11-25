@@ -21,8 +21,12 @@ memory, which .wslconfig's memory= sets).
 - Each program may use two hours of processor time (--max-time, 0 for
   none).
 
-They're applied to the run itself, so every program it starts, inside the
-sandbox or not, inherits them: RLIMIT_DATA for memory, which counts what a
+Memory is limited for the run itself, so every program it starts, inside
+the sandbox or not, inherits it; processor time only for the programs it
+starts, not for TextbookImprover's own Python (convert.py, build-pdf.py,
+and the other scripts a run starts), which a limit set low for a big book
+would otherwise stop with no word and no build record. RLIMIT_DATA for
+memory, which counts what a
 program writes and not the address space it reserves (GHC's runtime, the
 JVM, and Chromium's V8 reserve far more than they use, and RLIMIT_AS would
 stop them on the reservation), and RLIMIT_CPU for time, which stops a loop
@@ -33,6 +37,17 @@ a validator's JVM a heap of half the limit (-Xmx). Measured with Pandoc
 table under 500 MB: each stopped in under 5 s, Pandoc saying "Heap
 exhausted" under GHCRTS and "Unable to commit" under RLIMIT_DATA, LuaLaTeX
 "not enough memory".
+
+The processor time is given to each program as it starts: subprocess.Popen
+is replaced by one that sets the started program's RLIMIT_CPU (prlimit),
+unless the program is one of TextbookImprover's own scripts, run by
+Python; that script reads the limit from TEXTBOOKIMPROVER_MAX_TIME
+(inherit) and gives it to the programs it starts in turn. A program the
+started one starts in the moment before its limit is set isn't limited:
+the started one's first microseconds, or longer on a busy machine (a
+shell that read its limit at once read none in three of six runs while
+the suites ran beside it, 2026-11-25). Where Python has no prlimit (not Linux),
+the run limits itself, as before.
 
 Copyright 2026 Robert Szarka
 
@@ -53,6 +68,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 import re
 import signal
+import subprocess
+import sys
 
 GB = 1 << 30
 # What one LaTeX build and one Pandoc conversion are given room for, side
@@ -66,6 +83,12 @@ DEFAULT_SECONDS = 2 * 3600
 # Seconds past the processor-time limit before the kernel kills a program
 # that ignores the signal it's sent first (SIGXCPU).
 GRACE = 60
+# How a run tells the scripts of its own it starts their processor time,
+# which they give the programs they start (inherit).
+TIME_VARIABLE = "TEXTBOOKIMPROVER_MAX_TIME"
+# TextbookImprover's own folder: a script under it, run by Python, is one
+# of its own, which the time limit doesn't reach.
+OWN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 UNITS = {"": 1, "b": 1, "k": 1 << 10, "kb": 1 << 10, "m": 1 << 20, "mb": 1 << 20,
          "g": GB, "gb": GB, "t": 1 << 40, "tb": 1 << 40}
@@ -209,8 +232,13 @@ class Limits:
             kept = re.sub(r"(^|\s)-M\S*", " ", environ.get("GHCRTS", "")).strip()
             environ["GHCRTS"] = (kept + " " if kept else "") + f"-M{heap}m"
         if self.seconds:
-            _lower(resource, resource.RLIMIT_CPU, self.seconds, self.seconds + GRACE)
-
+            if hasattr(resource, "prlimit") and sys.platform.startswith("linux"):
+                environ[TIME_VARIABLE] = str(self.seconds)
+                limit_started(self.seconds)
+            else:
+                _lower(resource, resource.RLIMIT_CPU, self.seconds, self.seconds + GRACE)
+        else:
+            environ.pop(TIME_VARIABLE, None)
 
     def warnings(self):
         """What a run says of its limits before it starts."""
@@ -236,6 +264,81 @@ class Limits:
             return (f" It may have used more than its {self.seconds // 60} minute(s) of "
                     "processor time (--max-time), or been killed.")
         return ""
+
+
+def inherit(environ=None):
+    """For a script of TextbookImprover's own that a run starts: give the
+    programs it starts the processor time the run gives each
+    (TIME_VARIABLE), as the run's own processes are given none."""
+    environ = os.environ if environ is None else environ
+    try:
+        seconds = int(environ.get(TIME_VARIABLE, ""))
+    except ValueError:
+        return
+    if seconds > 0:
+        limit_started(seconds)
+
+
+def own_script(args):
+    """Whether a command runs one of TextbookImprover's own scripts with
+    Python, directly or through a sandbox's launcher before it: a program
+    named python..., its options, and a .py file under OWN_ROOT. A
+    command given as a string (a shell's) is never one."""
+    if isinstance(args, (str, bytes)):
+        return False
+    try:
+        args = [os.fsdecode(a) for a in args]
+    except TypeError:
+        return False
+    for i, arg in enumerate(args):
+        if not os.path.basename(arg).startswith("python"):
+            continue
+        rest = args[i + 1:]
+        while rest and rest[0].startswith("-") and rest[0] not in ("-c", "-m", "-"):
+            rest = rest[1:]
+        if rest and rest[0].endswith(".py"):
+            path = os.path.realpath(rest[0])
+            return os.path.commonpath([path, os.path.realpath(OWN_ROOT)]) \
+                == os.path.realpath(OWN_ROOT)
+        return False
+    return False
+
+
+_LIMITED = {}
+
+
+def limit_started(seconds):
+    """Make every program this process starts, but its own scripts, have
+    seconds of processor time (and GRACE more before the kernel kills one
+    that ignores SIGXCPU): subprocess.Popen replaced by a class that sets
+    the started program's RLIMIT_CPU, never higher than it has."""
+    _LIMITED["seconds"] = seconds
+    if getattr(subprocess.Popen, "_oer_limited", False):
+        return
+    import resource
+    started = subprocess.Popen
+
+    class LimitedPopen(started):
+        _oer_limited = True
+
+        def __init__(self, args, *rest, **options):
+            super().__init__(args, *rest, **options)
+            if own_script(args):
+                return
+            seconds = _LIMITED["seconds"]
+            try:
+                now_soft, now_hard = resource.prlimit(self.pid, resource.RLIMIT_CPU)
+
+                def lowest(value, now):
+                    return value if now == resource.RLIM_INFINITY else min(value, now)
+                hard = lowest(seconds + GRACE, now_hard)
+                resource.prlimit(self.pid, resource.RLIMIT_CPU,
+                                 (min(lowest(seconds, now_soft), hard), hard))
+            except (OSError, ValueError):
+                # It has ended already.
+                pass
+
+    subprocess.Popen = LimitedPopen
 
 
 def java_options():

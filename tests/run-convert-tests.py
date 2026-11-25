@@ -1030,9 +1030,9 @@ def case_build_record_stops(work):
     write("src/book/one.md", "# One\n\nA paragraph.\n")
     # LaTeX's run for the PDF (build-pdf.py's -jobname input) a stand-in
     # that spends processor time until it's stopped; every other run of
-    # lualatex the real one. The limit is ten seconds, not one, since it
-    # holds for TextbookImprover's own Python too, which a slow machine
-    # took past a second (convert.py 0.5 s here).
+    # lualatex the real one. Ten seconds leaves Pandoc and the real LuaLaTeX
+    # their time on a slow machine; TextbookImprover's own Python isn't held
+    # to it (lib/limits.py).
     tools = work.rstrip(os.sep) + "-tools"
     os.makedirs(tools, exist_ok=True)
     with open(os.path.join(tools, "lualatex"), "w") as fh:
