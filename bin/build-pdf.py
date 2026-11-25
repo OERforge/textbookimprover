@@ -1022,8 +1022,14 @@ def xmp_setup(project, own=None):
     key("pdfidentifier", "urn:isbn:" + isbn if isbn else "")
     key("pdfdoi", project.get("doi"))
     key("pdfurl", project.get("url"))
-    key("pdfcopyright", licenses.copyright_line(project.get("copyright"),
-                                                project.get("published")), listed=True)
+    # The copyright line, and where some pages have a license of their
+    # own, the book's "except where otherwise noted" after it, their
+    # sentences being in the text (project.licenses).
+    noted = licenses.exceptions(project.get("licenses"), project.get("license"))
+    key("pdfcopyright", licenses.statement(project.get("copyright"), project.get("license"),
+                                           project.get("published"), noted=True) if noted
+        else licenses.copyright_line(project.get("copyright"), project.get("published")),
+        listed=True)
     # The release's date as the XMP's dc:date, in the PDF date form the
     # code reads (D:YYYYMMDD), where it would otherwise be the build's.
     published = str(project.get("published") or "")

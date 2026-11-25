@@ -1095,6 +1095,9 @@ RELEASED = """\
     - {funder: Example Fund, award: {number: "17", title: Open Books,
                                      url: "https://example.org/awards/17"}}
   coverage: {time: 1865/1900}
+  licenses:
+    - {pages: [tables*], title: Tables Book, source: "https://example.org/tables",
+       license: CC0-1.0}
 """
 
 
@@ -1102,8 +1105,12 @@ def case_released(work):
     """The release's settings as the EPUB records them: its date the
     book's dc:date and on its title page, where without it dc:date is the
     build's moment; the copyright line made from its parts, the year the
-    release's, in the rights; a funder with an award a funder still; and
-    an interval of time its coverage, as written."""
+    release's, in the rights; a funder with an award a funder still; an
+    interval of time its coverage, as written; and with some pages
+    licensed otherwise (project.licenses), the rights except where
+    otherwise noted, and each content document linking to its pages'
+    licenses' deeds, or the book's. The sentence at a page's end is
+    convert.py's, in the convert suite."""
     convert(work, NEEDED)
     write_config(work, TREE, RELEASED, "    title_page: \"on\"\n")
     out = Built(work)
@@ -1119,11 +1126,20 @@ def case_released(work):
         ("without it, dc:date the build's moment, as before",
          lambda: re.search(r"<dc:date[^>]*>\d{4}-\d{2}-\d{2}T[\d:]+Z</dc:date>", undated.opf)
          or raised(undated.opf[:3000])),
-        ("the copyright line from its parts, the year the release's, then the license",
-         lambda: "<dc:rights>Copyright 2026 Robert Szarka. Some rights reserved. Licensed "
-         "under Creative Commons Attribution 4.0 International "
+        ("the copyright line from its parts, the year the release's, then the license "
+         "except where otherwise noted",
+         lambda: "<dc:rights>Copyright 2026 Robert Szarka. Some rights reserved. Except "
+         "where otherwise noted, licensed under Creative Commons Attribution 4.0 International "
          "(https://creativecommons.org/licenses/by/4.0/).</dc:rights>" in out.opf
          or raised(out.opf[:3000])),
+        ("each content document linking to its pages' licenses' deeds, or the book's",
+         lambda: all(re.findall(r'<link rel="license" href="([^"]+)"', t)
+                 == (["https://creativecommons.org/publicdomain/zero/1.0/"]
+                     if re.search(r'id="page-tables(-b)?"', t)
+                     else ["https://creativecommons.org/licenses/by/4.0/"])
+                 for n, t in out.files.items() if n.endswith(".xhtml") and "/text/" in n)
+         or raised(repr({n: re.findall(r'<link rel="license" href="([^"]+)"', t)
+                         for n, t in out.files.items() if n.endswith(".xhtml")}))),
         ("a funder with an award a funder",
          lambda: re.search(r'<dc:contributor id="([^"]+)">Example Fund</dc:contributor>\s*'
                            r'<meta refines="#\1" property="role" scheme="marc:relators">fnd',

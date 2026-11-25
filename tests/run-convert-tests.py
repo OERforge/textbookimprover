@@ -1056,6 +1056,133 @@ def case_identified_cartridge(work):
     ]
 
 
+def case_page_licenses(work):
+    """A license page by page (project.licenses): an entry's sentence at
+    the end of the last of its pages in the contents' order, not the
+    last by name, its title linked to its source and emphasized and the
+    license to its deed by its short name, the settings' words escaped,
+    and marked English in a book that isn't; a statement on each page
+    with each_page; each page's head linking to its licenses' deeds, and
+    the part's where none names it; the cartridge's rights except where
+    otherwise noted, with restrictions, still valid; and an entry that
+    names no page stopping the run, naming it."""
+    import importlib.util
+    import xml.etree.ElementTree as ET
+
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def page(name):
+        path = os.path.join(work, "output", "html", name + ".html")
+        if not os.path.isfile(path):
+            return ""
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    entries = ("  licenses:\n"
+               "    - pages: [ch1*]\n"
+               "      title: 'Economics <b>& Co'\n"
+               "      author: [OpenStax, A. Writer]\n"
+               "      source: https://openstax.org/details/books/principles-economics-3e\n"
+               "      license: CC-BY-4.0\n"
+               "      changes: Shortened\n"
+               "    - {pages: [ch2, ch3], statement: Figures used with permission., "
+               "each_page: true}\n")
+    write("project.yaml", "project:\n  identifier: org.example.licenses\n  title: Licencias\n"
+          "  language: es\n  license: CC-BY-SA-4.0\n  copyright: © 2026 Robert Szarka\n"
+          + entries + "  contents: [ch1b, ch1a, ch2, ch3]\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n"
+          "  epub:\n    format: epub3\n")
+    for name in ("ch1a", "ch1b", "ch2", "ch3"):
+        write(f"src/book/{name}.md", f"# {name}\n\nTexto.\n")
+    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
+                           "--quiet"], cwd=work, capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    pages = {name: page(name) for name in ("ch1a", "ch1b", "ch2", "ch3")}
+    epub = os.path.join(work, "output", "epub", "org.example.licenses.epub")
+    chapters = {}
+    if os.path.isfile(epub):
+        with zipfile.ZipFile(epub) as archive:
+            chapters = {n: archive.read(n).decode("utf-8") for n in archive.namelist()
+                        if "/text/" in n and n.endswith(".xhtml")}
+    manifest = os.path.join(work, "output", "packages", "cartridge", "imsmanifest.xml")
+    rights = None
+    if os.path.isfile(manifest):
+        ns = {"l": "http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest"}
+        found = ET.parse(manifest).getroot().find(".//l:lom/l:rights", ns)
+        rights = None if found is None else (
+            found.findtext("l:cost/l:value", "", ns),
+            found.findtext("l:copyrightAndOtherRestrictions/l:value", "", ns),
+            found.findtext("l:description/l:string", "", ns))
+    spec = importlib.util.spec_from_file_location(
+        "validator", os.path.join(BIN, "validate-manifest.py"))
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    valid = validator.validate_with_schema(manifest) if os.path.isfile(manifest) else (False, [])
+
+    def sentences(text):
+        return re.findall(r'<div class="oer-license"[^>]*>\s*<p>(.*?)</p>', text, re.S)
+
+    def deeds(text):
+        return re.findall(r'<link rel="license" href="([^"]+)"', text.split("</head>")[0])
+    write("project.yaml", "project:\n  identifier: org.example.licenses\n  title: Licencias\n"
+          "  language: es\n  license: CC-BY-SA-4.0\n" + entries.replace("[ch2, ch3]", "[ch9]")
+          + "  contents: [ch1b, ch1a, ch2, ch3]\n")
+    stopped = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                              "--quick", "--quiet"], cwd=work, capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL)
+    by = "https://creativecommons.org/licenses/by/4.0/"
+    return [
+        ("the run succeeds", lambda: done.returncode == 0 or fail(done.stderr[-1500:])),
+        ("the entry's sentence at the end of its last page in the contents' order alone",
+         lambda: not sentences(pages["ch1b"]) and len(sentences(pages["ch1a"])) == 1
+         and pages["ch1a"].rstrip().split("</main>")[0].rstrip().endswith("</div>")
+         or fail(pages["ch1a"][-1500:])),
+        ("its title emphasized and linked to its source, the license its short name linked "
+         "to its deed, the authors joined, the changes, and the settings' words escaped",
+         lambda: " ".join(sentences(pages["ch1a"])[0].split()) == (
+             'Adapted from <a href="https://openstax.org/details/books/principles-economics-3e">'
+             "<em>Economics &lt;b&gt;&amp; Co</em></a> by OpenStax and A. Writer, licensed "
+             f'under <a href="{by}">CC BY 4.0</a>. Changes: Shortened.')
+         or fail(repr(sentences(pages["ch1a"])))),
+        ("marked English in a book in Spanish",
+         lambda: '<div class="oer-license" lang="en">' in pages["ch1a"]
+         or fail(pages["ch1a"][-800:])),
+        ("a statement on each of its pages with each_page, as written",
+         lambda: sentences(pages["ch2"]) == ["Figures used with permission."]
+         and sentences(pages["ch3"]) == ["Figures used with permission."]
+         or fail(repr((sentences(pages["ch2"]), sentences(pages["ch3"]))))),
+        ("each page's head linking to its licenses' deeds, the part's where none names it",
+         lambda: deeds(pages["ch1a"]) == [by] and deeds(pages["ch1b"]) == [by]
+         and deeds(pages["ch2"]) == ["https://creativecommons.org/licenses/by-sa/4.0/"]
+         or fail(repr({n: deeds(t) for n, t in pages.items()}))),
+        ("the cartridge's rights except where otherwise noted, with restrictions, valid",
+         lambda: rights == ("no", "yes", "© 2026 Robert Szarka. Except where otherwise noted, "
+                            "licensed under Creative Commons Attribution-ShareAlike 4.0 "
+                            "International (https://creativecommons.org/licenses/by-sa/4.0/).")
+         and (valid is None or valid[0]) or fail(repr((rights, valid)))),
+        ("the EPUB built from the same pages: the sentence once, in the last page's content "
+         "document, the statement on each of its two pages, and the title page linked to "
+         "the book's deed",
+         lambda: [n for n, t in sorted(chapters.items()) if "Adapted from" in t]
+         == [n for n, t in sorted(chapters.items()) if 'id="page-ch1a"' in t]
+         and sum(t.count("Figures used with permission.") for t in chapters.values()) == 2
+         and re.findall(r'<link rel="license" href="([^"]+)"',
+                        next((t for n, t in chapters.items() if "title_page" in n), ""))
+         == ["https://creativecommons.org/licenses/by-sa/4.0/"]
+         or fail(repr(sorted(chapters)))),
+        ("an entry that names no page stops the run, naming it and what it named",
+         lambda: stopped.returncode != 0
+         and "licenses' second entry names no page of this part (ch9)"
+         in stopped.stdout + stopped.stderr or fail((stopped.stdout + stopped.stderr)[-800:])),
+    ]
+
+
 def case_xmp_pdf(work):
     """The book's facts in the PDF's XMP, as LaTeX's own XMP code takes them
     through hyperref's keys: a title and a copyright line with commas each
@@ -1085,6 +1212,7 @@ def case_xmp_pdf(work):
         write("project.yaml", "project:\n  identifier: org.example.xmp\n"
               + ("  published: 2026-11-14\n  work_type: presentation\n"
                  "  copyright: {holder: [A. Writer, B. Writer], text: 'Some, rights.'}\n"
+                 "  licenses: [{pages: one, title: Old Book, license: CC0-1.0}]\n"
                  if released else "")
               + "  title: 'Principles, Economics'\n"
               "  subtitle: '[Draft] An Open Textbook'\n"
@@ -1110,14 +1238,15 @@ def case_xmp_pdf(work):
         # for.
         prism = "{http://prismstandard.org/namespaces/basic/3.0/}"
         import pdftext
-        first_page = "".join(text for (page, _), text in pdftext.marked_text(path).items()
-                             if page == 0)
+        texts = pdftext.marked_text(path)
+        first_page = "".join(text for (page, _), text in texts.items() if page == 0)
+        every_page = "".join(texts.values())
         with pikepdf.open(path) as pdf, pdf.open_metadata() as meta:
             found = {key: meta.get(key.replace("prism:", prism)) for key in (
                 "dc:title", "dc:creator", "prism:subtitle", "dc:publisher", "dc:identifier",
                 "prism:doi", "prism:url", "dc:rights", "xmpRights:WebStatement",
                 "prism:aggregationType", "dc:date")}
-        return dict(found, first_page=first_page), done.stderr[-800:]
+        return dict(found, first_page=first_page, every_page=every_page), done.stderr[-800:]
     found, said = build()
     titled, said_titled = build(own_title=True)
     released, said_released = build(released=True)
@@ -1143,10 +1272,16 @@ def case_xmp_pdf(work):
         ("a title the metadata file gives the XMP's",
          lambda: titled.get("dc:title") == "Its Own Title" or fail(repr(titled) + said_titled)),
         ("the release's date the XMP's date and on the title page, the copyright line from "
-         "its parts with its year, and a Presentation the aggregation type other",
+         "its parts with its year, the license except where otherwise noted with a page "
+         "licensed otherwise, its sentence in the text, and a Presentation the aggregation "
+         "type other",
          lambda: released.get("dc:date") == ["2026-11-14"]
          and "2026-11-14" in released.get("first_page", "")
-         and released.get("dc:rights") == "Copyright 2026 A. Writer and B. Writer. Some, rights."
+         and released.get("dc:rights") == "Copyright 2026 A. Writer and B. Writer. Some, "
+         "rights. Except where otherwise noted, licensed under Creative Commons Attribution "
+         "4.0 International (https://creativecommons.org/licenses/by/4.0/)."
+         and "Adapted from Old Book, licensed under CC0 1.0." in " ".join(
+             released.get("every_page", "").split())
          and released.get("prism:aggregationType") == "other"
          or fail(repr(released) + said_released)),
     ]
@@ -13256,6 +13391,7 @@ CASES = [
     ("the build record, of a program a limit stopped", case_build_record_stops),
     ("the book's people in the cartridge", case_people_cartridge),
     ("the book's identifiers in the cartridge", case_identified_cartridge),
+    ("a license page by page", case_page_licenses),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),

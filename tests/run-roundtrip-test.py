@@ -114,6 +114,14 @@ def unusual(node):
         # A subject a name, or a mapping whose code YAML would read as a
         # number.
         return [{"name": "a, b", "id": "45.0601", "scheme": "no"}, "1.10"]
+    if kind == "list" and node.item == "licensing":
+        # A page's license: its work's parts, a title YAML would read as a
+        # boolean and an author as a number, and a statement with a colon,
+        # on each of its pages.
+        return [{"pages": ["ch1*", "no"], "title": "no", "author": ["1.10"],
+                 "source": "https://example.edu/a,b", "license": "CC-BY-4.0",
+                 "changes": "a, b: c"},
+                {"pages": ["ch2"], "statement": "Used: a, b.", "each_page": True}]
     if kind == "list" and node.item == "contributor":
         # A contributor is a mapping with a role, its name the word YAML
         # would make a boolean of.

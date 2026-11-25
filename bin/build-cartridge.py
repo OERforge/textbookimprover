@@ -889,15 +889,23 @@ def manifest_rights(project):
     asks nothing; and the copyright line and the license as the
     description (lib/licenses.py). Each of the first two is said only
     where the license says it, the profile's vocabularies being yes and
-    no alone."""
+    no alone. Where some pages have a license of their own
+    (project.licenses), the description says "except where otherwise
+    noted", and the two are said only where every license says them: the
+    profile's resource metadata has no rights of its own (CC 1.1's
+    resource LOM holds educational alone), so the pages' licenses are in
+    their text."""
     license_id = str(project.get("license") or "").strip()
+    entries = project.get("licenses") or []
     statement = licenses.statement(project.get("copyright"), license_id,
-                                   project.get("published"))
+                                   project.get("published"),
+                                   noted=licenses.exceptions(entries, license_id))
     if not statement:
         return ""
     out = "      <lomimscc:rights>\n"
-    if licenses.is_open(license_id):
-        free = licenses.known(license_id)[2]
+    others = [entry["license"] for entry in entries if entry.get("license")]
+    if all(licenses.is_open(each) for each in [license_id, *others]):
+        free = all(licenses.known(each)[2] for each in [license_id, *others])
         out += ("        <lomimscc:cost>\n"
                 "          <lomimscc:value>no</lomimscc:value>\n"
                 "        </lomimscc:cost>\n"

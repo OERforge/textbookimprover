@@ -109,6 +109,26 @@ An SPDX identifier is written as SPDX writes it, CC-BY-4.0, with a hyphen after 
 
 A Creative Commons license and CC0 are known by their deed's name and address (CC-BY-4.0 is Creative Commons Attribution 4.0 International, at its deed on creativecommons.org); another license is given as it's written, with no address. An EPUB records the copyright line and then the license, by name and address, as its rights ("© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/)."). A book's PDF, tagged as the default page makes it, gives the copyright line as its XMP's `dc:rights` and the license's address as its web statement. A cartridge's manifest says a Creative Commons license or CC0 costs nothing, that the book has conditions of use but under CC0, and gives the same statement as its rights' description. The copyright line made from its parts is the one each of them gives. A part's own `license` ([Project settings](project-settings.md)) is its outputs' in place of the project's: a test bank's `LicenseRef-instructors-only`, say, in the cartridge of its pages. `unpack-cnx.py` sets `license` from the deed's address an OpenStax collection names, and `unpack-epub.py` from the first deed's address in an EPUB's rights.
 
+Some pages may have a license of their own, or be adapted from another work, which `project.licenses` says, one entry for each work:
+
+```yaml
+project:
+  license: CC-BY-SA-4.0
+  licenses:
+    - pages: [ch03-*]                   # names as the run gives them, or patterns
+      title: Principles of Economics 3e
+      author: OpenStax                  # or a list of names
+      source: https://openstax.org/details/books/principles-economics-3e
+      license: CC-BY-4.0
+      changes: Shortened, with new examples.
+    - pages: [ch07]
+      statement: Figure 7.1 is used with its photographer's permission.
+```
+
+From an entry's title, author, source, and license, the parts of the credit Creative Commons asks a reuser to give, and its `changes`, the run writes one sentence at the end of the last of its pages in the book's order: "Adapted from *Principles of Economics 3e* by OpenStax, licensed under CC BY 4.0. Changes: Shortened, with new examples.", the title linked to the source and the license, by the short name Creative Commons gives it, to its deed. `each_page: true` writes it at the end of each page the entry names. The sentence's form is English, and is marked English on a page in another language; for other words, give a `statement`, which is written as it is, with a `license` or not. A page is named as the run names it, its file's name without the extension, or a piece of a split page's (`ch03--intro`), and a pattern takes `*`, `?`, and `[...]`; an entry that names no page stops the run, since a page without the credit its license asks for is worse than no build. The source must be an `http` or `https` address.
+
+A page's license is its entries' (a statement without one leaves it the book's), and otherwise the book's. An HTML page links to its license's deed in its head (`<link rel="license">`), as each of an EPUB's content documents does for the pages it holds; and where any page's license differs from the book's, the book's rights say so: "Except where otherwise noted, licensed under …" in an EPUB's rights, a cartridge's manifest, and a PDF's XMP, where the copyright line is otherwise alone. A cartridge's manifest says the book costs nothing and asks nothing only where every license says so; Common Cartridge 1.1 gives a page's resource no rights of its own, so its license is in its text. A part may have its own `licenses` ([Project settings](project-settings.md)), in place of the project's. A hand-written HTML page is copied as it is, so it doesn't get the sentence; the run says so.
+
 ### The book's other facts
 
 A few settings say what a catalog or a deposit asks of a book, and the formats that have a place for one get it:

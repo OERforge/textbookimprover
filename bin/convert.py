@@ -113,7 +113,8 @@ try:
     import oerconfig
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
-                              expand_split_sources, contents_from_tree, opener_types)
+                              expand_split_sources, contents_from_tree, opener_types,
+                              flatten_pages)
     from names import safe_path, safe_stem, is_safe, output_path, by_url
     import sidecars
     from sidecars import math_keep_rows
@@ -4610,6 +4611,87 @@ def filter_pages(base, stems, target, env, raw=None):
     return written
 
 
+def license_inlines(entry):
+    """The sentence an entry of project.licenses gives, as Pandoc's
+    inlines (licenses.tasl_parts): the work's title emphasized and linked
+    to its source, the license linked to its deed, each as text the
+    writers escape, the addresses checked as http or https already."""
+    import licenses
+
+    def words(text):
+        out = []
+        for index, word in enumerate(re.split(r"( )", text)):
+            if word == " ":
+                out.append({"t": "Space"})
+            elif word:
+                out.append({"t": "Str", "c": word})
+        return out
+    out = []
+    for text, kind, address in licenses.tasl_parts(entry):
+        runs = words(text)
+        if kind == "title":
+            runs = [{"t": "Emph", "c": runs}]
+        if address:
+            runs = [{"t": "Link", "c": [["", [], []], runs, [address, ""]]}]
+        out += runs
+    return out
+
+
+def add_license_statements(project, pages):
+    """Each entry of project.licenses (a part's own in its run) as its
+    sentence at the end of the last of its pages in the book's order, or
+    of each with each_page: a div of class oer-license, marked English
+    where the page isn't, since the sentence's fixed form is. An entry
+    that names none of the pages stops the run, a page left without the
+    credit its license asks for being worse than no build. Returns the
+    pages given one."""
+    import licenses
+    entries = project.get("licenses") or []
+    if not entries:
+        return []
+    stems = [os.path.basename(p)[:-len(INTERMEDIATE)] for p in pages]
+    missing = licenses.unmatched(entries, stems)
+    if missing:
+        import people
+        die("ERROR: " + "; ".join(
+            f"{people.entry('licenses', index)} names no page of this part "
+            f"({', '.join(entries[index - 1]['pages'])})" for index in missing)
+            + ". A page is named as the run names it (its file's name without "
+            "the extension, or a piece of a split page's, ch03--intro), or by a "
+            "pattern (ch03-*).")
+    known = set(stems)
+    order = [stem for stem in flatten_pages(unsaid_tree(project, pages)[0]) if stem in known]
+    order += sorted(known - set(order))
+    by_stem = dict(zip(stems, pages))
+    placed = licenses.statement_pages(entries, order)
+    for stem, chosen in placed.items():
+        with open(by_stem[stem], encoding="utf-8") as fh:
+            doc = json.load(fh)
+        language = meta_text(doc.get("meta", {}), "lang") or str(project.get("language") or "")
+        attributes = [] if language.lower().split("-")[0] == "en" else [["lang", "en"]]
+        doc["blocks"] = doc.get("blocks", []) + [
+            {"t": "Div", "c": [["", ["oer-license"], attributes],
+                               [{"t": "Para", "c": license_inlines(entry)}]]}
+            for entry in chosen]
+        with open(by_stem[stem], "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+    return sorted(placed)
+
+
+def license_links(project, stem):
+    """A page's <link rel="license"> elements, one for each of its
+    licenses that has a deed (licenses.page_licenses), for its head."""
+    import licenses
+    own = licenses.page_licenses(project.get("licenses"), [stem],
+                                 project.get("license")).get(stem, [])
+    links = []
+    for license_id in own:
+        found = licenses.known(license_id)
+        if found:
+            links.append('<link rel="license" href="%s" />' % html_escape(found[1]))
+    return "\n".join(links)
+
+
 PUBLISHER_PAGE = re.compile(r"^https?://[^/]+/books/[^/]+/pages/([^#?/]+)([#?].*)?$")
 
 
@@ -7085,7 +7167,7 @@ def number_page_headings(target, tree, titles, texts=None):
     return changed
 
 
-def render_html(target, pages, base, fragments, language, env):
+def render_html(target, pages, base, fragments, language, env, project=None):
     env = dict(env, TARGET_NAME=target.name,
                TITLE_BLOCK=str(target["title_block"]), TITLE_WRITER="html",
                MEDIA_SAFE="1", MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
@@ -7139,6 +7221,9 @@ def render_html(target, pages, base, fragments, language, env):
             text = fh.read()
         headed = notes_lib.titled(text, " ".join(str(target["notes.title"] or "").split()))
         headed = headercells.empty_as_data(headed, marked=True)[0]
+        links = license_links(project or {}, stem)
+        if links and "</head>" in headed:
+            headed = headed.replace("</head>", links + "\n</head>", 1)
         if headed != text:
             with open(out, "w", encoding="utf-8") as fh:
                 fh.write(headed)
@@ -7337,6 +7422,21 @@ def book_tree(project, pages, numbered=None):
     the project says so. Returns (tree, titles, api), api being the
     Pandoc API version the intermediates carry, for a document the run
     writes itself."""
+    tree, titles, api, problems, expanded = unsaid_tree(project, pages)
+    if expanded:
+        write_contents_sample(project, tree)
+    for problem in problems:
+        say(f"WARNING: {problem}")
+    opener_types(tree, titles)
+    if project.get("numbering") if numbered is None else numbered:
+        number_tree(tree, titles)
+    return tree, titles, api
+
+
+def unsaid_tree(project, pages):
+    """book_tree's structure, saying nothing and writing nothing: (tree,
+    titles, api, the problems it found, whether contents named a source
+    that was split)."""
     titles, parts, roles = {}, {}, {}
     stems = []
     api = None
@@ -7364,21 +7464,16 @@ def book_tree(project, pages, numbered=None):
     available, used, problems = set(stems), set(), []
     available.add("notes")          # a page the run may write itself
     contents = project.get("contents") or []
+    split = False
     if contents:
         expanded = expand_split_sources(contents, stems, titles, parts, roles)
         tree = walk_contents(expanded, available, used, problems,
                              suffix=INTERMEDIATE)
-        if expanded is not contents:
-            write_contents_sample(project, tree)
+        split = expanded is not contents
     else:
         tree = walk_contents(guess_contents(stems, None, titles, parts, roles),
                              available, used, problems, suffix=INTERMEDIATE)
-    for problem in problems:
-        say(f"WARNING: {problem}")
-    opener_types(tree, titles)
-    if project.get("numbering") if numbered is None else numbered:
-        number_tree(tree, titles)
-    return tree, titles, api
+    return tree, titles, api, problems, split
 
 
 PROJECT_SAMPLE = "project-sample.yaml"
@@ -8714,6 +8809,19 @@ def main():
                 pages_by_dir[target.pages_dir] += written_hand
         hand_stems = set(hand)
 
+        # ---- 4.62 each license entry's sentence, at the end of its pages ----
+        credited = set()
+        for pages in pages_by_dir.values():
+            credited.update(add_license_statements(project, pages))
+        if credited:
+            say(f"{len(credited)} page(s) given the sentence their licenses entry "
+                "asks for: " + ", ".join(sorted(credited)))
+        if credited & hand_stems:
+            say("WARNING: " + ", ".join(sorted(credited & hand_stems)) + ": a "
+                "hand-written page's HTML is copied as it is, so it doesn't get the "
+                "sentence its licenses entry asks for; the EPUB and the PDF do. Write "
+                "it into the page.")
+
         # ---- 4.65 images wider than they're shown (images.downsample) -------
         prepare_downsampled(targets, pages_by_dir, base, work, latex_book=bool(master))
 
@@ -8745,7 +8853,7 @@ def main():
                     target, base, work, css_header))
                 written[target.name] = render_html(
                     target, rendered, base, fragments[target.name], language,
-                    tenv)
+                    tenv, project)
                 written[target.name] += copy_hand_pages(
                     base, hand, target.output_dir, target.variants)
                 tree, titles, api = book_tree(

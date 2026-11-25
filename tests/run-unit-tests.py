@@ -929,6 +929,137 @@ def check_licenses():
     ]
 
 
+def check_page_licenses():
+    """lib/licenses.py's licenses page by page: an entry's TASL parts or
+    statement checked, each mistake named by its place; its pages by name
+    or pattern; each page's licenses its entries' or the part's; the
+    sentence's fixed form, the license by Creative Commons' short name;
+    an entry's last page, or each; the rights "except where otherwise
+    noted"; what isn't open; and a part's own list in place of the
+    project's."""
+    import licenses
+    shorts = [licenses.short_name(i) for i in ("CC-BY-NC-SA-4.0", "cc-by-4.0", "CC-BY-3.0-US",
+                                               "CC0-1.0", "MIT", "")]
+    good, said = licenses.check_entry({
+        "pages": "ch03-*", "title": "Principles of Economics 3e",
+        "author": ["OpenStax", "A. Writer", "B. Writer"],
+        "source": "https://openstax.org/details/books/principles-economics-3e",
+        "license": "CC-BY-4.0", "changes": "Shortened"}, "licenses' first entry")
+    stated, _ = licenses.check_entry({"pages": ["ch07", "ch08"], "statement": "Used with "
+                                      "permission.", "each_page": True}, "x")
+    wrong = [licenses.check_entry(v, "e")[1] for v in (
+        {"title": "T", "license": "CC-BY-4.0"},
+        {"pages": "a/b", "title": "T", "license": "CC-BY-4.0"},
+        {"pages": "a", "statement": "S", "title": "T"},
+        {"pages": "a", "author": "A"},
+        {"pages": "a", "title": "T", "license": "CC-BY-4.0", "source": "javascript:alert(1)"},
+        {"pages": "a", "title": "T\x07", "license": "CC-BY-4.0", "each_page": "yes",
+         "owner": "x"},
+        "ch03")]
+    entries = [good, stated, {"pages": ["ch03-intro"], "title": "Other", "license": "CC0-1.0"}]
+    order = ["ch01", "ch03-intro", "ch03-body", "ch07", "ch08"]
+    owned = licenses.page_licenses(entries, order, "CC-BY-SA-4.0")
+    placed = licenses.statement_pages(entries, order)
+    conversion = oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+    import projectpaths
+
+    def resolved(project, part=None):
+        path = os.path.join(scratch(), "conversion.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.licenses\n" + project
+                     + "targets:\n  html:\n    format: html\n")
+        projectpaths.set_part(part, os.path.dirname(path))
+        try:
+            return oerconfig.resolve(conversion, project_schema,
+                                     [oerconfig.load_document(path)], target="html").project
+        except oerconfig.ConfigError as error:
+            return str(error)
+        finally:
+            projectpaths.set_part(None)
+    listed = ("  licenses:\n    - {pages: ch1, title: T, license: CC-BY-4.0}\n"
+              "  parts:\n    book: {kind: book}\n    second:\n      kind: book\n"
+              "      licenses:\n        - {pages: [s1], statement: Mine., license: MIT}\n")
+    by_part = [resolved(listed, "book"), resolved(listed, "second")]
+    refused = [resolved("  licenses:\n    - {pages: ch1, title: T}\n"),
+               resolved("  parts:\n    book:\n      kind: book\n      licenses:\n"
+                        "        - {pages: s1, statement: S, changes: C}\n")]
+    return [
+        ("a license's short name as Creative Commons writes it, a space after CC, and "
+         "another as given",
+         lambda: shorts == ["CC BY-NC-SA 4.0", "CC BY 4.0", "CC BY 3.0 US", "CC0 1.0", "MIT", ""]
+         or fail(repr(shorts))),
+        ("an entry's parts kept, a page or a pattern made a list, the authors a list",
+         lambda: not said and good == {
+             "pages": ["ch03-*"], "title": "Principles of Economics 3e",
+             "author": ["OpenStax", "A. Writer", "B. Writer"],
+             "source": "https://openstax.org/details/books/principles-economics-3e",
+             "license": "CC-BY-4.0", "changes": "Shortened"}
+         and stated == {"pages": ["ch07", "ch08"], "statement": "Used with permission.",
+                        "each_page": True} or fail(repr((good, said, stated)))),
+        ("no pages, a page with a folder, a statement beside its parts, no title or license, "
+         "a source that isn't http, a control character, each_page not true or false, a key "
+         "not taken, and an entry that isn't a mapping each refused",
+         lambda: "has no pages" in wrong[0][0] and "without a folder" in wrong[1][0]
+         and "not both" in wrong[2][0] and any("no title" in w for w in wrong[3])
+         and any("no license" in w for w in wrong[3]) and "source" in wrong[4][0]
+         and any("control character" in w for w in wrong[5])
+         and any("each_page" in w for w in wrong[5]) and any("owner" in w for w in wrong[5])
+         and wrong[6] and all(wrong) or fail(repr(wrong))),
+        ("the sentence: the title, the authors joined, the license's short name, and the "
+         "changes; and a statement as written",
+         lambda: licenses.tasl_sentence(good) == "Adapted from Principles of Economics 3e by "
+         "OpenStax, A. Writer, and B. Writer, licensed under CC BY 4.0. Changes: Shortened."
+         and licenses.tasl_sentence(stated) == "Used with permission."
+         and [kind for _, kind, address in licenses.tasl_parts(good) if address]
+         == ["title", "license"] or fail(licenses.tasl_sentence(good))),
+        ("each page's licenses its entries', in order, and the part's where none names it",
+         lambda: owned == {"ch01": ["CC-BY-SA-4.0"], "ch03-intro": ["CC-BY-4.0", "CC0-1.0"],
+                           "ch03-body": ["CC-BY-4.0"], "ch07": ["CC-BY-SA-4.0"],
+                           "ch08": ["CC-BY-SA-4.0"]} or fail(repr(owned))),
+        ("an entry's sentence on the last of its pages in the book's order, or on each",
+         lambda: {stem: [e.get("title") or e.get("statement") for e in chosen]
+                  for stem, chosen in placed.items()}
+         == {"ch03-body": ["Principles of Economics 3e"], "ch03-intro": ["Other"],
+             "ch07": ["Used with permission."], "ch08": ["Used with permission."]}
+         or fail(repr(placed))),
+        ("an entry naming no page found by its place, and the rights except where otherwise "
+         "noted only where a license differs from the part's",
+         lambda: licenses.unmatched(entries + [{"pages": ["nothing*"]}], order) == [4]
+         and licenses.exceptions(entries, "CC-BY-SA-4.0")
+         and not licenses.exceptions([good], "cc-by-4.0")
+         and licenses.statement("", "CC-BY-SA-4.0", noted=True) == "Except where otherwise "
+         "noted, licensed under Creative Commons Attribution-ShareAlike 4.0 International "
+         "(https://creativecommons.org/licenses/by-sa/4.0/)."
+         and licenses.statement("Mine.", "All rights reserved", noted=True)
+         == "Mine. Except where otherwise noted, license: All rights reserved."
+         or fail(repr(licenses.unmatched(entries, order)))),
+        ("what isn't open: a part's license, the project's where a part has none, and an "
+         "entry's",
+         lambda: licenses.restricted({
+             "license": "CC-BY-4.0", "parts": {
+                 "book": {"kind": "book"},
+                 "bank": {"kind": "book", "license": "LicenseRef-instructors-only"},
+                 "deck": {"kind": "slides", "licenses": [
+                     {"pages": ["d1"], "statement": "S", "license": "MIT"}]}}})
+         == [("parts.bank", "LicenseRef-instructors-only"),
+             ("parts.deck's licenses' first entry", "MIT")]
+         and licenses.restricted({}) == [("project", "")] or fail(repr(licenses.restricted(
+             {"license": "CC-BY-4.0", "parts": {"bank": {"kind": "book",
+                                                         "license": "x"}}})))),
+        ("a part's own list in place of the project's, and the project's where it has none",
+         lambda: [r["licenses"] if isinstance(r, dict) else r for r in by_part] == [
+             [{"pages": ["ch1"], "title": "T", "license": "CC-BY-4.0"}],
+             [{"pages": ["s1"], "statement": "Mine.", "license": "MIT"}]]
+         or fail(repr(by_part))),
+        ("a mistake in the project's list and in a part's named by its place",
+         lambda: all(isinstance(r, str) for r in refused)
+         and "licenses' first entry has no license" in refused[0]
+         and "parts.book.licenses' first entry has a statement and changes" in refused[1]
+         or fail(repr(refused))),
+    ]
+
+
 def check_book_identifiers():
     """lib/identifiers.py: a DOI bare from its forms, an ISBN-13 and an
     ISBN-10 as 13 digits, each check digit checked, and an address that
@@ -13543,6 +13674,7 @@ GROUPS = [
     ("lib/licenses.py, a book's license and copyright line", check_licenses),
     ("lib/education.py, a book's subjects, readers' ages, and time", check_education),
     ("a book's release: its date, copyright, type of work, and period", check_release),
+    ("lib/licenses.py, a license page by page", check_page_licenses),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

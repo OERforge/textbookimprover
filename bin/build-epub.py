@@ -215,7 +215,8 @@ def book_metadata(project, resolved, found, paths):
     # The copyright line and the license, by name and deed, as one
     # statement of the book's rights (lib/licenses.py).
     rights = licenses.statement(project.get("copyright"), project.get("license"),
-                                project.get("published"))
+                                project.get("published"), noted=licenses.exceptions(
+                                    project.get("licenses"), project.get("license")))
     if rights:
         meta["rights"] = meta_string(rights)
     # The release's date as the book's date, which Pandoc's writer gives
@@ -1091,6 +1092,52 @@ def mark_page_languages(path, assembly, book):
     return len(changed)
 
 
+SECTION_ID = re.compile(r'<section id="([^"]+)"')
+
+
+def mark_licenses(path, project, stems):
+    """Each content document's licenses as links to their deeds in its
+    head (<link rel="license">): the licenses of the pages it holds, by
+    their sections' ids (licenses.page_licenses), or the book's where it
+    holds none of them (the title page, a group's, the notes). Returns
+    the number of files changed."""
+    by_id = {page_id(stem): stem for stem in stems}
+    own = licenses.page_licenses(project.get("licenses"), stems, project.get("license"))
+    book = [project["license"]] if licenses.known(project.get("license")) else []
+    with zipfile.ZipFile(path) as archive:
+        names = [n for n in archive.namelist() if "/text/" in n and n.endswith(".xhtml")]
+        texts = {n: archive.read(n).decode("utf-8") for n in names}
+    changed = {}
+    for name, text in texts.items():
+        held = []
+        for ident in SECTION_ID.findall(text):
+            stem = by_id.get(ident) or max(
+                (s for s in stems if ident.startswith(page_id(s) + "--")), key=len,
+                default=None)
+            for license_id in own.get(stem, []) if stem else []:
+                if license_id not in held:
+                    held.append(license_id)
+        links = ['<link rel="license" href="%s" />' % html_escape(found[1])
+                 for found in (licenses.known(each) for each in held or book) if found]
+        if links and "</head>" in text:
+            changed[name] = text.replace("</head>", "\n".join(links) + "\n</head>", 1)
+    if not changed:
+        return 0
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "mimetype":
+                zout.writestr(info, data, compress_type=zipfile.ZIP_STORED)
+                continue
+            if info.filename in changed:
+                data = changed[info.filename].encode("utf-8")
+            zout.writestr(info, data)
+    os.replace(tmp, path)
+    return len(changed)
+
+
 def mark_mathml(opf, texts):
     """The mathml property on each text item, as its content now is."""
     def fix(match):
@@ -1283,6 +1330,7 @@ def build(paths, name, resolved, keep, intermediates=None):
         mark_divisions(out_path, assembly.divisions(), assembly.contents_id)
         # Last, as it marks the footer the notes are placed before.
         mark_page_languages(out_path, assembly, project["language"])
+        mark_licenses(out_path, project, [page[0] for page in assembly.pages])
         pictures, renamed, left = unique_svg_ids(out_path)
         if pictures:
             print(f"{pictures} SVG picture(s) held an id more than once; the "

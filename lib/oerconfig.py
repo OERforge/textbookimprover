@@ -98,7 +98,7 @@ PEOPLE_TYPES = ("person", "contributor", "organization", "funding")
 # The mappings a list's entries may be, each entry named by its place: a
 # person's kinds, and a subject the book is classed under
 # (lib/education.py).
-ENTRY_TYPES = PEOPLE_TYPES + ("subject",)
+ENTRY_TYPES = PEOPLE_TYPES + ("subject", "licensing")
 # The copyright, the line whole or its parts (lib/licenses.py).
 MAPPING_TYPES = ("copyright",)
 
@@ -612,6 +612,14 @@ def _coerce(node, value, where, problems):
         problems += [f"{where}: {p}" for p in more]
         return node.default if more else checked
 
+    if kind == "licensing":
+        if value is None or value == "":
+            return node.default
+        import licenses
+        checked, more = licenses.check_entry(value, node.path)
+        problems += [f"{where}: {p}" for p in more]
+        return node.default if more else checked
+
     if kind == "subject":
         if value is None or value == "":
             return node.default
@@ -1005,6 +1013,9 @@ def resolve(schema, project_schema, documents, target=None,
     # The work's type: the part's, then the project's, and otherwise what
     # the part's kind is taken for, or the project's kind where it names
     # no parts (lib/worktypes.py).
+    if changes.get("licenses") is not None:
+        import licenses
+        changes["licenses"] = licenses.check_entries(changes["licenses"], "licenses")[0]
     import worktypes
     if changes.get("work_type"):
         changes["work_type"] = worktypes.normalize(changes["work_type"])
@@ -1147,7 +1158,8 @@ def _inside_path_problem(value, what):
 # What a part may say of its own in place of the project's: a second book
 # in a project (an instructor's version) is another course to an LMS and
 # has its own order.
-PART_OWN = ("identifier", "title", "contents", "numbering", "license", "work_type")
+PART_OWN = ("identifier", "title", "contents", "numbering", "license", "licenses",
+            "work_type")
 
 
 def parts_problems(project, where):
@@ -1175,7 +1187,7 @@ def parts_problems(project, where):
             problems.append(f"{what} has {', '.join(map(str, unknown))}, which a "
                             "part doesn't have: a part has kind, from, and "
                             "license, and may have an identifier, title, contents, "
-                            "numbering, and work_type of its own.")
+                            "numbering, licenses, and work_type of its own.")
         identifier = block.get("identifier")
         if identifier is not None and not (isinstance(identifier, str)
                                            and NCNAME_RE.match(identifier)):
@@ -1204,6 +1216,10 @@ def parts_problems(project, where):
                 worktypes.normalize(block["work_type"])
             except ValueError as exc:
                 problems.append(f"{what}'s work_type: {exc}")
+        if block.get("licenses") is not None:
+            import licenses
+            problems.extend(f"{where}: {p}" for p in licenses.check_entries(
+                block["licenses"], f"parts.{name}.licenses")[1])
         license = block.get("license")
         if license is not None and (not isinstance(license, str) or not license.strip()):
             problems.append(f"{what} has a license that isn't text; give its "
