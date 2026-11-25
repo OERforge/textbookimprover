@@ -1021,19 +1021,23 @@ def case_identified_cartridge(work):
     ]
 
 
-def case_rights_pdf(work):
-    """The book's copyright line and license in the PDF's XMP: the line as
-    written, LaTeX's own characters in it too, as dc:rights, and the
-    license's deed as xmpRights:WebStatement."""
+def case_xmp_pdf(work):
+    """The book's facts in the PDF's XMP, as LaTeX's own XMP code takes them
+    through hyperref's keys: a title and a copyright line with commas each
+    one item, each author a creator, a subtitle that opens with brackets
+    as written, the publisher, the PDF's ISBN as a urn:isbn:, the DOI, the
+    address with LaTeX's own characters, the copyright line with them too,
+    the license's deed, and the aggregation type book; and a title the
+    metadata file gives the XMP's title."""
     def fail(message):
         raise AssertionError(message)
     if shutil.which("lualatex") is None:
-        print("  skip  lualatex not installed; a PDF's rights aren't checked")
+        print("  skip  lualatex not installed; a PDF's XMP isn't checked")
         return []
     try:
         import pikepdf
     except ImportError:
-        print("  skip  pikepdf not installed; a PDF's rights aren't checked")
+        print("  skip  pikepdf not installed; a PDF's XMP isn't checked")
         return []
 
     def write(name, text):
@@ -1041,28 +1045,59 @@ def case_rights_pdf(work):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
-    line = "© 2026 A & B {x} 100% $5 #1 \\relax ~ ^ _"
-    write("project.yaml", "project:\n  identifier: org.example.rights\n  title: Rights\n"
-          "  copyright: '" + line + "'\n  license: CC-BY-4.0\n  contents:\n    - one\n")
-    write("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n")
-    write("src/book/one.md", "# One\n\nText.\n")
-    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
-                           "--quiet"], cwd=work, capture_output=True, text=True,
-                          stdin=subprocess.DEVNULL)
-    path = os.path.join(work, "output", "pdf", "org.example.rights.pdf")
-    xmp = ""
-    if os.path.isfile(path):
-        with pikepdf.open(path) as pdf:
-            xmp = bytes(pdf.Root.Metadata.read_bytes()).decode("utf-8")
-    rights = re.findall(r'<rdf:li xml:lang="x-default">(.*?)</rdf:li>',
-                        "".join(re.findall(r"<dc:rights>.*?</dc:rights>", xmp, re.S)))
+
+    def build(own_title=False):
+        write("project.yaml", "project:\n  identifier: org.example.xmp\n"
+              "  title: 'Principles, Economics'\n"
+              "  subtitle: '[Draft] An Open Textbook'\n"
+              "  authors: ['Szarka, Robert', {name: Ana Adapter}]\n"
+              "  publisher: 'Shepherd University, Shepherdstown'\n"
+              "  isbn: {pdf: 978-1-234567-89-7, epub: 0-306-40615-2}\n"
+              "  doi: 10.5281/zenodo.1234567\n"
+              "  url: 'https://example.edu/a?b=1&c=%20#x~y'\n"
+              "  copyright: '© 2026 A & B, {x} 100% $5 #1 \\relax ~ ^ _'\n"
+              "  license: CC-BY-4.0\n  contents:\n    - one\n")
+        write("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n"
+              + ("    pdf:\n      metadata: book-meta.yaml\n" if own_title else ""))
+        write("book-meta.yaml", "---\ntitle: Its Own Title\n---\n")
+        write("src/book/one.md", "# One\n\nText.\n")
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                               "--quick", "--quiet", "--rebuild"], cwd=work,
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        path = os.path.join(work, "output", "pdf", "org.example.xmp.pdf")
+        if not os.path.isfile(path):
+            return {}, done.stderr[-800:]
+        # PRISM 3.0's namespace by its address, which pikepdf knows no prefix
+        # for.
+        prism = "{http://prismstandard.org/namespaces/basic/3.0/}"
+        with pikepdf.open(path) as pdf, pdf.open_metadata() as meta:
+            return ({key: meta.get(key.replace("prism:", prism)) for key in (
+                "dc:title", "dc:creator", "prism:subtitle", "dc:publisher", "dc:identifier",
+                "prism:doi", "prism:url", "dc:rights", "xmpRights:WebStatement",
+                "prism:aggregationType")}, done.stderr[-800:])
+    found, said = build()
+    titled, said_titled = build(own_title=True)
     return [
-        ("the copyright line as written, as dc:rights",
-         lambda: rights == ["© 2026 A &amp; B {x} 100% $5 #1 \\relax ~ ^ _"]
-         or fail(repr(rights) + done.stderr[-600:])),
-        ("the license's deed as the web statement",
-         lambda: "<xmpRights:WebStatement>https://creativecommons.org/licenses/by/4.0/"
-         "</xmpRights:WebStatement>" in xmp or fail(xmp[:2000])),
+        ("the title and the copyright line with commas each one item",
+         lambda: found.get("dc:title") == "Principles, Economics"
+         and found.get("dc:rights") == "© 2026 A & B, {x} 100% $5 #1 \\relax ~ ^ _"
+         or fail(repr(found) + said)),
+        ("each author a creator, a comma in a name kept",
+         lambda: found.get("dc:creator") == ["Szarka, Robert", "Ana Adapter"]
+         or fail(repr(found))),
+        ("a subtitle that opens with brackets as written, and the publisher one",
+         lambda: found.get("prism:subtitle") == "[Draft] An Open Textbook"
+         and found.get("dc:publisher") == {"Shepherd University, Shepherdstown"}
+         or fail(repr(found))),
+        ("the PDF's ISBN, the DOI, the address, the deed, and a book",
+         lambda: found.get("dc:identifier") == "urn:isbn:9781234567897"
+         and found.get("prism:doi") == "10.5281/zenodo.1234567"
+         and found.get("prism:url") == "https://example.edu/a?b=1&c=%20#x~y"
+         and found.get("xmpRights:WebStatement")
+         == "https://creativecommons.org/licenses/by/4.0/"
+         and found.get("prism:aggregationType") == "book" or fail(repr(found))),
+        ("a title the metadata file gives the XMP's",
+         lambda: titled.get("dc:title") == "Its Own Title" or fail(repr(titled) + said_titled)),
     ]
 
 
@@ -13151,7 +13186,7 @@ CASES = [
     ("the build record, of a program a limit stopped", case_build_record_stops),
     ("the book's people in the cartridge", case_people_cartridge),
     ("the book's identifiers in the cartridge", case_identified_cartridge),
-    ("the book's rights in the PDF", case_rights_pdf),
+    ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

@@ -950,33 +950,82 @@ def metadata_file(base, setting):
     return json.loads(result.stdout).get("meta", {})
 
 
-def rights_setup(project):
-    """The book's copyright line and its license's address for the PDF's
-    XMP (dc:rights and xmpRights:WebStatement), as
-    LaTeX's own XMP code takes them through hyperref's pdfcopyright and
-    pdflicenseurl keys (pdfmanagement.ltx). Set as the document begins,
-    once hyperref is loaded, and only where \\DocumentMetadata loaded that
-    code, which declares the keys. The line is escaped as LaTeX's text
-    (texremediate.escape), the address made of the characters a license's
-    deed's address holds."""
+# A value LaTeX's XMP code reads as one in a language (pdfmanagement.ltx's
+# \l__pdfmeta_xmp_lang_regex): a tag in brackets at its start.
+XMP_LANGUAGE = re.compile(r"\[[A-Za-z-]+\]")
+
+
+def xmp_text(value, language):
+    """A setting's text as a hyperref key's value for LaTeX's XMP code: one
+    line, its control characters out, since a blank line would end a
+    paragraph, which the keys don't take; escaped as texremediate.escape
+    does a key's, but for ^ and ~, which the XMP code wrote as
+    \\textasciicircum's name, each its character, \\string's; and, where it
+    starts with what the XMP code would read as a language's tag ([Draft]),
+    the book's language's tag before it, so it's read as written."""
     import licenses
     import texremediate
+    line = licenses.one_line(value)
+    if not line:
+        return ""
+    escaped = texremediate.escape(line).replace(
+        "\\textasciicircum{}", "\\string^").replace("\\textasciitilde{}", "\\string~")
+    if XMP_LANGUAGE.match(escaped) and re.fullmatch(r"[A-Za-z-]+", language or ""):
+        escaped = "[%s]%s" % (language, escaped)
+    return escaped
+
+
+def xmp_setup(project, own=None):
+    """The book's facts as LaTeX's own XMP code takes them, through
+    hyperref's keys (pdfmanagement.ltx): the title as dc:title and each
+    author a dc:creator, in place of Pandoc's template's pdftitle and
+    pdfauthor, which the code splits at a comma ("Principles, 3e" two
+    titles) and which give every author as one (the document
+    information's Author hyperref's, the names a comma apart, where
+    Pandoc's had a semicolon); the subtitle as
+    prism:subtitle; the publisher as dc:publisher; the PDF's own ISBN as
+    dc:identifier, a urn:isbn:; the DOI as prism:doi; the address as
+    prism:url; the book as prism:aggregationType book, which it always is;
+    the copyright line as dc:rights; and the license's deed as
+    xmpRights:WebStatement. A value the code takes as a list, split at its
+    commas, is braced whole. The title, the authors, and the subtitle are
+    the metadata file's where it gives them (own), as Pandoc's template
+    would take them, and an author-meta of its own is left to the
+    template. Set as the document begins, once hyperref is
+    loaded and after the template's keys, and only where
+    \\DocumentMetadata loaded that code, which declares the keys. Each
+    value is xmp_text's, the deed's address made of the characters a
+    deed's address holds."""
+    import licenses
+    own = own or {}
+    language = str(project.get("language") or "")
     keys = []
-    # One line, its control characters out: a blank line in the key's
-    # value would be a paragraph's end, which hyperref's keys don't take.
-    line = licenses.one_line(project.get("copyright"))
-    if line:
-        # The text escaped as texremediate.escape does a key's, but for ^
-        # and ~, which LaTeX's XMP code wrote as \textasciicircum's name:
-        # each is its character, \string's.
-        escaped = texremediate.escape(line).replace(
-            "\\textasciicircum{}", "\\string^").replace("\\textasciitilde{}", "\\string~")
-        keys.append("pdfcopyright={%s}" % escaped)
+
+    def key(name, value, listed=False):
+        text = xmp_text(value, language)
+        if text:
+            keys.append(("%s={{%s}}" if listed else "%s={%s}") % (name, text))
+    own_title = own.get("title-meta") or own.get("title")
+    key("pdftitle", meta_plain(own_title) if own_title else project.get("title"), listed=True)
+    if "author" in own:
+        names = [meta_plain(a) for a in meta_items(own["author"])]
+    else:
+        names = people.names(project.get("authors"))
+    authors = [a for a in (xmp_text(n, language) for n in names) if a]
+    if authors and "author-meta" not in own:
+        keys.append("pdfauthor={%s}" % ",".join("{%s}" % a for a in authors))
+    key("pdfsubtitle", meta_plain(own["subtitle"]) if "subtitle" in own
+        else project.get("subtitle"))
+    key("pdfpublisher", people.name(project.get("publisher")), listed=True)
+    isbn = (project.get("isbn") or {}).get("pdf")
+    key("pdfidentifier", "urn:isbn:" + isbn if isbn else "")
+    key("pdfdoi", project.get("doi"))
+    key("pdfurl", project.get("url"))
+    key("pdfcopyright", project.get("copyright"), listed=True)
     found = licenses.known(project.get("license"))
     if found and re.fullmatch(r"[A-Za-z0-9:/._-]+", found[1]):
         keys.append("pdflicenseurl={%s}" % found[1])
-    if not keys:
-        return ""
+    keys.append("pdfpubtype={book}")
     return ("\\AtBeginDocument{\\IfDocumentMetadataTF{\\hypersetup{%s}}{}}\n"
             % ",".join(keys))
 
@@ -1151,7 +1200,7 @@ def book_metadata(project, resolved, base, numbered):
     # The footer setting at the foot of every page, its words alone
     # (pagefooter: LaTeX's tagging marks the foot an artifact).
     ours += pagefooter.latex_preamble(resolved["footer"], base)
-    ours += rights_setup(project)
+    ours += xmp_setup(project, own)
     # The template loads amssymb before unicode-math, which leaves the
     # names unicode-math lacks drawn as control characters.
     ours += "\\ifdefined\\directlua\n" + latexbuild.UM_ALIASES + "\\fi\n"

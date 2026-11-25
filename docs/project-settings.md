@@ -18,7 +18,7 @@ The book's title, as it should appear to a reader.
 
 **`subtitle`**—`string`; default `""` (empty)
 
-The book's subtitle, as a reader should see it after the title. An EPUB records it as a second title, typed subtitle; a PDF sets it on its title page; a cartridge's title has it after a colon.
+The book's subtitle, as a reader should see it after the title. An EPUB records it as a second title, typed subtitle; a PDF sets it on its title page, and has it in its XMP; a cartridge's title has it after a colon.
 
 **`language`**—`language`; default `en`
 
@@ -30,11 +30,11 @@ A sentence or two about the book, used wherever a package format asks for one.
 
 **`doi`**—`doi`; default `""` (empty)
 
-The book's DOI, bare (10.5281/zenodo.1234567) or as its address, checked for its form and kept bare. An EPUB records it as an identifier typed DOI, after the book's own; a cartridge's manifest as an identifier in the DOI catalog.
+The book's DOI, bare (10.5281/zenodo.1234567) or as its address, checked for its form and kept bare. An EPUB records it as an identifier typed DOI, after the book's own; a PDF in its XMP; a cartridge's manifest as an identifier in the DOI catalog.
 
 ## isbn
 
-The book's ISBNs, one for each format that has its own: each an ISBN-13 or an ISBN-10, its hyphens as you like, checked for its check digit and kept as its 13 digits, an ISBN-10 as the ISBN-13 it becomes. The EPUB records its own, epub, as an identifier typed ISBN-13; the others are kept for the formats TextbookImprover doesn't make, and for the book's records.
+The book's ISBNs, one for each format that has its own: each an ISBN-13 or an ISBN-10, its hyphens as you like, checked for its check digit and kept as its 13 digits, an ISBN-10 as the ISBN-13 it becomes. The EPUB records its own, epub, as an identifier typed ISBN-13, and the PDF its own, pdf, in its XMP; the others are kept for the formats TextbookImprover doesn't make, and for the book's records.
 
 **`isbn.epub`**—`isbn`; default `""` (empty)
 
@@ -42,7 +42,7 @@ The EPUB's ISBN.
 
 **`isbn.pdf`**—`isbn`; default `""` (empty)
 
-The PDF's ISBN.
+The PDF's ISBN, which its XMP gives as its identifier.
 
 **`isbn.paperback`**—`isbn`; default `""` (empty)
 
@@ -66,7 +66,7 @@ The book's place in the series, as a number (3, or 3.5); quote it.
 
 **`url`**—`url`; default `""` (empty)
 
-The book's own address, where readers find it, as an http or https URL. A cartridge's manifest records it as an identifier in the URI catalog.
+The book's own address, where readers find it, as an http or https URL. A PDF has it in its XMP, and a cartridge's manifest records it as an identifier in the URI catalog.
 
 **`keywords`**—`list`; default `[]`
 
@@ -74,7 +74,7 @@ Words a catalog can find the book by. An EPUB records each as a subject, a PDF a
 
 **`publisher`**—`organization`; default `""` (empty)
 
-Who published the book: a name, or a mapping with name and ror, the organization's ROR ID (https://ror.org/05dxps055 or 05dxps055), checked for its checksum. An EPUB records the name as its publisher, and a cartridge's manifest the publisher, with the date.
+Who published the book: a name, or a mapping with name and ror, the organization's ROR ID (https://ror.org/05dxps055 or 05dxps055), checked for its checksum. An EPUB records the name as its publisher, as a PDF's XMP does, and a cartridge's manifest the publisher, with the date.
 
 **`copyright`**—`string`; default `""` (empty)
 
