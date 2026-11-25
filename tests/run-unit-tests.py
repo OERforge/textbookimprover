@@ -872,6 +872,82 @@ def check_reads():
     ]
 
 
+def check_people():
+    """lib/people.py and the settings that name people: an ORCID iD and a
+    ROR ID checked and written as their addresses, a MARC role by its term
+    or its code, a person a name or a mapping, and what's wrong with one
+    named by its place in the project's settings."""
+    import people
+    ids = [people.orcid(v) for v in ("0000-0002-1825-0097", "https://orcid.org/0000-0002-1694-233x",
+                                     "0000000218250097")]
+    rors = [people.ror(v) for v in ("05dxps055", "https://ror.org/02MHBDP94")]
+    refused = []
+    for check, value in ((people.orcid, "0000-0002-1825-0098"), (people.orcid, "1234"),
+                         (people.ror, "01k4yrm30"), (people.ror, "11k4yrm29"),
+                         (people.ror, "01kOyrm29")):
+        try:
+            check(value)
+            refused.append("")
+        except ValueError as exc:
+            refused.append(str(exc))
+    roles = [people.relator(r) for r in ("Illustrator", "ill", "trl", "painter-x", "")]
+    conversion = oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+
+    def resolved(project):
+        path = os.path.join(scratch(), "conversion.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.people\n" + project
+                     + "targets:\n  html:\n    format: html\n")
+        try:
+            return oerconfig.resolve(conversion, project_schema,
+                                     [oerconfig.load_document(path)], target="html")
+        except oerconfig.ConfigError as error:
+            return str(error)
+    plain = resolved("  authors: [A. Writer]\n  publisher: OERforge\n")
+    full = resolved("  authors:\n    - name: Robert Szarka\n      orcid: 0000-0002-1825-0097\n"
+                    "      affiliation: {name: Shepherd University, ror: 05dxps055}\n"
+                    "  contributors:\n    - {name: Ill Ustrator, role: Illustrator}\n")
+    wrong = resolved("  authors:\n    - A. Writer\n    - {given: Robert, orcid: 1234}\n"
+                     "  editors:\n    - {name: E. Ditor, email: e@example.org}\n"
+                     "  contributors:\n    - Ill Ustrator\n    - {name: Tran Slator}\n"
+                     "  publisher: {name: OERforge, ror: 01k4yrm30}\n")
+    return [
+        ("an ORCID iD bare, as its address, or without hyphens is its address, an X its "
+         "check digit too",
+         lambda: ids == ["https://orcid.org/0000-0002-1825-0097",
+                         "https://orcid.org/0000-0002-1694-233X",
+                         "https://orcid.org/0000-0002-1825-0097"] or fail(repr(ids))),
+        ("a ROR ID bare or as its address is its address, in lowercase",
+         lambda: rors == ["https://ror.org/05dxps055", "https://ror.org/02mhbdp94"]
+         or fail(repr(rors))),
+        ("a wrong check digit, a short iD, a wrong checksum, a ROR ID not opening with 0, "
+         "and one with an O are refused, the first and third saying it's the check",
+         lambda: all(refused) and "check digit" in refused[0] and "checksum" in refused[2]
+         and "isn't a ROR ID, which is" in refused[3] and "isn't a ROR ID, which is" in refused[4]
+         or fail(repr(refused))),
+        ("a MARC role by its term in any case or its code, and one not on the list nothing",
+         lambda: roles == ["ill", "ill", "trl", None, None] or fail(repr(roles))),
+        ("names alone read as they always did",
+         lambda: not isinstance(plain, str) and plain.project["authors"] == ["A. Writer"]
+         and plain.project["publisher"] == "OERforge" or fail(repr(plain))),
+        ("a person's mapping kept, its iDs as their addresses, a role as given",
+         lambda: not isinstance(full, str) and full.project["authors"] == [{
+             "name": "Robert Szarka", "orcid": "https://orcid.org/0000-0002-1825-0097",
+             "affiliation": {"name": "Shepherd University",
+                             "ror": "https://ror.org/05dxps055"}}]
+         and full.project["contributors"] == [{"name": "Ill Ustrator", "role": "Illustrator"}]
+         or fail(repr(full))),
+        ("each mistake named by its place: no name, a bad iD, a key not taken, a "
+         "contributor as a name or with no role, a bad checksum",
+         lambda: isinstance(wrong, str) and all(part in wrong for part in (
+             "authors' second entry has no name", "authors' second entry's orcid: '1234'",
+             "editors' first entry has email", "contributors' first entry is 'Ill Ustrator'",
+             "contributors' second entry has no role", "publisher's ror: '01k4yrm30'"))
+         or fail(wrong)),
+    ]
+
+
 def check_limits():
     """lib/limits.py: sizes and times as given; how many of a kind run side
     by side, from the machine's memory or --jobs; what a run warns of; and
@@ -13171,6 +13247,7 @@ GROUPS = [
     ("the LaTeX a book supplies, scanned, and LaTeX's own list of what it opened",
      check_texreads),
     ("lib/sandbox.py, the sandbox a run converts in", check_sandbox),
+    ("lib/people.py, the people and organizations a book's settings name", check_people),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

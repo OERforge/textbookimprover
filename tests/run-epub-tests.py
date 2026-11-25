@@ -933,8 +933,76 @@ def case_svg_ids(work):
     ]
 
 
+def raised(message):
+    """Fail a check, saying why: what it found."""
+    raise AssertionError(message)
+
+
+PEOPLE = """\
+  authors:
+    - A. Writer
+    - name: Robert Szarka
+      given: Robert
+      family: Szarka
+      orcid: 0000-0002-1825-0097
+      affiliation: {name: Shepherd University, ror: 05dxps055}
+  adapters:
+    - name: Ana Adapter
+      given: Ana
+      family: Adapter
+  editors: [E. Ditor]
+  contributors:
+    - {name: Ill Ustrator, role: illustrator}
+    - {name: Tran Slator, role: trl}
+  publisher: {name: OERforge Press, ror: https://ror.org/02mhbdp94}
+"""
+
+
+def case_people(work):
+    """The book's people as the EPUB records them: the authors, adapters,
+    and editors creators in that order, each with its MARC role and, where
+    the given and family names are set, filed under them; contributors in
+    their roles; the publisher by name; and a mistyped ORCID iD stopping
+    the build, naming it."""
+    convert(work, NEEDED)
+    write_config(work, TREE, PEOPLE)
+    out = Built(work)
+    created = re.findall(r'<dc:creator id="([^"]+)">([^<]*)</dc:creator>', out.opf)
+    roles = dict(re.findall(r'<meta refines="#([^"]+)" property="role" '
+                            r'scheme="marc:relators">([^<]*)</meta>', out.opf))
+    filed = dict(re.findall(r'<meta refines="#([^"]+)" property="file-as">([^<]*)</meta>',
+                            out.opf))
+    others = re.findall(r'<dc:contributor id="([^"]+)">([^<]*)</dc:contributor>', out.opf)
+    write_config(work, TREE, PEOPLE.replace("1825-0097", "1825-0098"))
+    mistyped = Built(work)
+    return [
+        ("the build succeeds", lambda: out.status == 0 or raised(out.stderr)),
+        ("the authors, the adapter, and the editor are creators in that order, each in "
+         "its role",
+         lambda: [name for _, name in created] == ["A. Writer", "Robert Szarka",
+                                                   "Ana Adapter", "E. Ditor"]
+         and [roles.get(i) for i, _ in created] == ["aut", "aut", "adp", "edt"]
+         or raised(repr(created) + repr(roles))),
+        ("a person whose given and family names are set is filed under them, and no "
+         "other is",
+         lambda: [filed.get(i) for i, _ in created] == [None, "Szarka, Robert",
+                                                        "Adapter, Ana", None]
+         or raised(repr(filed))),
+        ("a contributor is in the role its term or code names",
+         lambda: [(name, roles.get(i)) for i, name in others]
+         == [("Ill Ustrator", "ill"), ("Tran Slator", "trl")] or raised(repr(others))),
+        ("the publisher given as a mapping is recorded by name",
+         lambda: "<dc:publisher>OERforge Press</dc:publisher>" in out.opf),
+        ("a mistyped ORCID iD stops the build, naming the setting and its check digit",
+         lambda: mistyped.status != 0
+         and "authors' second entry's orcid" in mistyped.stderr
+         and "check digit" in mistyped.stderr or raised(mistyped.stderr[-600:])),
+    ]
+
+
 CASES = [
     ("the shape of the book", case_structure),
+    ("the book's people", case_people),
     ("the table of contents read back", case_outline),
     ("tables survive assembly", case_tables_survive),
     ("accessibility claims", case_claims),

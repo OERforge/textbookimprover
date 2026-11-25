@@ -87,6 +87,10 @@ def unusual(node):
             if value != node.default:
                 return value
         return node.default
+    if kind == "list" and node.item == "contributor":
+        # A contributor is a mapping with a role, its name the word YAML
+        # would make a boolean of.
+        return [{"name": "no", "role": "ill"}, {"name": "1.10", "role": "trl"}]
     if kind == "list":
         return ["no", "1.10", "a, b"]
     if kind == "language":

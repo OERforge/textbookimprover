@@ -69,6 +69,7 @@ import languages  # noqa: E402
 import pagefooter  # noqa: E402
 import pandocversion  # noqa: E402
 import pandocrun
+import people  # noqa: E402
 import projectpaths  # noqa: E402
 from bookassembly import (  # noqa: E402
     INTERMEDIATE, page_id, load_page, inlines, header, Assembly, meta_text,
@@ -89,6 +90,28 @@ def meta_string(text):
 
 def meta_list(items):
     return {"t": "MetaList", "c": [meta_string(i) for i in items]}
+
+
+def creators(project):
+    """The book's people as Pandoc's EPUB writer takes them: (creators,
+    contributors), each a list of mappings with text, role, and file-as
+    where there is one. The authors, the adapters, and the editors are
+    creators, in that order, as MARC's aut, adp, and edt; contributors
+    are contributors, each in its own role (lib/people.py)."""
+    def entry(person, role):
+        fields = {"text": meta_string(people.name(person)), "role": meta_string(role)}
+        filed = people.file_as(person)
+        if filed:
+            fields["file-as"] = meta_string(filed)
+        return {"t": "MetaMap", "c": fields}
+    made = [entry(person, role) for key, role in (("authors", "aut"), ("adapters", "adp"),
+                                                  ("editors", "edt"))
+            for person in project.get(key) or [] if people.name(person)]
+    others = [entry(person, people.relator(person.get("role")))
+              for person in project.get("contributors") or []
+              if isinstance(person, dict) and people.name(person) and people.relator(
+                  person.get("role"))]
+    return made, others
 
 
 def accessibility_claims(found):
@@ -144,13 +167,15 @@ def book_metadata(project, resolved, found, paths):
         # a reading system recognizes a rebuilt edition as the same book.
         "identifier": meta_string(project["identifier"]),
     }
-    if project.get("publisher"):
-        meta["publisher"] = meta_string(project["publisher"])
+    if people.name(project.get("publisher")):
+        meta["publisher"] = meta_string(people.name(project["publisher"]))
     if project.get("description"):
         meta["description"] = meta_string(project["description"])
-    authors = [str(a) for a in (project.get("authors") or []) if str(a)]
-    if authors:
-        meta["creator"] = meta_list(authors)
+    made, others = creators(project)
+    if made:
+        meta["creator"] = {"t": "MetaList", "c": made}
+    if others:
+        meta["contributor"] = {"t": "MetaList", "c": others}
     for key, value in accessibility_claims(found).items():
         meta[key] = meta_list(value)
     summary = str(resolved["epub.accessibility_summary"] or "").strip()

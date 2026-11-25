@@ -24,9 +24,9 @@ BCP 47 language tag for the book's text. Sets the lang attribute on every page i
 
 A sentence or two about the book, used wherever a package format asks for one.
 
-**`publisher`**—`string`; default `""` (empty)
+**`publisher`**—`organization`; default `""` (empty)
 
-Who published the book. Written as document metadata, and available to package formats that record it.
+Who published the book: a name, or a mapping with name and ror, the organization's ROR ID (https://ror.org/05dxps055 or 05dxps055), checked for its checksum. An EPUB records the name as its publisher.
 
 **`license`**—`string`; default `""` (empty)
 
@@ -38,7 +38,19 @@ Number the book's structure the way a printed book does: groups and top-level pa
 
 **`authors`**—`list`; default `[]`
 
-Who wrote the book, one entry each, as a reader should see them. An EPUB records each as a creator; the cartridge has nowhere to put one. For an OpenStax book the publisher is usually the right entry.
+Who wrote the book, one entry each: a name, as a reader should see it, or a mapping with name and, as you like, given and family (the parts of the name, which nothing works out for you), orcid (an ORCID iD, 0000-0002-1825-0097 or its address, checked for its check digit), and affiliation (a name, or a mapping with name and ror). An EPUB records each as a creator, an author, filed under "family, given" where both are given; a PDF names each as its author. For an OpenStax book the publisher is usually the right entry.
+
+**`adapters`**—`list`; default `[]`
+
+Who adapted another's book into this one, each written as an author is. An EPUB records each as a creator, an adapter, after the authors.
+
+**`editors`**—`list`; default `[]`
+
+Who edited the book, each written as an author is. An EPUB records each as a creator, an editor, after the adapters.
+
+**`contributors`**—`list`; default `[]`
+
+Who else had a hand in the book, each a mapping written as an author's is, with a role: a MARC relator, by its code (ill) or its term (illustrator), from the Library of Congress's list (https://www.loc.gov/marc/relators/relaterm.html). An EPUB records each as a contributor in that role.
 
 **`passthrough`**—`path`; default `_pt`
 

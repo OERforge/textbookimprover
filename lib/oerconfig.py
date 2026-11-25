@@ -91,6 +91,9 @@ FALSE_WORDS = {"false", "no", "off", "0"}
 
 SCALAR_TYPES = ("string", "text", "path", "language", "ncname", "bool",
                 "int", "float", "enum", "date")
+# A person, a contributor (a person with a role), or an organization: a
+# name, or a mapping lib/people.py checks.
+PEOPLE_TYPES = ("person", "contributor", "organization")
 
 # An XML NCName: a letter or underscore, then letters, digits, and any of
 # . - _ . No colons, and it may not start with a digit. IMS types the
@@ -228,7 +231,7 @@ class Node:
         if self.type is None:
             raise ConfigError(f"schema entry {path!r} has neither keys nor "
                               "a type")
-        if self.type not in SCALAR_TYPES + ("list", "opaque"):
+        if self.type not in SCALAR_TYPES + PEOPLE_TYPES + ("list", "opaque"):
             raise ConfigError(f"schema entry {path!r} has unknown type "
                               f"{self.type!r}")
         if self.type == "enum":
@@ -552,9 +555,29 @@ def _coerce(node, value, where, problems):
             # A single value where a list is expected is almost always
             # meant, and rejecting it would be pedantry.
             value = [value]
+        if node.item in PEOPLE_TYPES:
+            # Each entry named by its place, since a list of people is
+            # where a mapping's mistake is likeliest.
+            out = []
+            for index, entry in enumerate(value, 1):
+                import people
+                item = Node(node.name, people.entry(node.path, index),
+                            {"type": node.item, "default": None})
+                checked = _coerce(item, entry, where, problems)
+                if checked is not None:
+                    out.append(checked)
+            return out
         item = Node(node.name, node.path,
                     {"type": node.item, "default": None})
         return [_coerce(item, v, where, problems) for v in value]
+
+    if kind in PEOPLE_TYPES:
+        if value is None or value == "":
+            return node.default
+        import people
+        checked, more = people.check(value, node.path, kind, prefix=f"{where}: ")
+        problems += more
+        return node.default if more else checked
 
     if kind == "bool":
         if isinstance(value, bool):
@@ -1166,6 +1189,11 @@ def _scalar(value):
         return str(value)
     if isinstance(value, list):
         return "[" + ", ".join(_scalar(v) for v in value) + "]"
+    if isinstance(value, dict):
+        # A person, an organization, or a section of the book's metadata
+        # written as a mapping (lib/people.py), each of its values quoted
+        # as one on its own is.
+        return "{" + ", ".join(f"{_scalar(k)}: {_scalar(v)}" for k, v in value.items()) + "}"
     text = str(value)
     if text == "":
         return '""'

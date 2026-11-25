@@ -44,6 +44,28 @@ Two have no useful default: `project.identifier` and `project.title`. With neith
 
 `identifier` is worth care. Brightspace matches on it when re-importing, so changing it duplicates a course rather than updating it. Keep it stable across rebuilds, and change it only when the book is genuinely a different book.
 
+### The book's people
+
+`project.authors`, `adapters`, and `editors` each list people, and `contributors` lists the others who had a hand in the book, each in a role. A person is a name, as a reader should see it, or a mapping that says more; the publisher is a name, or a mapping with its [ROR ID](https://ror.org/). A list of names stays valid as it is.
+
+```yaml
+project:
+  authors:
+    - A. Writer
+    - name: Robert Szarka
+      given: Robert                 # the name's parts, which nothing works out for you
+      family: Szarka
+      orcid: 0000-0002-1825-0097    # bare or as its address
+      affiliation: {name: Shepherd University, ror: 05dxps055}
+  adapters: [Ana Adapter]
+  editors: [E. Ditor]
+  contributors:
+    - {name: Ill Ustrator, role: illustrator}   # a MARC relator, its term or its code (ill)
+  publisher: {name: Shepherd University, ror: https://ror.org/05dxps055}
+```
+
+An ORCID iD is checked for its check digit and a ROR ID for its checksum, and a contributor's `role` must be a [MARC relator](https://www.loc.gov/marc/relators/relaterm.html), by its term or its code. A mistake stops the run, naming the entry (`authors' second entry's orcid`). An EPUB records the authors, the adapters, and the editors as its creators, in that order, as `aut`, `adp`, and `edt`, each filed under "family, given" where both are given, and the contributors in their roles; a PDF names the authors as its author. The iDs and affiliations go nowhere yet: the cartridge's metadata and the archive's description are to carry them.
+
 ### Targets
 
 Both `conversion.yaml` and `packaging.yaml` have the same shape: a `defaults:` block, then a `targets:` block naming one or more things to build. A target inherits the defaults and overrides what it needs.

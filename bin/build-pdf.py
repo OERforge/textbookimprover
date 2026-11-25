@@ -78,6 +78,7 @@ from latexbuild import (  # noqa: E402
     ENGINE, PDF_MACROS as HEADER, UA1_LINKS, is_ua1, label_prefixes, math_setup,
 )
 import pagefooter  # noqa: E402
+import people  # noqa: E402
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
 import texreads  # noqa: E402
@@ -961,7 +962,10 @@ def book_metadata(project, resolved, base, numbered):
             # level too low.
             "documentclass": {"t": "MetaInlines",
                               "c": [{"t": "Str", "c": "book"}]}}
-    authors = [str(a) for a in (project.get("authors") or []) if str(a)]
+    # The authors' names alone: a PDF's author is its title page's and its
+    # XMP's dc:creator, neither of which has a place for a role or an iD
+    # (lib/people.py).
+    authors = people.names(project.get("authors"))
     if authors:
         meta["author"] = {"t": "MetaList",
                           "c": [meta_string(a) for a in authors]}

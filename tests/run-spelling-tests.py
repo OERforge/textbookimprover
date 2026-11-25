@@ -74,6 +74,7 @@ ALLOWED = {
     ("CHANGELOG.md", "unrecognised_roles"),     # the entries naming the old
     ("CHANGELOG.md", "sanitise"),               # spellings to say what became
     ("CHANGELOG.md", "tokenise"),               # of them
+    ("lib/people.py", "programmer"),       # a MARC relator's term, the LC's
     ("tests/run-spelling-tests.py", None),  # this file names them all
 }
 
