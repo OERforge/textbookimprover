@@ -872,6 +872,39 @@ def check_reads():
     ]
 
 
+def check_book_identifiers():
+    """lib/identifiers.py: a DOI bare from its forms, an ISBN-13 and an
+    ISBN-10 as 13 digits, each check digit checked, and an address that
+    isn't http or https, or has a space, refused."""
+    import identifiers
+    dois = [identifiers.doi(v) for v in ("10.5281/zenodo.1234567", "doi:10.1000/xyz",
+                                         "https://doi.org/10.1000/xyz")]
+    isbns = [identifiers.isbn(v) for v in ("978-1-234567-89-7", "0-306-40615-2",
+                                           "ISBN 978 0 306 40615 7", "080442957X")]
+    refused = []
+    for check, value in ((identifiers.doi, "11.1000/x"), (identifiers.isbn, "978-1-234567-89-8"),
+                         (identifiers.isbn, "0-306-40615-3"), (identifiers.isbn, "12345"),
+                         (identifiers.url, "javascript:alert(1)"),
+                         (identifiers.url, "https://example.edu/a b"), (identifiers.url, "https://")):
+        try:
+            check(value)
+            refused.append("")
+        except ValueError as exc:
+            refused.append(str(exc))
+    return [
+        ("a DOI bare, doi:, or as its address is the DOI bare",
+         lambda: dois == ["10.5281/zenodo.1234567", "10.1000/xyz", "10.1000/xyz"]
+         or fail(repr(dois))),
+        ("an ISBN-13 and an ISBN-10, hyphens, spaces, and ISBN before them, as 13 digits",
+         lambda: isbns == ["9781234567897", "9780306406157", "9780306406157", "9780804429573"]
+         or fail(repr(isbns))),
+        ("a DOI not opening 10., a wrong check digit of either length, a short ISBN, and an "
+         "address not http, with a space, or with no host refused",
+         lambda: all(refused) and "check digit" in refused[1] and "check digit" in refused[2]
+         or fail(repr(refused))),
+    ]
+
+
 def check_people():
     """lib/people.py and the settings that name people: an ORCID iD and a
     ROR ID checked and written as their addresses, a MARC role by its term
@@ -13248,6 +13281,7 @@ GROUPS = [
      check_texreads),
     ("lib/sandbox.py, the sandbox a run converts in", check_sandbox),
     ("lib/people.py, the people and organizations a book's settings name", check_people),
+    ("lib/identifiers.py, a book's DOI, ISBNs, and address", check_book_identifiers),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

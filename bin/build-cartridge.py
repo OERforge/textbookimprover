@@ -508,6 +508,23 @@ def archive_name(settings, project, target):
     return name + extension
 
 
+def book_keywords(project, settings):
+    """The cartridge's keywords: project.keywords, or packaging.yaml's
+    where the project has none, as a package's were before."""
+    own = [str(k) for k in project.get("keywords") or [] if str(k).strip()]
+    return own or [str(k) for k in settings.get("keywords") or [] if str(k).strip()]
+
+
+def keyword_note(project, settings):
+    """The warning for a package's keywords that the project's don't
+    replace: where they belong now."""
+    if settings.get("keywords") and not project.get("keywords"):
+        return ("packaging.yaml's keywords are the cartridge's, as before; they're the "
+                "book's now, project.keywords, which the EPUB and the PDF take too: move "
+                "them there.")
+    return None
+
+
 def legacy_view(resolved, target):
     """Project the resolved configuration into the v0.1 shape.
 
@@ -525,7 +542,9 @@ def legacy_view(resolved, target):
             "language": project["language"],
             "version": settings["version"],
             "modified": settings["modified"],
-            "keywords": list(settings["keywords"]),
+            # The project's keywords, or where it has none a package's
+            # own, as they were before the project took them (book_keywords).
+            "keywords": book_keywords(project, settings),
             "cartridge": archive_name(settings, project, target),
         },
         "contents": project["contents"],
@@ -732,9 +751,10 @@ MANIFEST_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
           <lomimscc:string>{description}{version_note}</lomimscc:string>
         </lomimscc:description>
         <lomimscc:language>{language}</lomimscc:language>
-{keywords}      </lomimscc:general>
+{identifiers}{keywords}      </lomimscc:general>
       <lomimscc:lifeCycle>
 {contributes}      </lomimscc:lifeCycle>
+{relations}
     </lomimscc:lom>
   </metadata>
   <organizations>
@@ -918,21 +938,51 @@ def build_manifest(config, tree, page_files, common_files):
                      "</lomimscc:string>\n"
                      "        </lomimscc:keyword>\n")
 
+    project = config.get("project") or {}
+    # The subtitle after the title, the profile's title holding one string.
+    subtitle = str(project.get("subtitle") or "").strip()
+    title = manifest["title"] + (": " + subtitle if subtitle else "")
+    # The book's DOI and address as identifiers, each in its catalog.
+    identifiers = ""
+    for catalog, entry in (("DOI", project.get("doi")), ("URI", project.get("url"))):
+        if str(entry or "").strip():
+            identifiers += ("        <lomimscc:identifier>\n"
+                            f"          <lomimscc:catalog>{catalog}</lomimscc:catalog>\n"
+                            f"          <lomimscc:entry>{xml_escape(str(entry))}</lomimscc:entry>\n"
+                            "        </lomimscc:identifier>\n")
+    # The series as what the book is part of, the profile's relation
+    # taking only a kind and a description of the other resource.
+    relations = ""
+    series = project.get("series") or {}
+    if str(series.get("name") or "").strip():
+        named = str(series["name"]).strip() + (
+            ", " + str(series["position"]).strip()
+            if str(series.get("position") or "").strip() else "")
+        relations = ("      <lomimscc:relation>\n"
+                     "        <lomimscc:kind>\n"
+                     "          <lomimscc:value>ispartof</lomimscc:value>\n"
+                     "        </lomimscc:kind>\n"
+                     "        <lomimscc:resource>\n"
+                     "          <lomimscc:description>\n"
+                     f"            <lomimscc:string>{xml_escape(named)}</lomimscc:string>\n"
+                     "          </lomimscc:description>\n"
+                     "        </lomimscc:resource>\n"
+                     "      </lomimscc:relation>\n")
     head = MANIFEST_HEAD.format(
         identifier=xml_escape(manifest["identifier"]),
-        title=xml_escape(manifest["title"]),
+        title=xml_escape(title),
+        identifiers=identifiers,
+        relations=relations,
         version_note=(" (version " + xml_escape(str(manifest.get("version", "")))
                       + ")") if manifest.get("version") else "",
         description=xml_escape(manifest.get("description", "")),
         language=xml_escape(manifest.get("language", "en")),
         version=xml_escape(str(manifest.get("version", "1.0"))),
         keywords=keywords,
-        contributes=contributes(config.get("project") or {},
-                                manifest.get("modified") or build_day()),
+        contributes=contributes(project, manifest.get("modified") or build_day()),
     )
 
     organization = config.get("organization") or {}
-    project = config.get("project") or {}
     wrapper = (wrapper_title(project, organization, manifest)
                if organization.get("wrap_in_module") else None)
     items = render_items(tree, 0, wrapper)
@@ -1224,6 +1274,9 @@ def main():
             sys.exit(str(exc))
         for warning in resolved.warnings:
             print(f"WARNING: {warning}", file=sys.stderr)
+        note = keyword_note(resolved.project, resolved.settings)
+        if note:
+            print(f"WARNING: {note}", file=sys.stderr)
         config = legacy_view(resolved, target)
 
         # Two packages of the same format both derive the same

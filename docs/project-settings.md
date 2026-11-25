@@ -16,6 +16,10 @@ What the folder holds: a book, whose files are its pages, or slides, a set of de
 
 The book's title, as it should appear to a reader.
 
+**`subtitle`**—`string`; default `""` (empty)
+
+The book's subtitle, as a reader should see it after the title. An EPUB records it as a second title, typed subtitle; a PDF sets it on its title page; a cartridge's title has it after a colon.
+
 **`language`**—`language`; default `en`
 
 BCP 47 language tag for the book's text. Sets the lang attribute on every page in it (WCAG 3.1.1) and the language declared in any package built from those pages; a page in another language, as its row in the languages sidecar or its own file says, is marked in its own (WCAG 3.1.2; docs/sidecars.md). Quote it: unquoted no, yes, and on are read as booleans by YAML. A PDF of a book in a language other than English needs TeX's support for the language installed, which docs/installation.md says how to add, Spanish's for one.
@@ -23,6 +27,50 @@ BCP 47 language tag for the book's text. Sets the lang attribute on every page i
 **`description`**—`text`; default `""` (empty)
 
 A sentence or two about the book, used wherever a package format asks for one.
+
+**`doi`**—`doi`; default `""` (empty)
+
+The book's DOI, bare (10.5281/zenodo.1234567) or as its address, checked for its form and kept bare. An EPUB records it as an identifier typed DOI, after the book's own; a cartridge's manifest as an identifier in the DOI catalog.
+
+## isbn
+
+The book's ISBNs, one for each format that has its own: each an ISBN-13 or an ISBN-10, its hyphens as you like, checked for its check digit and kept as its 13 digits, an ISBN-10 as the ISBN-13 it becomes. The EPUB records its own, epub, as an identifier typed ISBN-13; the others are kept for the formats TextbookImprover doesn't make, and for the book's records.
+
+**`isbn.epub`**—`isbn`; default `""` (empty)
+
+The EPUB's ISBN.
+
+**`isbn.pdf`**—`isbn`; default `""` (empty)
+
+The PDF's ISBN.
+
+**`isbn.paperback`**—`isbn`; default `""` (empty)
+
+A paperback's ISBN, where the book is printed as one.
+
+**`isbn.hardcover`**—`isbn`; default `""` (empty)
+
+A hardcover's ISBN, where the book is printed as one.
+
+## series
+
+A series the book is part of, and its place in it. An EPUB records them as the collection it belongs to, a series, and its position; a cartridge's manifest as what it's part of.
+
+**`series.name`**—`string`; default `""` (empty)
+
+The series' name.
+
+**`series.position`**—`string`; default `""` (empty)
+
+The book's place in the series, as a number (3, or 3.5); quote it.
+
+**`url`**—`url`; default `""` (empty)
+
+The book's own address, where readers find it, as an http or https URL. A cartridge's manifest records it as an identifier in the URI catalog.
+
+**`keywords`**—`list`; default `[]`
+
+Words a catalog can find the book by. An EPUB records each as a subject, a PDF as its keywords, and a cartridge's manifest each as a keyword. Where they're unset, a package's packaging.yaml keywords are its cartridge's, as they were, and the run says to move them here.
 
 **`publisher`**—`organization`; default `""` (empty)
 

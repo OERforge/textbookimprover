@@ -90,7 +90,7 @@ TRUE_WORDS = {"true", "yes", "on", "1"}
 FALSE_WORDS = {"false", "no", "off", "0"}
 
 SCALAR_TYPES = ("string", "text", "path", "language", "ncname", "bool",
-                "int", "float", "enum", "date")
+                "int", "float", "enum", "date", "doi", "isbn", "url")
 # A person, a contributor (a person with a role), or an organization: a
 # name, or a mapping lib/people.py checks.
 PEOPLE_TYPES = ("person", "contributor", "organization")
@@ -670,6 +670,10 @@ def _coerce(node, value, where, problems):
         return node.default
     if value is None:
         return node.default
+    if kind == "isbn" and isinstance(value, int):
+        # An ISBN written without hyphens is a number to YAML, and a
+        # number of 13 digits loses none of them.
+        value = str(value)
     if not isinstance(value, str):
         # A bare 1.10 is the number 1.1 by the time it reaches us, and the
         # trailing zero is already gone, so say so rather than pretend.
@@ -692,6 +696,16 @@ def _coerce(node, value, where, problems):
             f"{where}: {node.path} is {value!r}, which is not a valid XML "
             f"name{hint}")
         return node.default
+
+    if kind in ("doi", "isbn", "url") and value.strip():
+        # The book's identifiers, each checked as lib/identifiers.py says:
+        # a DOI and an ISBN kept in the form a record takes them.
+        import identifiers
+        try:
+            return identifiers.CHECKS[kind](value)
+        except ValueError as exc:
+            problems.append(f"{where}: {node.path}: {exc}")
+            return node.default
 
     if kind == "language" and not LANGUAGE_RE.match(value):
         problems.append(f"{where}: {node.path} is {value!r}, which is not a "

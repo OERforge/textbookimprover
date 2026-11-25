@@ -1000,9 +1000,68 @@ def case_people(work):
     ]
 
 
+IDENTIFIED = """\
+  subtitle: An Open Textbook
+  doi: https://doi.org/10.5281/zenodo.1234567
+  isbn: {epub: 978-1-234567-89-7, paperback: 0-306-40615-2}
+  series: {name: Shepherd Open Textbooks, position: "3"}
+  url: https://example.edu/econ/
+  keywords: [economics, micro & macro]
+"""
+
+
+def case_identified(work):
+    """The book's subtitle, identifiers, series, and keywords as the EPUB
+    records them: a second title typed subtitle, on the title page a
+    paragraph and not a second h1; the book's own identifier the package's
+    unique one, then the DOI bare and the EPUB's ISBN as its 13 digits,
+    each typed by its ONIX code; the series with its position; each
+    keyword a subject; and a mistyped ISBN stopping the build."""
+    convert(work, NEEDED)
+    write_config(work, TREE, IDENTIFIED, "    title_page: \"on\"\n")
+    out = Built(work)
+    page = next((text for name, text in out.files.items()
+                 if name.endswith("title_page.xhtml")), "")
+    write_config(work, TREE, IDENTIFIED.replace("89-7", "89-8"))
+    mistyped = Built(work)
+    return [
+        ("the build succeeds", lambda: out.status == 0 or raised(out.stderr)),
+        ("the subtitle a second title, typed subtitle, after the main one",
+         lambda: re.search(r'<dc:title id="epub-title-1">The Fixture Book</dc:title>\s*'
+                           r'<meta refines="#epub-title-1" property="title-type">main</meta>'
+                           r'\s*<dc:title id="epub-title-2">An Open Textbook</dc:title>\s*'
+                           r'<meta refines="#epub-title-2" property="title-type">subtitle',
+                           out.opf) or raised(out.opf[:3000])),
+        ("and on the title page a paragraph after the title's h1",
+         lambda: '<p class="subtitle">An Open Textbook</p>' in page
+         and page.count("<h1") == 1 or raised(page)),
+        ("the book's own identifier the unique one, then the DOI and the ISBN, typed",
+         lambda: 'unique-identifier="epub-id-1"' in out.opf
+         and '<dc:identifier id="epub-id-1">org.example.fixtures</dc:identifier>' in out.opf
+         and re.search(r'<dc:identifier id="epub-id-2">10\.5281/zenodo\.1234567</dc:identifier>'
+                       r'\s*<meta refines="#epub-id-2" property="identifier-type" '
+                       r'scheme="onix:codelist5">06</meta>', out.opf)
+         and re.search(r'<dc:identifier id="epub-id-3">9781234567897</dc:identifier>\s*'
+                       r'<meta refines="#epub-id-3" property="identifier-type" '
+                       r'scheme="onix:codelist5">15</meta>', out.opf)
+         and "9780306406157" not in out.opf or raised(out.opf[:3000])),
+        ("the series a collection, with the book's position",
+         lambda: '<meta property="belongs-to-collection" id="epub-collection-1">Shepherd Open '
+         'Textbooks</meta>' in out.opf
+         and '<meta refines="#epub-collection-1" property="group-position">3</meta>' in out.opf),
+        ("each keyword a subject",
+         lambda: re.findall(r"<dc:subject[^>]*>([^<]*)</dc:subject>", out.opf)
+         == ["economics", "micro &amp; macro"] or raised(out.opf[:3000])),
+        ("a mistyped ISBN stops the build, naming it and its check digit",
+         lambda: mistyped.status != 0 and "isbn.epub" in mistyped.stderr
+         and "check digit" in mistyped.stderr or raised(mistyped.stderr[-600:])),
+    ]
+
+
 CASES = [
     ("the shape of the book", case_structure),
     ("the book's people", case_people),
+    ("the book's identifiers", case_identified),
     ("the table of contents read back", case_outline),
     ("tables survive assembly", case_tables_survive),
     ("accessibility claims", case_claims),

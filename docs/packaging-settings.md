@@ -54,7 +54,7 @@ Date recorded in the package metadata, as YYYY-MM-DD. Empty means the day SOURCE
 
 **`keywords`**—`list`; default `[]`
 
-Subject keywords recorded in the package metadata.
+Subject keywords recorded in the package metadata, where the book's own, project.keywords, are unset; the run says to move them there, where the EPUB and the PDF take them too.
 
 **`common_files`**—`list`; default `[]`
 

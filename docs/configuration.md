@@ -66,6 +66,22 @@ project:
 
 An ORCID iD is checked for its check digit and a ROR ID for its checksum, and a contributor's `role` must be a [MARC relator](https://www.loc.gov/marc/relators/relaterm.html), by its term or its code. A mistake stops the run, naming the entry (`authors' second entry's orcid`). An EPUB records the authors, the adapters, and the editors as its creators, in that order, as `aut`, `adp`, and `edt`, each filed under "family, given" where both are given, and the contributors in their roles; a PDF names the authors as its author. A cartridge's manifest gives each kind its contribute, in the nearest of the fifteen roles the Common Cartridge 1.1 profile takes: the authors `author`, the adapters and then the editors `editor`, and the publisher `publisher`, with the date; each person or organization is a vCard, with the name's parts, the affiliation, and the ORCID iD or ROR ID. The contributors, whose roles the profile has no place for, aren't in it.
 
+### The book's identifiers
+
+`project.subtitle`, `doi`, `isbn`, `series`, `url`, and `keywords` say more of the book, each where a format has a place for it:
+
+```yaml
+project:
+  subtitle: An Open Textbook
+  doi: 10.5281/zenodo.1234567           # or its address, or doi:
+  isbn: {epub: 978-1-234567-89-7, paperback: 0-306-40615-2}
+  series: {name: Shepherd Open Textbooks, position: "3"}
+  url: https://example.edu/econ/
+  keywords: [economics, microeconomics]
+```
+
+A DOI is checked for its form and kept bare; an ISBN, of 13 digits or the older 10, for its check digit, and kept as its 13 digits; and an address must be an `http` or `https` URL with a host. A mistake stops the run, naming the setting. An EPUB records the subtitle as a second title, typed `subtitle`, and on its title page a paragraph under the title; the DOI and the EPUB's own ISBN as identifiers after the book's, which stays the package's unique one, each typed by its ONIX code; the series as the collection it belongs to, with its position; and each keyword as a subject. A PDF sets the subtitle under the title on its title page and gives the keywords as its own. A cartridge's manifest has the title with the subtitle after a colon, the DOI and the address as identifiers, the series as what the book is part of, and the keywords. The other ISBNs are kept for formats TextbookImprover doesn't make. `keywords` was a package's setting in `packaging.yaml`, which a cartridge still takes where the project has none, with a warning to move them.
+
 ### Targets
 
 Both `conversion.yaml` and `packaging.yaml` have the same shape: a `defaults:` block, then a `targets:` block naming one or more things to build. A target inherits the defaults and overrides what it needs.

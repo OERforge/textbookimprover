@@ -167,6 +167,32 @@ def book_metadata(project, resolved, found, paths):
         # a reading system recognizes a rebuilt edition as the same book.
         "identifier": meta_string(project["identifier"]),
     }
+    subtitle = str(project.get("subtitle") or "").strip()
+    if subtitle:
+        # A second title, typed subtitle, after the main one.
+        meta["title"] = {"t": "MetaList", "c": [
+            {"t": "MetaMap", "c": {"type": meta_string("main"),
+                                   "text": meta_string(project["title"])}},
+            {"t": "MetaMap", "c": {"type": meta_string("subtitle"),
+                                   "text": meta_string(subtitle)}}]}
+    # The book's other identifiers after its own, which stays the
+    # package's unique one: its DOI and the EPUB's ISBN, typed by their
+    # ONIX codes (Pandoc's schemeToOnix: DOI 06, ISBN-13 15).
+    others = [(scheme, value) for scheme, value in (
+        ("DOI", project.get("doi")), ("ISBN-13", (project.get("isbn") or {}).get("epub")))
+        if str(value or "").strip()]
+    if others:
+        meta["identifier"] = {"t": "MetaList", "c": [meta_string(project["identifier"])] + [
+            {"t": "MetaMap", "c": {"scheme": meta_string(scheme), "text": meta_string(value)}}
+            for scheme, value in others]}
+    series = project.get("series") or {}
+    if str(series.get("name") or "").strip():
+        meta["belongs-to-collection"] = meta_string(series["name"])
+        if str(series.get("position") or "").strip():
+            meta["group-position"] = meta_string(series["position"])
+    keywords = [str(k).strip() for k in project.get("keywords") or [] if str(k).strip()]
+    if keywords:
+        meta["subject"] = meta_list(keywords)
     if people.name(project.get("publisher")):
         meta["publisher"] = meta_string(people.name(project["publisher"]))
     if project.get("description"):
@@ -281,6 +307,9 @@ def number_notes(text):
     return NOTE.sub(fix, text), count
 
 
+SUBTITLE_HEADING = re.compile(r'<h1 class="subtitle">(.*?)</h1>', re.S)
+
+
 def retitle_chapters(path, texts=None):
     """Give each chapter file a <title> that is its heading's text, its
     footnotes their numbers, and each empty header cell of its tables a
@@ -319,6 +348,10 @@ def retitle_chapters(path, texts=None):
                 continue
             if info.filename.endswith(".xhtml") and "/text/" in info.filename:
                 text = data.decode("utf-8")
+                # The title page's subtitle, which the template's loop over
+                # the titles makes a second h1, is the paragraph Pandoc's
+                # own subtitle variable makes it (book_metadata).
+                text = SUBTITLE_HEADING.sub(r'<p class="subtitle">\1</p>', text)
                 found = heading.search(text)
                 if found:
                     # A formula's TeX, kept in its MathML as an annotation,

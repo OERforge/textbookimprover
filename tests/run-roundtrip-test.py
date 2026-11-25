@@ -87,6 +87,14 @@ def unusual(node):
             if value != node.default:
                 return value
         return node.default
+    # A book's identifiers are checked, so each is one that's valid, in
+    # the form it's kept in, an address with a comma in it.
+    if kind == "doi":
+        return "10.5281/zenodo.1234567"
+    if kind == "isbn":
+        return "9781234567897"
+    if kind == "url":
+        return "https://example.edu/a,b?no=1.10"
     if kind == "list" and node.item == "contributor":
         # A contributor is a mapping with a role, its name the word YAML
         # would make a boolean of.

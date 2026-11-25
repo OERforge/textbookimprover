@@ -938,6 +938,80 @@ def case_build_record_latex(work):
     ]
 
 
+def case_identified_cartridge(work):
+    """The book's subtitle, DOI, address, series, and keywords in the
+    cartridge's manifest: the title with the subtitle after a colon, the
+    DOI and the address identifiers in their catalogs, the series what
+    it's part of, the project's keywords; a package's own keywords taken
+    where the project has none, with a warning to move them; and the
+    manifest valid against Common Cartridge 1.1."""
+    import importlib.util
+    import xml.etree.ElementTree as ET
+
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    ns = {"l": "http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest"}
+    manifest = os.path.join(work, "output", "packages", "cartridge", "imsmanifest.xml")
+
+    def build(project):
+        write("project.yaml", "project:\n  identifier: org.example.ids\n  title: Ids\n"
+              + project + "  contents:\n    - one\n")
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                               "--quick", "--quiet"], cwd=work, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+        if not os.path.isfile(manifest):
+            return done, None
+        return done, ET.parse(manifest).getroot()
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n")
+    write("packaging.yaml", "targets:\n  cartridge:\n    format: common-cartridge\n"
+          "    keywords: [old, words]\n")
+    write("src/book/one.md", "# One\n\nText.\n")
+    done, root = build("  subtitle: An Open Textbook\n  doi: doi:10.5281/zenodo.1234567\n"
+                       "  url: https://example.edu/ids/\n"
+                       "  series: {name: Shepherd Open Textbooks, position: '3'}\n"
+                       "  keywords: [economics]\n")
+    general = root.find(".//l:general", ns) if root is not None else None
+    ids = [(i.findtext("l:catalog", "", ns), i.findtext("l:entry", "", ns))
+           for i in general.iterfind("l:identifier", ns)] if general is not None else []
+    words = [k.findtext("l:string", "", ns) for k in general.iterfind("l:keyword", ns)] \
+        if general is not None else []
+    relation = root.find(".//l:relation", ns) if root is not None else None
+    spec = importlib.util.spec_from_file_location(
+        "validator", os.path.join(BIN, "validate-manifest.py"))
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    valid = validator.validate_with_schema(manifest) if root is not None else (False, [])
+    fallback, old_root = build("")
+    old_words = [k.findtext("l:string", "", ns) for k in old_root.iterfind(".//l:keyword", ns)] \
+        if old_root is not None else []
+    return [
+        ("the title with the subtitle after a colon",
+         lambda: general is not None and general.findtext("l:title/l:string", "", ns)
+         == "Ids: An Open Textbook" or fail(done.stderr[-600:])),
+        ("the DOI bare and the address, each an identifier in its catalog",
+         lambda: ids == [("DOI", "10.5281/zenodo.1234567"), ("URI", "https://example.edu/ids/")]
+         or fail(repr(ids))),
+        ("the series what the book is part of, with its position",
+         lambda: relation is not None
+         and relation.findtext("l:kind/l:value", "", ns) == "ispartof"
+         and relation.findtext("l:resource/l:description/l:string", "", ns)
+         == "Shepherd Open Textbooks, 3" or fail(repr(relation))),
+        ("the project's keywords, not the package's",
+         lambda: words == ["economics"] or fail(repr(words))),
+        ("the manifest valid against Common Cartridge 1.1",
+         lambda: valid is None or valid[0] or fail(repr(valid))),
+        ("a package's own keywords where the project has none, with a warning to move them",
+         lambda: old_words == ["old", "words"] and "project.keywords" in fallback.stdout
+         + fallback.stderr or fail(repr(old_words) + fallback.stderr[-600:])),
+    ]
+
+
 def case_people_cartridge(work):
     """The book's people in the cartridge's manifest: the authors as
     author, the adapters and then the editors as editor, the publisher as
@@ -13022,6 +13096,7 @@ CASES = [
     ("the build record, of how a package's pages were placed", case_build_record_packages),
     ("the build record, of a program a limit stopped", case_build_record_stops),
     ("the book's people in the cartridge", case_people_cartridge),
+    ("the book's identifiers in the cartridge", case_identified_cartridge),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

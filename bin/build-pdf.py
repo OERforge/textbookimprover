@@ -969,6 +969,15 @@ def book_metadata(project, resolved, base, numbered):
     if authors:
         meta["author"] = {"t": "MetaList",
                           "c": [meta_string(a) for a in authors]}
+    # The subtitle on the title page, after the title (Pandoc's template's
+    # \subtitle), and the keywords as the PDF's (its pdfkeywords), each a
+    # MetaString, which the writer escapes as LaTeX's text.
+    subtitle = str(project.get("subtitle") or "").strip()
+    if subtitle:
+        meta["subtitle"] = meta_string(subtitle)
+    keywords = [str(k).strip() for k in project.get("keywords") or [] if str(k).strip()]
+    if keywords:
+        meta["keywords"] = {"t": "MetaList", "c": [meta_string(k) for k in keywords]}
     standards = [str(s) for s in (resolved["pdf.standard"] or []) if str(s)]
     if standards:
         meta["pdfstandard"] = {"t": "MetaList",

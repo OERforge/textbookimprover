@@ -172,7 +172,9 @@ keys:
     item: string
     default: []
     description: >
-      Subject keywords recorded in the package metadata.
+      Subject keywords recorded in the package metadata, where the book's
+      own, project.keywords, are unset; the run says to move them there,
+      where the EPUB and the PDF take them too.
 
   common_files:
     type: list
