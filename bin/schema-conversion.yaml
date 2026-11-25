@@ -767,6 +767,24 @@ keys:
           PowerPoint file made with reference_doc is that file's size
           instead.
 
+      license_footer:
+        type: bool
+        default: false
+        description: >
+          Whether each slide of a deck's PDF, PowerPoint file, and reveal.js
+          presentation shows the deck's license by its short name, "CC BY
+          4.0", in its footer: the part's license (project.license), or
+          the one a licenses entry naming the deck gives it. A PowerPoint
+          file has it in each layout's footer placeholder, as PowerPoint's
+          own Header and Footer puts a footer, the title slide's too; a
+          layout of slides.reference_doc with no footer placeholder gives
+          its slides none, and the run warns. A PDF has it in its slides'
+          foot, an artifact to a screen reader, as a book's running foot is.
+          A reveal.js presentation has it in a footer at the window's
+          lower left, outside the slides, read once. A deck's page doesn't
+          show it: the page links to its license already. The full credits
+          are the deck's last slide whatever this says (project.licenses).
+
       reference_doc:
         type: path
         default: ""

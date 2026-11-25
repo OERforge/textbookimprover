@@ -932,7 +932,7 @@ def tidy(path):
 def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
               standards=("ua-2",), ua1_math="office", ratio="auto", title=None,
               repair_captions=True, remove_empty_paragraphs=True, env=None,
-              keep=None, trace=None, picture_paths=True, code_wrap=None):
+              keep=None, trace=None, picture_paths=True, code_wrap=None, footer=""):
     """One deck's tagged PDF, through ltx-talk: the deck's filtered
     intermediate, its headings renumbered (renumber), written by
     Pandoc's beamer writer with template and filters, talkified, and
@@ -946,7 +946,10 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
     to. picture_paths: whether picture mode is drawn with pict2e
     (latexbuild.PICTURE_PATHS). code_wrap: how far a block of code too
     wide for its slide is set smaller before its lines wrap, the fit
-    macros' own default where None. An SVG that can't be made a PDF stops it
+    macros' own default where None. footer: text for every slide's foot,
+    the deck's license with slides.license_footer, which ltx-talk's
+    footer sets as an element of its own (ltx-talk.latex). An SVG that
+    can't be made a PDF stops it
     before LaTeX, which can't show one. Returns a dict: ok, pages, log
     (the last run's), timeout (LaTeX stopped), unsettled, ratio and why,
     level, frame tag, whether each slide's title was tagged at its own
@@ -1033,6 +1036,10 @@ def build_pdf(intermediate, base, out_pdf, *, template, filters, language,
             command += ["-V", "hyperfootnotes-off=true"]
         if title and not meta.get("title") and not meta.get("title-meta"):
             command += ["-M", f"title-meta={title}"]
+        # Metadata, not a variable, so the writer escapes it as LaTeX.
+        footer = " ".join(str(footer or "").split())
+        if footer:
+            command += ["-M", f"oer-license-footer={footer}"]
         for path in filters:
             command += ["--lua-filter", path]
         if trace:

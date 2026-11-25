@@ -1792,6 +1792,9 @@ PART_BASE = None
 # read, and what each target's strip took out (strip_target).
 STRIP = None
 STRIPPED = []
+# Each deck's license by its short name, as its page has it, for its
+# slides' footer where a target's slides.license_footer asks for it.
+DECK_LICENSES = {}
 DEFAULT_PART = None
 PART_KIND = None
 PART_ARGS = []
@@ -4727,6 +4730,17 @@ def add_license_statements(project, pages):
     return sorted(placed)
 
 
+def deck_license(project, stem):
+    """A deck's licenses by their short names, "CC BY 4.0", or two
+    joined, as its page has them (licenses.page_licenses): what
+    slides.license_footer puts on each of its slides. Empty where the
+    part names no license."""
+    import licenses
+    own = licenses.page_licenses(project.get("licenses"), [stem],
+                                 project.get("license")).get(stem, [])
+    return licenses.names_joined([licenses.short_name(one) for one in own])
+
+
 def license_links(project, stem):
     """A page's <link rel="license"> elements, one for each of its
     licenses that has a deed (licenses.page_licenses), for its head."""
@@ -6363,6 +6377,23 @@ def latex_book_pdf(target, base, latex_parts, paths, work, language, project, ta
     return written
 
 
+def deck_footers(target, stems):
+    """{deck: the text of each of its slides' footer} for a target whose
+    slides.license_footer is on, each deck's license (DECK_LICENSES), and
+    none for one that's off. A deck with no license gets no footer, which
+    the run notes."""
+    if not target["slides.license_footer"]:
+        return {}
+    footers = {stem: DECK_LICENSES.get(stem, "") for stem in stems}
+    bare = sorted(stem for stem, text in footers.items() if not text)
+    if bare:
+        say(f"NOTE: slides.license_footer is on for target {target.name}, but "
+            f"{len(bare)} deck(s) have no license to show ({', '.join(bare[:4])}"
+            + (", ..." if len(bare) > 4 else "") + "): project.license, or a licenses "
+            "entry naming the deck, gives one.")
+    return {stem: text for stem, text in footers.items() if text}
+
+
 def deck_pdfs(target, stems, names, base, language):
     """Each deck's PDF, through ltx-talk (decks.build_pdf), built side by
     side, a PDF per deck named as its page is: stems are the decks' pages,
@@ -6410,6 +6441,7 @@ def deck_pdfs(target, stems, names, base, language):
     # nothing of it (pdf-target.lua's counted).
     env.pop("OER_MEASURES", None)
     os.makedirs(target.output_dir, exist_ok=True)
+    footers = deck_footers(target, stems)
 
     def one(stem):
         return stem, decklib.build_pdf(
@@ -6422,7 +6454,7 @@ def deck_pdfs(target, stems, names, base, language):
             remove_empty_paragraphs=bool(target["pdf.remove_empty_paragraphs"]), env=env,
             trace=(lambda c: say("+ " + " ".join(shell_quote(p) for p in c[:12]) + " ..."))
             if TRACE else None, picture_paths=str(target["picture_paths"]) == "on",
-            code_wrap=target["code_wrap"])
+            code_wrap=target["code_wrap"], footer=footers.get(stem, ""))
 
     workers = LIMITS.latex_jobs(len(stems))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -6657,6 +6689,8 @@ def deck_pptxs(target, stems, names, base, language, work):
                DOWNSAMPLED=DOWNSAMPLED.get(target.name, ""))
     os.makedirs(target.output_dir, exist_ok=True)
 
+    footers = deck_footers(target, stems)
+
     def one(job):
         stem, intermediate, level, shape, _why = job
         return job, pptxtarget.build(
@@ -6664,12 +6698,13 @@ def deck_pptxs(target, stems, names, base, language, work):
             filters=[TARGET_FILTER, DECK_PPTX_FILTER], reference=reference or references[shape],
             level=level, language=spoken[stem],
             title=os.path.splitext(os.path.basename(names.get(stem, stem)))[0],
-            notes=str(target["slides.notes"]), env=env)
+            notes=str(target["slides.notes"]), footer=footers.get(stem, ""), env=env)
 
     workers = LIMITS.pandoc_jobs(len(jobs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, jobs))
     written, failed, slides, ratios, layouts = [], [], 0, {}, set()
+    footerless = set()
     counts, found = Counter(), {key: [] for key in (
         "cut", "pauses", "inline_images", "languages", "unlinked", "column_blocks", "notes",
         "notes_unlinked", "notes_math", "notes_tex", "not_rendered", "overlaps", "small",
@@ -6704,6 +6739,7 @@ def deck_pptxs(target, stems, names, base, language, work):
             found["not_rendered"].append((stem, len(result["not_rendered"])))
             left_out.update(kind for kind, _ in result["not_rendered"])
         layouts.update(result["layouts"])
+        footerless.update(result["footerless"])
         found["warnings"] += [(stem, message) for message in result["warnings"]]
         for what in ("small", "overflow"):
             numbers = sorted({n for kind, n in result["notes"] if kind == what})
@@ -6842,6 +6878,12 @@ def deck_pptxs(target, stems, names, base, language, work):
             "layout of that name in Pandoc's own reference document instead, which may not "
             "match the look or the size of the reference document's slides: name a layout so "
             "in PowerPoint's Slide Master view (see docs/slides.md).")
+    if footerless:
+        say(f"WARNING: the reference document of target {target.name}'s PowerPoint files has "
+            "no footer placeholder in its layout(s) " + ", ".join(
+                f'"{name}"' for name in sorted(footerless)) + ", so a slide that takes one "
+            "has no footer, and slides.license_footer's license isn't on it: give the layout "
+            "a footer in PowerPoint's Slide Master view (Master Layout, Footers).")
     if found["warnings"]:
         say(f"WARNING: Pandoc's PowerPoint writer warned of {len(found['warnings'])} thing(s) "
             "writing the PowerPoint files:")
@@ -6910,6 +6952,7 @@ def deck_presentations(target, stems, base, language):
                MEDIA_SAFE="1", MEDIA_LOWERCASE="1" if target["media.lowercase"] else "")
     os.makedirs(target.output_dir, exist_ok=True)
     notes = str(target["slides.notes"])
+    footers = deck_footers(target, stems)
 
     def one(job):
         stem, intermediate, level, shape, _why = job
@@ -6917,7 +6960,8 @@ def deck_presentations(target, stems, base, language):
             intermediate, base, os.path.join(target.output_dir, stem + ".html"),
             filters=[DECK_HTML_FILTER, DECK_REVEALJS_FILTER, TARGET_FILTER, SAFE_MEDIA_FILTER,
                      HEADER_FILTER],
-            level=level, language=language, shape=shape, notes=notes, env=env)
+            level=level, language=language, shape=shape, notes=notes,
+            footer=footers.get(stem, ""), env=env)
 
     workers = LIMITS.pandoc_jobs(len(jobs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -8868,6 +8912,9 @@ def main():
         if credited:
             say(f"{len(credited)} page(s) given the sentence their licenses entry "
                 "asks for: " + ", ".join(sorted(credited)))
+        DECK_LICENSES.clear()
+        if DECK_RUN:
+            DECK_LICENSES.update({stem: deck_license(project, stem) for stem in stems})
         if credited & hand_stems:
             say("WARNING: " + ", ".join(sorted(credited & hand_stems)) + ": a "
                 "hand-written page's HTML is copied as it is, so it doesn't get the "

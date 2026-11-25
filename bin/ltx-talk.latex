@@ -492,6 +492,17 @@ $if(date)$
 $else$
 \date{}
 $endif$
+$-- The deck's license in every slide's foot (slides.license_footer), as
+$-- an element of ltx-talk's footer of its own, read from \@oerlicense as
+$-- its own elements are from \@title and the rest; before header-includes,
+$-- so a deck's own footer can replace it.
+$if(oer-license-footer)$
+\makeatletter
+\def\@oerlicense{$oer-license-footer$}
+\makeatother
+\DeclareInstance{footer-element}{oerlicense}{talk}{}
+\EditInstance{footer}{std}{element-order = oerlicense}
+$endif$
 $for(header-includes)$
 $header-includes$
 $endfor$

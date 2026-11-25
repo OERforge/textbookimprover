@@ -114,6 +114,28 @@ html.oer-page-view .reveal .controls,
 html.oer-page-view .reveal .progress {
   position: fixed;
 }
+/* The deck's license (slides.license_footer, lib/revealtarget.py), at
+   the window's lower left, outside the slides and clear of the controls
+   at its lower right; on a narrow window's page, after the slide. */
+.oer-deck-footer {
+  position: fixed;
+  left: 12px;
+  bottom: 8px;
+  z-index: 30;
+  margin: 0;
+  font-family: var(--r-main-font);
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--r-main-color);
+  background: var(--r-background-color);
+}
+.oer-deck-footer p {
+  margin: 0;
+}
+html.oer-page-view .oer-deck-footer {
+  position: static;
+  padding: 0 0.5em 1em;
+}
 /* On a phone or a tablet, text a page's size, where a laptop's zoomed
    window keeps the slide's, which its zoom enlarges. */
 @media (pointer: coarse) {

@@ -289,6 +289,88 @@ def reference_doc(ratio, out, size="widescreen"):
     return out
 
 
+FOOTER_SHAPE = re.compile(r"<p:sp\b[^>]*>(?:(?!</p:sp>).)*</p:sp>", re.S)
+FOOTER_PLACEHOLDER = re.compile(r'<p:ph\b[^>]*\stype="ftr"')
+TEXT_BODY_PARAGRAPHS = re.compile(r"(<p:txBody\b[^>]*>(?:(?!</p:txBody>).)*?)"
+                                  r"(<a:p\b(?:(?!</p:txBody>).)*)(</p:txBody>)", re.S)
+MASTER_HF = re.compile(r"<p:hf\b[^>]*?/?>")
+FOOTER_PART_LIMIT = 16 << 20
+
+
+def footer_reference(reference, text, out):
+    """A copy of the reference document, out, whose slides each carry text
+    in their footer: each layout's footer placeholder given it, and each
+    master a <p:hf> showing the footer, which is what Pandoc's PowerPoint
+    writer looks for to copy a layout's footer onto every slide that
+    takes the layout (Writers/Powerpoint/Output.hs, getFooterInfo), the
+    title slide's too unless the presentation says otherwise. A master
+    that has a <p:hf> keeps its other choices, the date and the slide's
+    number. Returns (out, the layouts that have no footer placeholder,
+    whose slides get none)."""
+    paragraph = ("<a:p><a:r><a:rPr/><a:t>%s</a:t></a:r></a:p>"
+                 % html.escape(" ".join(text.split()), quote=False))
+    lacking, parts = [], {}
+    with zipfile.ZipFile(reference) as zin:
+        infos = zin.infolist()
+        # Only the masters and layouts are read, each no larger than a
+        # part of PowerPoint's own ever is, so a reference document can't
+        # fill memory; the rest is copied as it is.
+        for info in infos:
+            if re.match(r"ppt/(slideMasters|slideLayouts)/[^/]+\.xml$", info.filename):
+                if info.file_size > FOOTER_PART_LIMIT:
+                    lacking.append(info.filename + " (too large to read)")
+                    continue
+                parts[info.filename] = zin.read(info.filename)
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info in infos:
+                if info.filename in parts:
+                    continue
+                with zin.open(info) as src, zout.open(info, "w") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+            _footer_parts(parts, paragraph, lacking)
+            for info in infos:
+                if info.filename in parts:
+                    zout.writestr(info, parts[info.filename])
+    return out, lacking
+
+
+def _footer_parts(parts, paragraph, lacking):
+    """footer_reference's change to each master and layout in parts, in
+    place; a layout with no footer placeholder named in lacking."""
+    for part in sorted(parts):
+        if re.match(r"ppt/slideMasters/[^/]+\.xml$", part):
+            xml = parts[part].decode("utf-8", "replace")
+            found = MASTER_HF.search(xml)
+            if found:
+                attrs = re.sub(r'\sftr="[^"]*"', "", found.group(0))
+                xml = xml[:found.start()] + attrs + xml[found.end():]
+            elif "<p:txStyles" in xml:
+                xml = xml.replace("<p:txStyles", '<p:hf hdr="0" dt="0" sldNum="0"/><p:txStyles', 1)
+            else:
+                xml = xml.replace("</p:sldMaster>",
+                                  '<p:hf hdr="0" dt="0" sldNum="0"/></p:sldMaster>', 1)
+            parts[part] = xml.encode("utf-8")
+        elif re.match(r"ppt/slideLayouts/[^/]+\.xml$", part):
+            xml = parts[part].decode("utf-8", "replace")
+            given = [False]
+
+            def given_text(shape):
+                if not FOOTER_PLACEHOLDER.search(shape.group(0)):
+                    return shape.group(0)
+                given[0] = True
+                body = TEXT_BODY_PARAGRAPHS.sub(
+                    lambda m: m.group(1) + paragraph + m.group(3), shape.group(0), count=1)
+                if "<p:txBody" not in body:
+                    body = body.replace("</p:sp>", "<p:txBody><a:bodyPr/><a:lstStyle/>"
+                                        + paragraph + "</p:txBody></p:sp>", 1)
+                return body
+            xml = FOOTER_SHAPE.sub(given_text, xml)
+            if not given[0]:
+                name = re.search(r'<p:cSld\b[^>]*?\sname="([^"]*)"', xml)
+                lacking.append(html.unescape(name.group(1)) if name else part)
+            parts[part] = xml.encode("utf-8")
+
+
 # --------------------------------------------------------------------------
 # a table's contrast
 # --------------------------------------------------------------------------
@@ -470,25 +552,32 @@ LAYOUT_NAMED = re.compile(r'layout named "([^"]+)"')
 
 
 def build(intermediate, base, out, *, filters, reference, level, language, title,
-          notes="collapsed", env=None):
+          notes="collapsed", footer="", env=None):
     """One deck's PowerPoint file, out, from its filtered intermediate:
     Pandoc's PowerPoint writer with filters and reference (reference_doc,
     or slides.reference_doc), at the deck's slide level, then finish(),
     with language and title (the deck's file's name, for a deck with no
-    title). notes is slides.notes. Returns a dict: ok; log, Pandoc's
+    title). notes is slides.notes; footer, text for every slide's footer
+    (footer_reference), the deck's license with slides.license_footer.
+    Returns a dict: ok; log, Pandoc's
     errors; svg_failed, the SVGs that couldn't be made PNGs and why;
     not_rendered, what Pandoc said it didn't write, each ("block" or
     "inline", what it said); layouts, those the reference document lacks,
-    which the writer took from its own; warnings, the writer's others;
+    which the writer took from its own; footerless, the layouts with no
+    footer placeholder, whose slides have no footer; warnings, the
+    writer's others;
     record, what the filter recorded; finish's counts and notes; slides;
     overlaps, the numbers of the slides whose shapes overlap."""
     with open(intermediate, encoding="utf-8") as fh:
         doc = json.load(fh)
     result = {"ok": False, "log": "", "svg_failed": [], "not_rendered": [], "layouts": [],
               "warnings": [], "record": {}, "counts": {}, "notes": [], "slides": 0,
-              "overlaps": [], "pptx": out}
+              "overlaps": [], "pptx": out, "footerless": []}
     work = projectpaths.mkdtemp(prefix="deck-pptx-")
     try:
+        if " ".join(str(footer or "").split()):
+            reference, result["footerless"] = footer_reference(
+                reference, str(footer), os.path.join(work, "reference-footer.pptx"))
         svgs, result["svg_failed"] = svgs_to_png(doc, base, work)
         if result["svg_failed"]:
             return result

@@ -84,6 +84,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+import html
 import json
 import os
 import re
@@ -378,11 +379,27 @@ def start_problem(html):
     return start_settings(starts[0])[1]
 
 
+def with_footer(html_text, text):
+    """The presentation with text in a footer of its own after reveal.js's
+    slides, a content information landmark read once, which the
+    stylesheet keeps at the window's lower left (slides.license_footer)."""
+    text = " ".join(str(text or "").split())
+    if not text:
+        return html_text
+    element = '<footer class="oer-deck-footer"><p>%s</p></footer>\n' % html.escape(text)
+    at = html_text.rfind("</body>")
+    if at < 0:
+        return html_text + element
+    return html_text[:at] + element + html_text[at:]
+
+
 def build(intermediate, base, out, *, filters, level, language, shape, notes="collapsed",
-          env=None):
+          footer="", env=None):
     """One deck's presentation, out, from its filtered intermediate: Pandoc's
     reveal.js writer with filters, at the deck's slide level, its slides
-    shape, then finish(). notes is slides.notes. Returns a dict: ok; log,
+    shape, then finish(). notes is slides.notes; footer, the text of the
+    presentation's footer (with_footer), the deck's license with
+    slides.license_footer. Returns a dict: ok; log,
     Pandoc's errors; refused, why a presentation Pandoc wrote was refused
     and removed, its start of reveal.js holding more than settings
     (start_problem), which would run as code; warnings, Pandoc's others;
@@ -427,7 +444,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
         result["warnings"] = sorted({" ".join(line.split())[:160]
                                      for line in done.stderr.splitlines() if line.strip()})
         with open(out, encoding="utf-8") as fh:
-            html = finish(fh.read())
+            html = with_footer(finish(fh.read()), footer)
         refused = start_problem(html)
         if refused:
             os.remove(out)

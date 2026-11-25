@@ -42,6 +42,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import argparse
 import csv
 import html
+import io
 import json
 import os
 import re
@@ -1537,6 +1538,125 @@ def case_credits(work):
              lambda: len(pages) > 1 and pages[-1].lstrip().startswith("Credits")
              and "Adapted from" in pages[-1] and "Adapted from" not in pages[-2]
              or fail(repr(pages[-2:]))))
+    return checks
+
+
+def case_license_footer(work):
+    """slides.license_footer: each deck's license by its short name in
+    every slide's footer, the one a licenses entry naming the deck gives
+    it or the part's, in its PowerPoint file (each slide's footer
+    placeholder), its presentation (one footer after the slides), and
+    its PDF (each page's foot, an artifact); none on a target that turns
+    it off; a reference document whose layouts have no footer
+    placeholder warned of; and a deck with no license noted, with none."""
+    def fail(message):
+        raise AssertionError(message)
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file") \
+        or too_old("REVEALJS_PANDOC", "a deck's reveal.js presentation")
+    if unready:
+        print(f"  skip  {unready}; a deck's license footer isn't checked")
+        return []
+    no_pdf = pdf_ready()
+    if no_pdf:
+        print(f"  skip  {no_pdf}; a deck's PDF's license footer isn't checked")
+    config = ("defaults:\n  slides:\n    license_footer: true\n" + PPTX
+              + "  plain:\n    format: pptx\n    slides:\n      license_footer: false\n"
+              + "  present:\n    format: revealjs\n  pages:\n    format: html\n"
+              + ("" if no_pdf else "  print:\n    format: pdf\n"))
+    work_on = folder(place(work, "on"), config, project=False)
+    licensed = ("project:\n  identifier: org.example.decks\n  title: The Decks\n"
+                "  language: en-US\n  kind: slides\n%s  licenses:\n"
+                "    - {pages: [Flat-Deck*], title: Old Deck, author: A. Lecturer, "
+                "license: CC-BY-SA-4.0}\n")
+    write(place(work_on, "project.yaml"), licensed % "  license: CC-BY-4.0\n")
+    result = convert(work_on, "--quick")
+
+    def footers(path):
+        """Each slide's footer placeholder's text, or None for a slide
+        without one."""
+        out = []
+        for xml in pptx_slides(pptx_parts(path)):
+            shape = re.search(r'<p:sp>(?:(?!</p:sp>).)*?<p:ph type="ftr"(?:(?!</p:sp>).)*</p:sp>',
+                              xml, re.S)
+            out.append("".join(re.findall(r"<a:t>([^<]*)</a:t>", shape.group(0)))
+                       if shape else None)
+        return out
+    flat = place(work_on, "slides", "Flat-Deck.pptx")
+    flat_footers = footers(flat) if os.path.exists(flat) else []
+    other_footers = footers(place(work_on, "slides", "sectioned.pptx")) \
+        if os.path.exists(place(work_on, "slides", "sectioned.pptx")) else []
+    plain = place(work_on, "plain", "Flat-Deck.pptx")
+    plain_footers = footers(plain) if os.path.exists(plain) else ["missing"]
+    shown = read(place(work_on, "present", "Flat-Deck.html")) \
+        if os.path.exists(place(work_on, "present", "Flat-Deck.html")) else ""
+    page = read(place(work_on, "pages", "Flat-Deck.html")) \
+        if os.path.exists(place(work_on, "pages", "Flat-Deck.html")) else ""
+    pdf = place(work_on, "print", "Flat-Deck.pdf")
+    pages, artifact = [], None
+    if not no_pdf and os.path.exists(pdf):
+        pages = [p.extract_text() or "" for p in pypdf.PdfReader(pdf).pages]
+        with pikepdf.open(pdf) as opened:
+            stack, artifact = [], False
+            for operands, operator in pikepdf.parse_content_stream(opened.pages[1]):
+                name = str(operator)
+                if name in ("BMC", "BDC"):
+                    stack.append(str(operands[0]))
+                elif name == "EMC" and stack:
+                    stack.pop()
+                elif name in ("Tj", "TJ") and stack:
+                    shown_text = "".join(str(part) for part in operands[0]) \
+                        if name == "TJ" else str(operands[0])
+                    if "/Artifact" in stack and shown_text.strip():
+                        artifact = True
+
+    # A reference document whose layouts have no footer placeholder, and
+    # a part with no license, its entry's deck the only one with one.
+    work_off = folder(place(work, "off"), PPTX + "    slides:\n      license_footer: true\n"
+                      "      reference_doc: plain.pptx\n", project=False)
+    write(place(work_off, "project.yaml"), licensed % "")
+    reference = subprocess.run(["pandoc", "--print-default-data-file", "reference.pptx"],
+                               capture_output=True, check=True).stdout
+    with zipfile.ZipFile(io.BytesIO(reference)) as zin, \
+            zipfile.ZipFile(named(work_off, "plain.pptx"), "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename.startswith("ppt/slideLayouts/") and info.filename.endswith(".xml"):
+                data = re.sub(rb'<p:sp>(?:(?!</p:sp>).)*?<p:ph type="ftr"(?:(?!</p:sp>).)*</p:sp>',
+                              b"", data, flags=re.S)
+            zout.writestr(info, data)
+    without = convert(work_off, "--quick")
+    off_flat = place(work_off, "slides", "Flat-Deck.pptx")
+    off_footers = footers(off_flat) if os.path.exists(off_flat) else ["missing"]
+    said = " ".join((without.stdout + without.stderr).split())
+    checks = [
+        ("the decks are converted", lambda: result.returncode == 0 and bool(flat_footers)
+         or fail(result.stderr[-1200:])),
+        ("every slide of the PowerPoint file its deck's license in its footer, the entry's "
+         "and the part's",
+         lambda: flat_footers and all(f == "CC BY-SA 4.0" for f in flat_footers)
+         and other_footers and all(f == "CC BY 4.0" for f in other_footers)
+         or fail(repr((flat_footers, other_footers)))),
+        ("none where the target turns it off",
+         lambda: plain_footers and not any(plain_footers) or fail(repr(plain_footers))),
+        ("the presentation's one footer, at the end of its body, after its slides",
+         lambda: shown.count('class="oer-deck-footer"') == 1
+         and re.search(r'<footer class="oer-deck-footer"><p>CC BY-SA 4\.0</p></footer>\s*</body>',
+                       shown) or fail(shown[-900:])),
+        ("the deck's page without it", lambda: page and "oer-deck-footer" not in page
+         and "CC BY-SA 4.0" in " ".join(page.split()) or fail(page[-600:])),
+        ("a reference document's layouts without a footer placeholder warned of, and their "
+         "slides without one",
+         lambda: without.returncode == 0 and "no footer placeholder in its layout(s)" in said
+         and not any(off_footers) or fail(said[-900:] + repr(off_footers))),
+        ("a deck with no license noted, and the one an entry names still given its own",
+         lambda: "have no license to show (sectioned, untitled)" in said
+         or fail(said[-900:])),
+    ]
+    if not no_pdf:
+        checks.append(
+            ("every page of the PDF its license at its foot, an artifact",
+             lambda: pages and all(p.rstrip().endswith("CC BY-SA 4.0") for p in pages)
+             and artifact or fail(repr([p[-40:] for p in pages]) + repr(artifact))))
     return checks
 
 
@@ -5747,6 +5867,7 @@ CASES = [("the pieces", case_pieces),
          ("a PowerPoint caption with a link", case_linked_caption),
          ("a PowerPoint file's list of slide titles", case_titles_list),
          ("a deck's credits on a slide of their own", case_credits),
+         ("a deck's license in every slide's footer", case_license_footer),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),
