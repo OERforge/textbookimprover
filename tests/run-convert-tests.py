@@ -939,10 +939,11 @@ def case_build_record_latex(work):
 
 
 def case_identified_cartridge(work):
-    """The book's subtitle, DOI, address, series, and keywords in the
-    cartridge's manifest: the title with the subtitle after a colon, the
-    DOI and the address identifiers in their catalogs, the series what
-    it's part of, the project's keywords; a package's own keywords taken
+    """The book's subtitle, DOI, address, series, rights, and keywords in
+    the cartridge's manifest: the title with the subtitle after a colon,
+    the DOI and the address identifiers in their catalogs, the series what
+    it's part of, the rights of a Creative Commons license, the project's
+    keywords; a package's own keywords taken
     where the project has none, with a warning to move them; and the
     manifest valid against Common Cartridge 1.1."""
     import importlib.util
@@ -975,8 +976,10 @@ def case_identified_cartridge(work):
     done, root = build("  subtitle: An Open Textbook\n  doi: doi:10.5281/zenodo.1234567\n"
                        "  url: https://example.edu/ids/\n"
                        "  series: {name: Shepherd Open Textbooks, position: '3'}\n"
-                       "  keywords: [economics]\n")
+                       "  keywords: [economics]\n  copyright: © 2026 Robert Szarka\n"
+                       "  license: CC-BY-4.0\n")
     general = root.find(".//l:general", ns) if root is not None else None
+    rights = root.find(".//l:rights", ns) if root is not None else None
     ids = [(i.findtext("l:catalog", "", ns), i.findtext("l:entry", "", ns))
            for i in general.iterfind("l:identifier", ns)] if general is not None else []
     words = [k.findtext("l:string", "", ns) for k in general.iterfind("l:keyword", ns)] \
@@ -1002,6 +1005,12 @@ def case_identified_cartridge(work):
          and relation.findtext("l:kind/l:value", "", ns) == "ispartof"
          and relation.findtext("l:resource/l:description/l:string", "", ns)
          == "Shepherd Open Textbooks, 3" or fail(repr(relation))),
+        ("the rights: no cost, a license with conditions, and the copyright line and license",
+         lambda: rights is not None and rights.findtext("l:cost/l:value", "", ns) == "no"
+         and rights.findtext("l:copyrightAndOtherRestrictions/l:value", "", ns) == "yes"
+         and rights.findtext("l:description/l:string", "", ns)
+         == "© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 International "
+         "(https://creativecommons.org/licenses/by/4.0/)." or fail(repr(rights))),
         ("the project's keywords, not the package's",
          lambda: words == ["economics"] or fail(repr(words))),
         ("the manifest valid against Common Cartridge 1.1",
@@ -1009,6 +1018,51 @@ def case_identified_cartridge(work):
         ("a package's own keywords where the project has none, with a warning to move them",
          lambda: old_words == ["old", "words"] and "project.keywords" in fallback.stdout
          + fallback.stderr or fail(repr(old_words) + fallback.stderr[-600:])),
+    ]
+
+
+def case_rights_pdf(work):
+    """The book's copyright line and license in the PDF's XMP: the line as
+    written, LaTeX's own characters in it too, as dc:rights, and the
+    license's deed as xmpRights:WebStatement."""
+    def fail(message):
+        raise AssertionError(message)
+    if shutil.which("lualatex") is None:
+        print("  skip  lualatex not installed; a PDF's rights aren't checked")
+        return []
+    try:
+        import pikepdf
+    except ImportError:
+        print("  skip  pikepdf not installed; a PDF's rights aren't checked")
+        return []
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    line = "© 2026 A & B {x} 100% $5 #1 \\relax ~ ^ _"
+    write("project.yaml", "project:\n  identifier: org.example.rights\n  title: Rights\n"
+          "  copyright: '" + line + "'\n  license: CC-BY-4.0\n  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n")
+    write("src/book/one.md", "# One\n\nText.\n")
+    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
+                           "--quiet"], cwd=work, capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    path = os.path.join(work, "output", "pdf", "org.example.rights.pdf")
+    xmp = ""
+    if os.path.isfile(path):
+        with pikepdf.open(path) as pdf:
+            xmp = bytes(pdf.Root.Metadata.read_bytes()).decode("utf-8")
+    rights = re.findall(r'<rdf:li xml:lang="x-default">(.*?)</rdf:li>',
+                        "".join(re.findall(r"<dc:rights>.*?</dc:rights>", xmp, re.S)))
+    return [
+        ("the copyright line as written, as dc:rights",
+         lambda: rights == ["© 2026 A &amp; B {x} 100% $5 #1 \\relax ~ ^ _"]
+         or fail(repr(rights) + done.stderr[-600:])),
+        ("the license's deed as the web statement",
+         lambda: "<xmpRights:WebStatement>https://creativecommons.org/licenses/by/4.0/"
+         "</xmpRights:WebStatement>" in xmp or fail(xmp[:2000])),
     ]
 
 
@@ -13097,6 +13151,7 @@ CASES = [
     ("the build record, of a program a limit stopped", case_build_record_stops),
     ("the book's people in the cartridge", case_people_cartridge),
     ("the book's identifiers in the cartridge", case_identified_cartridge),
+    ("the book's rights in the PDF", case_rights_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

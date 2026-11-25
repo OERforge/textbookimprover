@@ -69,6 +69,7 @@ import languages  # noqa: E402
 import pagefooter  # noqa: E402
 import pandocversion  # noqa: E402
 import pandocrun
+import licenses  # noqa: E402
 import people  # noqa: E402
 import projectpaths  # noqa: E402
 from bookassembly import (  # noqa: E402
@@ -193,6 +194,11 @@ def book_metadata(project, resolved, found, paths):
     keywords = [str(k).strip() for k in project.get("keywords") or [] if str(k).strip()]
     if keywords:
         meta["subject"] = meta_list(keywords)
+    # The copyright line and the license, by name and deed, as one
+    # statement of the book's rights (lib/licenses.py).
+    rights = licenses.statement(project.get("copyright"), project.get("license"))
+    if rights:
+        meta["rights"] = meta_string(rights)
     if people.name(project.get("publisher")):
         meta["publisher"] = meta_string(people.name(project["publisher"]))
     if project.get("description"):

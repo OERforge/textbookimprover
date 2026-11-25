@@ -82,6 +82,18 @@ project:
 
 A DOI is checked for its form and kept bare; an ISBN, of 13 digits or the older 10, for its check digit, and kept as its 13 digits; and an address must be an `http` or `https` URL with a host. A mistake stops the run, naming the setting. An EPUB records the subtitle as a second title, typed `subtitle`, and on its title page a paragraph under the title; the DOI and the EPUB's own ISBN as identifiers after the book's, which stays the package's unique one, each typed by its ONIX code; the series as the collection it belongs to, with its position; and each keyword as a subject. A PDF sets the subtitle under the title on its title page and gives the keywords as its own. A cartridge's manifest has the title with the subtitle after a colon, the DOI and the address as identifiers, the series as what the book is part of, and the keywords. The other ISBNs are kept for formats TextbookImprover doesn't make. `keywords` was a package's setting in `packaging.yaml`, which a cartridge still takes where the project has none, with a warning to move them.
 
+### The book's rights
+
+`project.copyright` is the book's copyright line, as it should read, and `project.license` the license it's published under, as its [SPDX identifier](https://spdx.org/licenses/) where it has one, and otherwise as its name:
+
+```yaml
+project:
+  copyright: © 2026 Robert Szarka
+  license: CC-BY-4.0                    # CC-BY-NC-SA-4.0, CC0-1.0, or a name
+```
+
+A Creative Commons license and CC0 are known by their deed's name and address (CC-BY-4.0 is Creative Commons Attribution 4.0 International, at its deed on creativecommons.org); another license is given as it's written, with no address. An EPUB records the copyright line and then the license, by name and address, as its rights ("© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/)."). A book's PDF, tagged as the default page makes it, gives the copyright line as its XMP's `dc:rights` and the license's address as its web statement. A cartridge's manifest says a Creative Commons license or CC0 costs nothing, that the book has conditions of use but under CC0, and gives the same statement as its rights' description.
+
 ### Targets
 
 Both `conversion.yaml` and `packaging.yaml` have the same shape: a `defaults:` block, then a `targets:` block naming one or more things to build. A target inherits the defaults and overrides what it needs.

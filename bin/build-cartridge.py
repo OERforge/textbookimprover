@@ -82,6 +82,7 @@ from bookcontents import (  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import archivedates  # noqa: E402
+import licenses  # noqa: E402
 import people  # noqa: E402
 import projectpaths  # noqa: E402
 import stamps  # noqa: E402
@@ -754,7 +755,7 @@ MANIFEST_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
 {identifiers}{keywords}      </lomimscc:general>
       <lomimscc:lifeCycle>
 {contributes}      </lomimscc:lifeCycle>
-{relations}
+{rights}{relations}
     </lomimscc:lom>
   </metadata>
   <organizations>
@@ -880,6 +881,34 @@ PARTS = {}      # piece stem -> (source stem, part number, parent titles)
 ROLES = {}      # page stem -> role, for a page that was not split
 
 
+def manifest_rights(project):
+    """The manifest's rights, where the book gives a license or a
+    copyright line: cost no for a Creative Commons license or CC0, which
+    cost nothing; copyrightAndOtherRestrictions yes, but no for CC0, which
+    asks nothing; and the copyright line and the license as the
+    description (lib/licenses.py). Each of the first two is said only
+    where the license says it, the profile's vocabularies being yes and
+    no alone."""
+    license_id = str(project.get("license") or "").strip()
+    statement = licenses.statement(project.get("copyright"), license_id)
+    if not statement:
+        return ""
+    out = "      <lomimscc:rights>\n"
+    if licenses.is_open(license_id):
+        free = licenses.known(license_id)[2]
+        out += ("        <lomimscc:cost>\n"
+                "          <lomimscc:value>no</lomimscc:value>\n"
+                "        </lomimscc:cost>\n"
+                "        <lomimscc:copyrightAndOtherRestrictions>\n"
+                f"          <lomimscc:value>{'no' if free else 'yes'}</lomimscc:value>\n"
+                "        </lomimscc:copyrightAndOtherRestrictions>\n")
+    out += ("        <lomimscc:description>\n"
+            f"          <lomimscc:string>{xml_escape(statement)}</lomimscc:string>\n"
+            "        </lomimscc:description>\n"
+            "      </lomimscc:rights>\n")
+    return out
+
+
 def contributes(project, modified):
     """The manifest's lifeCycle: a contribute for each kind of the book's
     people, its role one of the fifteen the CC 1.1 profile takes, and each
@@ -969,6 +998,7 @@ def build_manifest(config, tree, page_files, common_files):
                      "        </lomimscc:resource>\n"
                      "      </lomimscc:relation>\n")
     head = MANIFEST_HEAD.format(
+        rights=manifest_rights(project),
         identifier=xml_escape(manifest["identifier"]),
         title=xml_escape(title),
         identifiers=identifiers,

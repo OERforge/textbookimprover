@@ -76,9 +76,13 @@ Words a catalog can find the book by. An EPUB records each as a subject, a PDF a
 
 Who published the book: a name, or a mapping with name and ror, the organization's ROR ID (https://ror.org/05dxps055 or 05dxps055), checked for its checksum. An EPUB records the name as its publisher, and a cartridge's manifest the publisher, with the date.
 
+**`copyright`**—`string`; default `""` (empty)
+
+The book's copyright line, as it should read (© 2026 Robert Szarka). An EPUB records it, with the license, as its rights; a PDF as its copyright; a cartridge's manifest in its rights' description.
+
 **`license`**—`string`; default `""` (empty)
 
-The license the book is published under, as its SPDX identifier where it has one (CC-BY-4.0, CC-BY-NC-SA-4.0) and otherwise as its name. A part may have a license of its own (parts). Read and checked; not acted on yet (see ROADMAP.md).
+The license the book is published under, as its SPDX identifier where it has one (CC-BY-4.0, CC-BY-NC-SA-4.0, CC0-1.0) and otherwise as its name. A Creative Commons license and CC0 are known by name and deed; another is given as it's written. An EPUB records it, after the copyright line, as its rights; a PDF its address as its license's; a cartridge's manifest says it costs nothing where it's Creative Commons' or CC0, that it has conditions but for CC0, and names it in its rights' description. A part may have a license of its own (parts), read and checked and not acted on yet (see ROADMAP.md).
 
 **`numbering`**—`bool`; default `false`
 

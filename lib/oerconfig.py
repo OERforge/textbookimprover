@@ -1069,9 +1069,9 @@ PART_OWN = ("identifier", "title", "contents", "numbering")
 
 
 def parts_problems(project, where):
-    """What's wrong with project.parts, project.include, and project.license,
-    as messages, and what to warn of. Read and checked; nothing builds from
-    them yet."""
+    """What's wrong with project.parts and project.include, a part's
+    license among them, as messages, and what to warn of. Read and
+    checked; nothing builds from them yet."""
     problems, warnings = [], []
     parts = project.get("parts")
     if parts in (None, {}, []):

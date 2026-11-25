@@ -872,6 +872,50 @@ def check_reads():
     ]
 
 
+def check_licenses():
+    """lib/licenses.py: a Creative Commons license by its deed's name and
+    address, CC0 too, and another license, or a port of 4.0, which has
+    none, not known; which cost nothing; and the rights as one
+    statement."""
+    import licenses
+    named = [licenses.known(i) for i in ("CC-BY-4.0", "cc-by-nc-sa-4.0", "CC-BY-ND-3.0",
+                                         "CC-BY-3.0-US", "CC-BY-SA-2.5", "CC0-1.0", "MIT",
+                                         "LicenseRef-instructors-only", "All rights reserved",
+                                         "CC-BY-4.0-US")]
+    opened = [licenses.is_open(i) for i in ("CC-BY-4.0", "CC0-1.0", "MIT", "")]
+    said = [licenses.statement("© 2026 Robert Szarka", "CC-BY-4.0"),
+            licenses.statement("", "CC0-1.0"), licenses.statement("Mine.", "All rights reserved"),
+            licenses.statement("", ""),
+            licenses.statement("© 2026\x00 A\n\nB\x85", "Mine\x07")]
+    return [
+        ("each license by the deed's own name and address, its version's scope too",
+         lambda: [n[0] if n else None for n in named] == [
+             "Creative Commons Attribution 4.0 International",
+             "Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International",
+             "Creative Commons Attribution-NoDerivs 3.0 Unported",
+             "Creative Commons Attribution 3.0 US",
+             "Creative Commons Attribution-ShareAlike 2.5 Generic", "CC0 1.0 Universal", None,
+             None, None, None]
+         and named[1][1] == "https://creativecommons.org/licenses/by-nc-sa/4.0/"
+         and named[3][1] == "https://creativecommons.org/licenses/by/3.0/us/"
+         and named[5][1] == "https://creativecommons.org/publicdomain/zero/1.0/"
+         and licenses.known("CC-BY-NC-ND-1.0")[1]
+         == "https://creativecommons.org/licenses/by-nd-nc/1.0/" or fail(repr(named))),
+        ("a Creative Commons license and CC0 cost nothing, and CC0 alone asks nothing",
+         lambda: opened == [True, True, False, False] and named[5][2] and not named[0][2]
+         or fail(repr(opened))),
+        ("the copyright line, then the license by name and address, or as given, each one "
+         "line without a control character",
+         lambda: said == [
+             "© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 "
+             "International (https://creativecommons.org/licenses/by/4.0/).",
+             "Dedicated to the public domain under CC0 1.0 Universal "
+             "(https://creativecommons.org/publicdomain/zero/1.0/).",
+             "Mine. License: All rights reserved.", "",
+             "© 2026 A B. License: Mine."] or fail(repr(said))),
+    ]
+
+
 def check_book_identifiers():
     """lib/identifiers.py: a DOI bare from its forms, an ISBN-13 and an
     ISBN-10 as 13 digits, each check digit checked, and an address that
@@ -13282,6 +13326,7 @@ GROUPS = [
     ("lib/sandbox.py, the sandbox a run converts in", check_sandbox),
     ("lib/people.py, the people and organizations a book's settings name", check_people),
     ("lib/identifiers.py, a book's DOI, ISBNs, and address", check_book_identifiers),
+    ("lib/licenses.py, a book's license and copyright line", check_licenses),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

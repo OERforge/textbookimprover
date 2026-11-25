@@ -950,6 +950,37 @@ def metadata_file(base, setting):
     return json.loads(result.stdout).get("meta", {})
 
 
+def rights_setup(project):
+    """The book's copyright line and its license's address for the PDF's
+    XMP (dc:rights and xmpRights:WebStatement), as
+    LaTeX's own XMP code takes them through hyperref's pdfcopyright and
+    pdflicenseurl keys (pdfmanagement.ltx). Set as the document begins,
+    once hyperref is loaded, and only where \\DocumentMetadata loaded that
+    code, which declares the keys. The line is escaped as LaTeX's text
+    (texremediate.escape), the address made of the characters a license's
+    deed's address holds."""
+    import licenses
+    import texremediate
+    keys = []
+    # One line, its control characters out: a blank line in the key's
+    # value would be a paragraph's end, which hyperref's keys don't take.
+    line = licenses.one_line(project.get("copyright"))
+    if line:
+        # The text escaped as texremediate.escape does a key's, but for ^
+        # and ~, which LaTeX's XMP code wrote as \textasciicircum's name:
+        # each is its character, \string's.
+        escaped = texremediate.escape(line).replace(
+            "\\textasciicircum{}", "\\string^").replace("\\textasciitilde{}", "\\string~")
+        keys.append("pdfcopyright={%s}" % escaped)
+    found = licenses.known(project.get("license"))
+    if found and re.fullmatch(r"[A-Za-z0-9:/._-]+", found[1]):
+        keys.append("pdflicenseurl={%s}" % found[1])
+    if not keys:
+        return ""
+    return ("\\AtBeginDocument{\\IfDocumentMetadataTF{\\hypersetup{%s}}{}}\n"
+            % ",".join(keys))
+
+
 def book_metadata(project, resolved, base, numbered):
     """project.yaml's facts, then this target's settings, then whatever
     the metadata file says, which wins."""
@@ -1120,6 +1151,7 @@ def book_metadata(project, resolved, base, numbered):
     # The footer setting at the foot of every page, its words alone
     # (pagefooter: LaTeX's tagging marks the foot an artifact).
     ours += pagefooter.latex_preamble(resolved["footer"], base)
+    ours += rights_setup(project)
     # The template loads amssymb before unicode-math, which leaves the
     # names unicode-math lacks drawn as control characters.
     ours += "\\ifdefined\\directlua\n" + latexbuild.UM_ALIASES + "\\fi\n"

@@ -1007,6 +1007,8 @@ IDENTIFIED = """\
   series: {name: Shepherd Open Textbooks, position: "3"}
   url: https://example.edu/econ/
   keywords: [economics, micro & macro]
+  copyright: © 2026 Robert Szarka
+  license: CC-BY-4.0
 """
 
 
@@ -1016,7 +1018,8 @@ def case_identified(work):
     paragraph and not a second h1; the book's own identifier the package's
     unique one, then the DOI bare and the EPUB's ISBN as its 13 digits,
     each typed by its ONIX code; the series with its position; each
-    keyword a subject; and a mistyped ISBN stopping the build."""
+    keyword a subject; the rights; and a mistyped ISBN stopping the
+    build."""
     convert(work, NEEDED)
     write_config(work, TREE, IDENTIFIED, "    title_page: \"on\"\n")
     out = Built(work)
@@ -1052,6 +1055,10 @@ def case_identified(work):
         ("each keyword a subject",
          lambda: re.findall(r"<dc:subject[^>]*>([^<]*)</dc:subject>", out.opf)
          == ["economics", "micro &amp; macro"] or raised(out.opf[:3000])),
+        ("the copyright line and the license, by name and deed, the rights",
+         lambda: "<dc:rights>© 2026 Robert Szarka. Licensed under Creative Commons Attribution "
+         "4.0 International (https://creativecommons.org/licenses/by/4.0/).</dc:rights>"
+         in out.opf or raised(out.opf[:3000])),
         ("a mistyped ISBN stops the build, naming it and its check digit",
          lambda: mistyped.status != 0 and "isbn.epub" in mistyped.stderr
          and "check digit" in mistyped.stderr or raised(mistyped.stderr[-600:])),
