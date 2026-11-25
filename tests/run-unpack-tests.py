@@ -71,6 +71,7 @@ OPF = """<?xml version="1.0"?>
 <dc:title>A "Small" Book</dc:title><dc:language>en-CA</dc:language>
 <dc:creator>First Author</dc:creator><dc:creator>Second Author</dc:creator>
 <dc:publisher>The Press</dc:publisher>
+<dc:rights>© 2026 The Press. Licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).</dc:rights>
 <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
 </metadata>
 <manifest>
@@ -174,6 +175,8 @@ def case_unpack(work):
          and project["authors"] == ["First Author", "Second Author"]
          and project["identifier"] == "example.org-books-a-small-book"
          and project["publisher"] == "The Press"),
+        ("the license the rights' Creative Commons deed names, by its SPDX identifier",
+         lambda: project.get("license") == "CC-BY-SA-4.0"),
         ("the navigation is the contents: a chapter's page opens its group",
          lambda: project["contents"][0]["title"] == "Chapter 1"
          and [i["page"] for i in project["contents"][0]["items"]]

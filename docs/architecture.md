@@ -60,7 +60,7 @@ The project is a box of tools that happen to work together. Conversion turns sou
 | `lib/findings.py` | One format for everything a check finds: the CSV, the Markdown report, the input hashes, the cache. |
 | `lib/sourcecheck.py` | What a Word or Markdown source says about itself, from Pandoc's unfiltered reading. |
 | `lib/identifiers.py` | A book's DOI, ISBNs, and address, each checked where it's set (an ISBN's check digit, of 13 digits or 10) and kept in the form a record takes. |
-| `lib/licenses.py` | A book's license by its deed's name and address, where it's a Creative Commons license or CC0, and the rights as one statement. |
+| `lib/licenses.py` | A book's license by its deed's name and address, where it's a Creative Commons license or CC0, a deed's address in an unpacked book's metadata as its SPDX identifier, and the rights as one statement. |
 | `lib/people.py` | The people and organizations a book's settings name: a name, or a mapping checked here (an ORCID iD's check digit, a ROR ID's checksum, a MARC role), and what an EPUB files each under. |
 | `lib/pdfcheck.py` | What a PDF states about itself: metadata, claims, structure, with veraPDF when installed, and veraPDF's WCAG 2.2 checks when asked for (`--wcag`), with the probe that says whether its WCAG modules loaded; an audit's cache of each PDF's own checks and of its WCAG findings. |
 | `lib/wcag.py` | WCAG 2.2's success criteria, from W3C's source: each one's name, level, the version it came in, and its Understanding document, which a finding from veraPDF's WCAG profile or axe-core names; and what `--wcag-version` and `--wcag-level` choose, a criterion within them or not. |

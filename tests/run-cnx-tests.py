@@ -644,6 +644,9 @@ def case_trade(work):
          and project["publisher"] == "OpenStax"
          and project["contents"][1]["title"]
          == "Chapter 1 Trade and Its Gains"),
+        ("project.yaml: the collection's license by its SPDX identifier, from its deed's "
+         "address, and no description saying it",
+         lambda: project.get("license") == "CC-BY-4.0" and "description" not in project),
         ("an OpenStax book's pages carry the attribution OpenStax asks for, in its "
          "words, not a link",
          lambda: conversion["defaults"]["footer"] == "Access for free at openstax.org."),

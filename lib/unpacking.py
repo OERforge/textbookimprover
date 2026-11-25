@@ -27,6 +27,7 @@ import re
 import shutil
 import sys
 
+import licenses
 import sidecars
 import projectpaths
 
@@ -452,7 +453,8 @@ def write_contents(nodes, lines, indent, flagged, top=True):
 
 def project_yaml(source, meta, tree, flagged, unnamed, title):
     """project.yaml's text. meta holds lists under title, language,
-    creator, identifier, publisher, description."""
+    creator, identifier, publisher, description, and rights, whose first
+    Creative Commons deed's address is the license's (lib/licenses.py)."""
     lines = ["# Written by " + source + "; yours to edit.", "project:",
              "  identifier: " + xml_name((meta.get("identifier") or [title])[0]),
              "  title: " + yaml_string(title),
@@ -460,6 +462,9 @@ def project_yaml(source, meta, tree, flagged, unnamed, title):
     for key in ("description", "publisher"):
         if meta.get(key):
             lines.append(f"  {key}: " + yaml_string(meta[key][0]))
+    spdx = next((s for s in map(licenses.from_address, meta.get("rights") or []) if s), None)
+    if spdx:
+        lines.append(f"  license: {spdx}")
     if meta.get("creator"):
         lines.append("  authors:")
         lines += ["    - " + yaml_string(a) for a in meta["creator"]]

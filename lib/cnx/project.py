@@ -43,6 +43,7 @@ import textwrap
 import unicodedata
 
 import alttext
+import licenses
 import sidecars
 
 from .emit import TEXT_FIXES, symbol_counts, symbol_report
@@ -100,7 +101,13 @@ def project_yaml(source, collection, slug, outline, publisher=None,
              f"  language: {yaml_string(collection.language or 'en')}"]
     if publisher:
         lines.append(f"  publisher: {yaml_string(publisher)}")
-    if collection.license_text or collection.license_url:
+    # The license by its SPDX identifier where its address is a Creative
+    # Commons deed's (lib/licenses.py), and otherwise said in the
+    # description, as it was before the book had a license of its own.
+    spdx = licenses.from_address(collection.license_url)
+    if spdx:
+        lines.append(f"  license: {spdx}")
+    elif collection.license_text or collection.license_url:
         license_text = collection.license_text or collection.license_url
         if collection.license_url and collection.license_url not in \
                 license_text:

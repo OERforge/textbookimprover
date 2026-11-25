@@ -79,6 +79,30 @@ def known(license_id):
     return None
 
 
+# A Creative Commons deed's address, or its legal code's, within a text:
+# the license's elements, version, and a port's jurisdiction, or CC0.
+DEED = re.compile(r"creativecommons\.org/(?:licenses/(by(?:-nc)?(?:-nd|-sa)?|by-nd-nc)/"
+                  r"(\d\.\d)(?:/([a-z]{2,3}))?(?=[/\s\"'<>),.;]|$)|(publicdomain/zero/1\.0))",
+                  re.I)
+
+
+def from_address(text):
+    """The SPDX identifier of the first Creative Commons license or CC0
+    whose deed's or legal code's address the text holds, as an unpacked
+    book's metadata gives it (OpenStax's collection, an EPUB's rights), or
+    None where it holds none this module knows."""
+    for found in DEED.finditer(str(text or "")):
+        if found.group(4):
+            return "CC0-1.0"
+        elements, version, port = found.group(1).upper(), found.group(2), found.group(3)
+        if elements == "BY-ND-NC":
+            elements = "BY-NC-ND"
+        spdx = f"CC-{elements}-{version}" + (f"-{port.upper()}" if port else "")
+        if known(spdx):
+            return spdx
+    return None
+
+
 def is_open(license_id):
     """Whether the license is a Creative Commons license or CC0, which
     cost nothing to use."""

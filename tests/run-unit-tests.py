@@ -883,6 +883,14 @@ def check_licenses():
                                          "LicenseRef-instructors-only", "All rights reserved",
                                          "CC-BY-4.0-US")]
     opened = [licenses.is_open(i) for i in ("CC-BY-4.0", "CC0-1.0", "MIT", "")]
+    addressed = [licenses.from_address(t) for t in (
+        "http://creativecommons.org/licenses/by/4.0/",
+        "https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode",
+        "creativecommons.org/licenses/by-nd-nc/1.0", "https://creativecommons.org/licenses/by/3.0/us/",
+        "https://creativecommons.org/publicdomain/zero/1.0/",
+        "Licensed under CC BY (https://creativecommons.org/licenses/by/4.0).",
+        "https://creativecommons.org/licenses/by/4.0/us/", "https://creativecommons.org/licenses/by/5.0/",
+        "https://creativecommons.org/licenses/by/4.0x", "https://example.org/licenses/by/4.0/", "")]
     said = [licenses.statement("© 2026 Robert Szarka", "CC-BY-4.0"),
             licenses.statement("", "CC0-1.0"), licenses.statement("Mine.", "All rights reserved"),
             licenses.statement("", ""),
@@ -901,6 +909,11 @@ def check_licenses():
          and named[5][1] == "https://creativecommons.org/publicdomain/zero/1.0/"
          and licenses.known("CC-BY-NC-ND-1.0")[1]
          == "https://creativecommons.org/licenses/by-nd-nc/1.0/" or fail(repr(named))),
+        ("a deed's address, or its legal code's, in a text as its SPDX identifier, a port's and "
+         "1.0's too, and one that isn't a deed's as none",
+         lambda: addressed == ["CC-BY-4.0", "CC-BY-NC-SA-4.0", "CC-BY-NC-ND-1.0", "CC-BY-3.0-US",
+                               "CC0-1.0", "CC-BY-4.0", None, None, None, None, None]
+         or fail(repr(addressed))),
         ("a Creative Commons license and CC0 cost nothing, and CC0 alone asks nothing",
          lambda: opened == [True, True, False, False] and named[5][2] and not named[0][2]
          or fail(repr(opened))),
