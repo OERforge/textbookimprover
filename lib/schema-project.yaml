@@ -311,7 +311,8 @@ keys:
       (its SPDX identifier or its name), and changes (what you changed),
       or a statement in your own words, with a license or not. From the
       parts a sentence is written at the end of the last of its pages in
-      the book's order, or of each with each_page: true: "Adapted from
+      the book's order, or of each with each_page: true (a deck's on a
+      slide of their own at its end, Credits): "Adapted from
       Title by Author, licensed under CC BY 4.0. Changes: ...", the title
       linked to the source and the license to its deed, in English. Each
       page's license is its entries' and otherwise the book's: an HTML

@@ -4678,7 +4678,8 @@ def add_license_statements(project, pages):
     """Each entry of project.licenses (a part's own in its run) as its
     sentence at the end of the last of its pages in the book's order, or
     of each with each_page: a div of class oer-license, marked English
-    where the page isn't, since the sentence's fixed form is. An entry
+    where the page isn't, since the sentence's fixed form is; a deck's on
+    a slide of their own at its end, "Credits". An entry
     that names none of the pages stops the run, a page left without the
     credit its license asks for being worse than no build. Returns the
     pages given one."""
@@ -4706,10 +4707,21 @@ def add_license_statements(project, pages):
             doc = json.load(fh)
         language = meta_text(doc.get("meta", {}), "lang") or str(project.get("language") or "")
         attributes = [] if language.lower().split("-")[0] == "en" else [["lang", "en"]]
-        doc["blocks"] = doc.get("blocks", []) + [
-            {"t": "Div", "c": [["", ["oer-license"], attributes],
-                               [{"t": "Para", "c": license_inlines(entry)}]]}
-            for entry in chosen]
+        credits = [{"t": "Div", "c": [["", ["oer-license"], attributes],
+                                      [{"t": "Para", "c": license_inlines(entry)}]]}
+                   for entry in chosen]
+        # A deck's credits are a slide of their own at its end, headed at
+        # its slide level, where on a page they'd end its last slide; a
+        # deck that makes no heading a slide (level 0) is given a rule.
+        level = meta_text(doc.get("meta", {}), "deck-slide-level")
+        if level.isdigit():
+            level = int(level)
+            heading = [{"t": "HorizontalRule"}] if level < 1 else []
+            heading.append({"t": "Header", "c": [max(level, 1), ["oer-credits", ["oer-credits"],
+                                                                 attributes],
+                                                 [{"t": "Str", "c": "Credits"}]]})
+            credits = heading + credits
+        doc["blocks"] = doc.get("blocks", []) + credits
         with open(by_stem[stem], "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
     return sorted(placed)

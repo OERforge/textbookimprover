@@ -1470,6 +1470,76 @@ def case_titles_list(work):
     ]
 
 
+def case_credits(work):
+    """A deck's credits (project.licenses) on a slide of their own at its
+    end, headed Credits at its slide level, in its PowerPoint file, its
+    presentation, its PDF, and its page alike, where they had ended its last slide;
+    and a deck no entry names given none."""
+    def fail(message):
+        raise AssertionError(message)
+    unready = too_old("PPTX_PANDOC", "a deck's PowerPoint file")
+    if unready:
+        print(f"  skip  {unready}; a deck's credits aren't checked")
+        return []
+    no_pdf = pdf_ready()
+    if no_pdf:
+        print(f"  skip  {no_pdf}; a deck's PDF's credits aren't checked")
+    work = folder(work, PPTX + "  present:\n    format: revealjs\n  pages:\n    format: html\n"
+                  + ("" if no_pdf else "  print:\n    format: pdf\n"), project=False)
+    write(place(work, "project.yaml"),
+          "project:\n  identifier: org.example.decks\n  title: The Decks\n"
+          "  language: en-US\n  kind: slides\n  license: CC-BY-4.0\n  licenses:\n"
+          "    - {pages: [Flat-Deck*, flat*], title: Old Deck, author: A. Lecturer, "
+          "license: CC-BY-SA-4.0}\n")
+    result = convert(work, "--quick")
+    stem = next((os.path.splitext(n)[0] for n in sorted(os.listdir(place(work, "slides")))
+                 if n.lower().startswith("flat") and n.endswith(".pptx")), "") \
+        if os.path.isdir(place(work, "slides")) else ""
+    slides = pptx_slides(pptx_parts(place(work, "slides", stem + ".pptx"))) if stem else []
+    others = [n for n in os.listdir(place(work, "slides"))
+              if n.endswith(".pptx") and n != stem + ".pptx"] if stem else []
+    other_texts = [re.findall(r"<a:t>([^<]*)</a:t>", "".join(pptx_slides(pptx_parts(
+        place(work, "slides", n))))) for n in others]
+
+    def texts(xml):
+        return re.findall(r"<a:t>([^<]*)</a:t>", xml)
+    shown = read(place(work, "present", stem + ".html")) if stem else ""
+    sections = re.findall(r"<section\b[^>]*>(.*?)</section>", shown, re.S)
+    page = read(place(work, "pages", stem + ".html")) if stem else ""
+    pdf = place(work, "print", stem + ".pdf") if stem else ""
+    pages = ([page.extract_text() or "" for page in pypdf.PdfReader(pdf).pages]
+             if not no_pdf and os.path.exists(pdf) else [])
+    checks = [
+        ("the decks are converted", lambda: result.returncode == 0 and bool(slides)
+         or fail(result.stderr[-1200:])),
+        ("the PowerPoint file's last slide the credits, its title Credits, the one before it "
+         "without them",
+         lambda: texts(slides[-1])[:1] == ["Credits"]
+         and "Adapted from " in texts(slides[-1]) and "CC BY-SA 4.0" in texts(slides[-1])
+         and "Adapted from " not in texts(slides[-2]) or fail(repr(texts(slides[-1])))),
+        ("the presentation's last slide headed Credits, with the sentence",
+         lambda: re.search(r"<h\d[^>]*>Credits</h\d>", sections[-1])
+         and "Adapted from" in sections[-1] and "Adapted from" not in sections[-2]
+         or fail(sections[-1][:600] if sections else shown[:600])),
+        ("a deck no entry names given no credits",
+         lambda: others and not any("Credits" in t for t in other_texts)
+         or fail(repr(other_texts))),
+        ("the deck's page's credits under a heading Credits of their own, after its "
+         "last slide's",
+         lambda: re.search(r'<h2 class="oer-credits" id="oer-credits">Credits</h2>\s*'
+                           r'<div class="oer-license"', page)
+         and page.count("Adapted from") == 1
+         and page.index("Adapted from") > page.index(">Credits</h2>") or fail(page[-900:])),
+    ]
+    if not no_pdf:
+        checks.append(
+            ("the PDF's last page the credits, headed Credits, the one before it without them",
+             lambda: len(pages) > 1 and pages[-1].lstrip().startswith("Credits")
+             and "Adapted from" in pages[-1] and "Adapted from" not in pages[-2]
+             or fail(repr(pages[-2:]))))
+    return checks
+
+
 def case_lowercase_names(work):
     """media.lowercase in a deck's presentation and its page alike: the
     picture copied under its name in lowercase, and named so."""
@@ -5676,6 +5746,7 @@ CASES = [("the pieces", case_pieces),
          ("a PowerPoint caption with a note", case_noted_caption),
          ("a PowerPoint caption with a link", case_linked_caption),
          ("a PowerPoint file's list of slide titles", case_titles_list),
+         ("a deck's credits on a slide of their own", case_credits),
          ("file names lowercased", case_lowercase_names),
          ("a formula in display style", case_display_style),
          ("pictures scaled down to a set number of times the width shown", case_downsample),
