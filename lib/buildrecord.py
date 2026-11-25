@@ -31,6 +31,9 @@ For each PDF LaTeX built, what it was built with (lib/texrecord.py): the
 release, the TeX Live packages and the fonts, and the files read outside
 TeX's tree, a file under --allow-read among them.
 
+Each program a limit may have stopped (lib/limits.py), by the part's
+run that started it (write_stop).
+
 For each package, how the pages its contents doesn't name were placed,
 and the outline --toc read, by its path and SHA-256, which
 build-cartridge.py leaves beside the package's stamp (write_package).
@@ -73,6 +76,9 @@ NAME = "ti-build.yaml"
 FORMAT = "1"
 FRAGMENTS = ("output", "work", "record")
 PACKAGES = FRAGMENTS + ("packages",)
+STOPS = FRAGMENTS + ("stops",)
+# The most stops a part's run records.
+MOST_STOPS = 50
 # The longest a part's piece may be (bytes): longer, it's passed over.
 LONGEST = 1 << 20
 # What isn't an output of the run's, under output/: its own files, and
@@ -154,6 +160,11 @@ def clear_fragments(base):
                 os.remove(os.path.join(folder, name))
     import texrecord
     texrecord.clear(base)
+    stops = projectpaths.of(base).top(*STOPS)
+    if os.path.isdir(stops) and not os.path.islink(stops):
+        for name in os.listdir(stops):
+            if name.endswith(".json"):
+                os.remove(os.path.join(stops, name))
 
 
 def sandbox_said():
@@ -217,6 +228,41 @@ def write_package(base, values):
     name = re.sub(r"[^A-Za-z0-9._-]", "_", values["package"])[:120]
     _write_new(os.path.join(folder, name + ".json"),
                json.dumps(_strings(values), indent=1, sort_keys=True))
+
+
+def write_stop(base, part, program, code, why):
+    """A program a limit may have stopped (lib/limits.py's why), added to
+    its part's list in output/work/record/stops/, for the build record."""
+    folder = projectpaths.of(base).top(*STOPS)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, re.sub(r"[^A-Za-z0-9._-]", "_", str(part))[:120] + ".json")
+    try:
+        said = json.loads(_read_small(path) or "[]")
+    except ValueError:
+        said = []
+    if not isinstance(said, list):
+        said = []
+    if len(said) < MOST_STOPS:
+        said.append({"part": str(part), "program": os.path.basename(str(program)),
+                     "exit status": str(code), "why": str(why).strip()})
+    _write_new(path, json.dumps(said, indent=1))
+
+
+def _stops(base):
+    """[{part, program, exit status, why}] for each program a limit may have
+    stopped this run, read as a sandboxed run's data."""
+    folder = projectpaths.of(base).top(*STOPS)
+    found = []
+    if not os.path.isdir(folder) or os.path.islink(folder):
+        return found
+    for name in sorted(os.listdir(folder)):
+        try:
+            said = json.loads(_read_small(os.path.join(folder, name)) or "[]")
+        except ValueError:
+            continue
+        if isinstance(said, list):
+            found.extend(_strings(s) for s in said[:MOST_STOPS] if isinstance(s, dict))
+    return found
 
 
 def _packages(base):
@@ -448,6 +494,7 @@ def values(base, argv, moment, moment_from, status, checks="full"):
         "environment": environment,
         "parts": parts,
         "packages built": _packages(base),
+        "stopped by a limit": _stops(base),
         "latex": _latex(base, {t for p in parts.values() if isinstance(p, dict)
                                for t in (p.get("targets") or {})}),
         "stamps": _stamps(base),

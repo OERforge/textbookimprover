@@ -555,9 +555,22 @@ def run(command, env=None, cwd=None, check=True, capture=False):
     result = subprocess.run(command, env=env, cwd=cwd, text=True,
                             capture_output=capture)
     if check and result.returncode:
+        why = LIMITS.why(result.returncode, command[0])
+        if why:
+            record_stop(command[0], result.returncode, why)
         die(f"{os.path.basename(command[0])} failed with exit code "
-            f"{result.returncode}.{LIMITS.why(result.returncode, command[0])}")
+            f"{result.returncode}.{why}")
     return result
+
+
+def record_stop(program, code, why):
+    """A program a limit may have stopped, for the build record."""
+    if PART_BASE is not None and projectpaths.builds_beside():
+        import buildrecord
+        try:
+            buildrecord.write_stop(PART_BASE, PART, program, code, why)
+        except OSError:
+            pass
 
 
 def shell_quote(value):
@@ -1739,6 +1752,8 @@ KIND_DECLARED = None        # project.kind as a file gives it, if one does
 # project says (project.parts) or its folder's name does (slides), and
 # the option that tells each script the run starts which part it is.
 PART = None
+# The project of the part this run builds, once it's chosen.
+PART_BASE = None
 DEFAULT_PART = None
 PART_KIND = None
 PART_ARGS = []
@@ -8233,6 +8248,8 @@ def main():
             "second imported over the first.")
     PART_ARGS = ["--part", PART]
     projectpaths.set_part(PART, base)
+    global PART_BASE
+    PART_BASE = base
 
     # What of Pandoc's data folders a run leaves alone (lib/pandocrun.py).
     for line in [] if again else pandocrun.notices():

@@ -1952,6 +1952,26 @@ def scan_supplied(base, resolved, pages_dir, stems):
                                        "The PDF wasn't built, and an earlier one is as it was."))
 
 
+# The exit codes of a program a signal ended: the processor time
+# --max-time gives it (SIGXCPU, then SIGKILL at the hard limit), or
+# another killing it (the kernel short of memory).
+KILLED = {-signal.SIGXCPU, -signal.SIGKILL, 128 + signal.SIGXCPU, 128 + signal.SIGKILL}
+
+
+def record_stop(base, code):
+    """LaTeX ended by a signal, for the build record a run of convert.py
+    writes (buildrecord.write_stop)."""
+    if not projectpaths.builds_beside():
+        return
+    import buildrecord
+    try:
+        buildrecord.write_stop(base, texreads.part_of(P(base)) or "book", ENGINE, code,
+                               "It may have used more than its processor time "
+                               "(--max-time), or been killed.")
+    except OSError:
+        pass
+
+
 def record_tex(base, key, fls, pdf, log):
     """What LaTeX built the PDF with, for the build record a run of
     convert.py writes (lib/texrecord.py)."""
@@ -2025,6 +2045,8 @@ def pdf_via_latex(book_json, filters, searched, out_path, base, work, environmen
             break
     made = os.path.join(tex_dir, LATEX_JOB + ".pdf")
     stderr = wrote.stderr
+    if code in KILLED:
+        record_stop(base, code)
     if code or not os.path.exists(made):
         lines = latex_stopped(code or 43, run, log, said, source, tex_dir, pages or {}) if code \
             else [f"LaTeX finished its {ORDINALS[run - 1]} run and made no PDF; the last of "

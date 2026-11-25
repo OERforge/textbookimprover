@@ -1003,6 +1003,66 @@ def case_build_record_packages(work):
     ]
 
 
+def case_build_record_stops(work):
+    """The build record names a program a limit may have stopped: the
+    PDF's LaTeX, a stand-in that runs on past the processor time a run
+    gives each program, is stopped, and the record says which program,
+    its exit status, and why."""
+    import yaml
+
+    def fail(message):
+        raise AssertionError(message)
+    real = shutil.which("lualatex")
+    if real is None:
+        print("  skip  lualatex not installed; a stop by a limit in the build record isn't "
+              "checked")
+        return []
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    write("project.yaml", "project:\n  identifier: org.example.stops\n  title: Stops\n"
+          "  contents:\n    - one\n")
+    write("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n")
+    write("src/book/one.md", "# One\n\nA paragraph.\n")
+    # LaTeX's run for the PDF (build-pdf.py's -jobname input) a stand-in
+    # that spends processor time until it's stopped; every other run of
+    # lualatex the real one. The limit is ten seconds, not one, since it
+    # holds for TextbookImprover's own Python too, which a slow machine
+    # took past a second (convert.py 0.5 s here).
+    tools = work.rstrip(os.sep) + "-tools"
+    os.makedirs(tools, exist_ok=True)
+    with open(os.path.join(tools, "lualatex"), "w") as fh:
+        fh.write("#!/bin/sh\nprev=\nfor a in \"$@\"; do\n"
+                 "  if [ \"$prev\" = -jobname ] && [ \"$a\" = input ]; then\n"
+                 "    while :; do :; done\n  fi\n  prev=$a\ndone\n"
+                 "exec %s \"$@\"\n" % shlex.quote(real))
+    os.chmod(os.path.join(tools, "lualatex"), 0o755)
+    done = subprocess.run(
+        ["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick", "--quiet",
+         "--max-time", "10s"], cwd=work, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL,
+        env=dict(os.environ, PATH=tools + os.pathsep + os.environ["PATH"]))
+    path = os.path.join(work, "output", "ti-build.yaml")
+    record = {}
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
+            record = yaml.safe_load(fh) or {}
+    stops = record.get("stopped by a limit") or []
+    return [
+        ("a program a limit stopped is named, with its exit status and why",
+         lambda: done.returncode != 0 and record.get("run", {}).get("exit status") != "0"
+         and len(stops) >= 1 and stops[0].get("part") == "book"
+         and stops[0].get("program") == "lualatex"
+         and stops[0].get("exit status") in ("-24", "-9", "152", "137")
+         and "--max-time" in stops[0].get("why", "")
+         or fail(done.stderr[-600:] + repr(stops))),
+    ]
+
+
 def case_archive_dates(work):
     """The zip and tar files a run writes itself, a target's archive and a
     package's cartridge, are the same bytes when the book is built again
@@ -12896,6 +12956,7 @@ CASES = [
     ("the build record, of what a run built and with what", case_build_record),
     ("the build record, of what LaTeX built a PDF with", case_build_record_latex),
     ("the build record, of how a package's pages were placed", case_build_record_packages),
+    ("the build record, of a program a limit stopped", case_build_record_stops),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),

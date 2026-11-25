@@ -1294,6 +1294,12 @@ def check_buildrecord():
     os.symlink(os.path.join(work, "planted.json"),
                os.path.join(project, *buildrecord.PACKAGES, "planted.json"))
     packages = buildrecord._packages(project)
+    # Stops: each part's list, at most MOST_STOPS, and not through a link.
+    for n in range(buildrecord.MOST_STOPS + 2):
+        buildrecord.write_stop(project, "book", "/usr/bin/pandoc", 251, " Out of memory. ")
+    os.symlink(os.path.join(work, "planted.json"),
+               os.path.join(project, *buildrecord.STOPS, "planted.json"))
+    stops = buildrecord._stops(project)
     # The software digest: the same whatever the moment, the paths, and
     # the outputs, and another for another package's version or face.
     software = {"run": {"moment": "1"}, "textbookimprover": {"version": "0.11.dev", "digest": "d",
@@ -1330,6 +1336,11 @@ def check_buildrecord():
          "outputs, and is by a package's version or a face's",
          lambda: digests[0] == digests[1] and len(set(digests)) == 3
          or fail(repr(digests))),
+        ("a stop is named by its part, program, exit status, and why, at most MOST_STOPS, "
+         "and none through a link",
+         lambda: len(stops) == buildrecord.MOST_STOPS
+         and stops[0] == {"part": "book", "program": "pandoc", "exit status": "251",
+                          "why": "Out of memory."} or fail(repr(stops[:2]))),
         ("a package's piece is read where its stamp is there, every value a string, and not "
          "through a link",
          lambda: packages == {"cartridge": {"zip": "no"}} or fail(repr(packages))),
