@@ -114,6 +114,9 @@ def unusual(node):
         # A subject a name, or a mapping whose code YAML would read as a
         # number.
         return [{"name": "a, b", "id": "45.0601", "scheme": "no"}, "1.10"]
+    if kind == "list" and node.item == "keptmetadata":
+        # What the metadata strip keeps: a category and a field by name.
+        return ["gps", "LensModel"]
     if kind == "list" and node.item == "licensing":
         # A page's license: its work's parts, a title YAML would read as a
         # boolean and an author as a number, and a statement with a colon,

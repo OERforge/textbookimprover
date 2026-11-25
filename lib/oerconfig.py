@@ -91,7 +91,7 @@ FALSE_WORDS = {"false", "no", "off", "0"}
 
 SCALAR_TYPES = ("string", "text", "path", "language", "ncname", "bool",
                 "int", "float", "enum", "date", "doi", "isbn", "url", "contact",
-                "agerange", "duration", "period", "worktype")
+                "agerange", "duration", "period", "worktype", "keptmetadata")
 # A person, a contributor (a person with a role), an organization, or a
 # funder and its award: a name, or a mapping lib/people.py checks.
 PEOPLE_TYPES = ("person", "contributor", "organization", "funding")
@@ -769,6 +769,16 @@ def _coerce(node, value, where, problems):
         except ValueError as exc:
             problems.append(f"{where}: {node.path}: {exc}")
             return node.default
+
+    if kind == "keptmetadata" and value.strip():
+        # A category or an EXIF field kept by the metadata strip
+        # (lib/metastrip.py).
+        import metastrip
+        more = metastrip.check_keep([value])
+        if more:
+            problems.append(f"{where}: {node.path}: {more[0]}")
+            return node.default
+        return value.strip()
 
     if kind == "worktype" and value.strip():
         # A work's type, as DataCite names it (lib/worktypes.py).

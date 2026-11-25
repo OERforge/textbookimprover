@@ -564,6 +564,36 @@ def run(command, env=None, cwd=None, check=True, capture=False):
     return result
 
 
+def strip_target(target, folder):
+    """The pictures in a target's folder as this run built it, their
+    metadata stripped at project.strip_metadata (lib/metastrip.py), as
+    files and inside the EPUBs, Office files, cartridges, and PDFs it
+    holds, a Word or PowerPoint target's own dates kept; what went is the
+    part's metadata-stripped.csv, written again with each target, and said
+    in one line."""
+    import csv
+    import metastrip
+    level, keep = STRIP
+    # A Word file or a deck's PowerPoint file a writer made here is dated
+    # by the run's moment, which isn't about a person, and is kept; a
+    # copy's (format: source) dates are its editors'.
+    rows = metastrip.strip_folder(folder, level, keep,
+                                  own_dates=target.format in ("docx", "pptx"))
+    STRIPPED[:] = [row for row in STRIPPED if row[0] != target.name]
+    STRIPPED.extend((target.name, where, member, level, "; ".join(removed))
+                    for where, member, removed in rows)
+    report = P(target.base).report("metadata-stripped.csv")
+    os.makedirs(os.path.dirname(report), exist_ok=True)
+    with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["Target", "File", "Inside", "Level", "Taken out"])
+        writer.writerows(STRIPPED)
+    if rows:
+        verb = "would be taken out at private" if level == "report" else "taken out"
+        say(f"{target.name}: {len(rows)} picture(s) with metadata {verb} "
+            f"({os.path.relpath(report, target.base)}).")
+
+
 def record_stop(program, code, why):
     """A program a limit may have stopped, for the build record."""
     if PART_BASE is not None and projectpaths.builds_beside():
@@ -618,10 +648,13 @@ class Target:
         self.current = False         # up to date, and not built this run
 
     def put_in_place(self, written=()):
-        """The target's folder as this run built it, put where it's kept
+        """The target's folder as this run built it, its pictures' metadata
+        stripped first (strip_metadata), put where it's kept
         (projectpaths.put_in_place), and written, the files the build
         named in it, as they're named there."""
         built = os.path.abspath(self.output_dir)
+        if os.path.isdir(built) and STRIP is not None:
+            strip_target(self, built)
         # Built, and so swapped in: its stamp is recorded once the part's
         # run has succeeded (record_stamps), never for a folder an
         # earlier run left.
@@ -1755,6 +1788,10 @@ KIND_DECLARED = None        # project.kind as a file gives it, if one does
 PART = None
 # The project of the part this run builds, once it's chosen.
 PART_BASE = None
+# project.strip_metadata and keep_metadata, once the part's settings are
+# read, and what each target's strip took out (strip_target).
+STRIP = None
+STRIPPED = []
 DEFAULT_PART = None
 PART_KIND = None
 PART_ARGS = []
@@ -8399,6 +8436,9 @@ def main():
                                     decks_only=bool(decks or others) and not book_here,
                                     pptx_decks=bool(decks or (others and not markdown_here)),
                                     markdown_decks=bool(markdown_here))
+    global STRIP
+    if not args.check_only:
+        STRIP = (project.get("strip_metadata") or "private", project.get("keep_metadata") or [])
     # A folder is a book or a set of slides: slides when project.kind says
     # so, or when it says nothing and the folder holds decks alone.
     slides = KIND_DECLARED == "slides" or (KIND_DECLARED is None and bool(decks or others)

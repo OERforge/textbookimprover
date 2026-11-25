@@ -1056,6 +1056,112 @@ def case_identified_cartridge(work):
     ]
 
 
+def case_metadata_strip(work):
+    """A photograph's metadata taken out of every output, its source left
+    alone (project.strip_metadata): the HTML target's copy, the EPUB's,
+    the Word file's, and the PDF's picture without the camera's serial
+    number or the position, the orientation kept and the pixels the same;
+    the part's metadata-stripped.csv naming each picture and what went,
+    and the Word file's own properties;
+    and at report every output's picture the source's bytes, the report
+    listing what private would take out."""
+    def fail(message):
+        raise AssertionError(message)
+    try:
+        from PIL import Image
+    except ImportError:
+        return [("the strip", lambda: print("  skip  no Pillow (python3-pil)") or True)]
+    import io
+    import pikepdf
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    picture = Image.new("RGB", (48, 32), (10, 120, 200))
+    exif = Image.Exif()
+    exif[0x010F], exif[0x0112], exif[0x8298] = "Canon", 1, "CC BY 4.0 Ana"
+    exif.get_ifd(0x8769)[0xA431] = "SN98765"
+    gps = exif.get_ifd(0x8825)
+    gps[1], gps[2] = "N", (40.0, 26.0, 46.0)
+    held = io.BytesIO()
+    picture.save(held, "JPEG", exif=exif.tobytes(), quality=92)
+    source = held.getvalue()
+    os.makedirs(os.path.join(work, "src", "book"), exist_ok=True)
+    with open(os.path.join(work, "src", "book", "photo.jpg"), "wb") as fh:
+        fh.write(source)
+    write("src/book/one.md", "# One\n\n![A blue field.](photo.jpg)\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
+          "  docx:\n    format: docx\n  pdf:\n    format: pdf\n")
+
+    def build(level):
+        write("project.yaml", "project:\n  identifier: org.example.strip\n  title: Strip\n"
+              f"  contents: [one]\n  strip_metadata: {level}\n")
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                               "--quick", "--quiet", "--rebuild"], cwd=work,
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        out = os.path.join(work, "output")
+        pictures = {}
+        html = os.path.join(out, "html", "photo.jpg")
+        if os.path.isfile(html):
+            with open(html, "rb") as fh:
+                pictures["html"] = fh.read()
+        for target, name in (("epub", "org.example.strip.epub"), ("docx", "one.docx")):
+            path = os.path.join(out, target, name)
+            if os.path.isfile(path):
+                with zipfile.ZipFile(path) as archive:
+                    pictures[target] = next((archive.read(n) for n in archive.namelist()
+                                             if n.lower().endswith((".jpg", ".jpeg"))), b"")
+        pdf_path = os.path.join(out, "pdf", "org.example.strip.pdf")
+        if os.path.isfile(pdf_path):
+            with pikepdf.open(pdf_path) as pdf:
+                pictures["pdf"] = next((o.read_raw_bytes() for o in pdf.objects
+                                        if isinstance(o, pikepdf.Stream)
+                                        and o.get("/Subtype") == "/Image"), b"")
+        report = os.path.join(out, "reports", "book", "metadata-stripped.csv")
+        rows = []
+        if os.path.isfile(report):
+            with open(report, encoding="utf-8-sig") as fh:
+                rows = list(csv.reader(fh))[1:]
+        return done, pictures, rows
+    def pictures_of(found):
+        return [row for row in found if not row[2].startswith("docProps/")]
+    done, pictures, rows = build("private")
+    _, reported, report_rows = build("report")
+    with open(os.path.join(work, "src", "book", "photo.jpg"), "rb") as fh:
+        untouched = fh.read() == source
+
+    def same_pixels(data):
+        return Image.open(io.BytesIO(data)).tobytes() == Image.open(io.BytesIO(source)).tobytes()
+    return [
+        ("the run succeeds", lambda: done.returncode == 0 or fail(done.stderr[-1500:])),
+        ("the HTML's, the EPUB's, the Word file's, and the PDF's picture without the serial "
+         "number or the position, the copyright kept",
+         lambda: sorted(pictures) == ["docx", "epub", "html", "pdf"]
+         and all(b"SN98765" not in data and b"Canon" not in data for data in pictures.values())
+         and b"CC BY 4.0 Ana" in pictures["html"] or fail(repr(sorted(pictures)))),
+        ("the HTML's picture drawn the same as the source",
+         lambda: same_pixels(pictures["html"]) or fail("pixels differ")),
+        ("the report naming each target's picture and what went, and the Word file's own "
+         "properties",
+         lambda: sorted(row[0] for row in pictures_of(rows)) == ["docx", "epub", "html", "pdf"]
+         and all("GPS position" in row[4] and "EXIF SerialNumber" in row[4]
+                 for row in pictures_of(rows))
+         and any(row[0] == "docx" and row[2] == "docProps/app.xml" and "Office Template" in row[4]
+                 for row in rows)
+         and not any(row[0] == "docx" and "Office modified" in row[4] for row in rows)
+         and all(row[3] == "private" for row in rows) or fail(repr(rows))),
+        ("the source left as it was", lambda: untouched or fail("the source changed")),
+        ("at report the HTML's picture the source's bytes, and the report listing what "
+         "private would take out",
+         lambda: reported.get("html") == source and report_rows
+         and all(row[3] == "report" for row in report_rows)
+         and all("GPS position" in row[4] for row in pictures_of(report_rows))
+         or fail(repr(report_rows))),
+    ]
+
+
 def case_page_licenses(work):
     """A license page by page (project.licenses): an entry's sentence at
     the end of the last of its pages in the contents' order, not the
@@ -9010,10 +9116,18 @@ def case_source_target(work):
         return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick"],
                               cwd=work, capture_output=True, text=True)
 
-    def differ(n):
+    def differ(n, properties=False):
+        """The parts the copy changed, its own properties apart, which
+        project.strip_metadata takes its editors out of; with properties,
+        those."""
         with zipfile.ZipFile(place(work, n)) as a, \
                 zipfile.ZipFile(place(work, "fixed", n)) as b:
-            return [p for p in a.namelist() if a.read(p) != b.read(p)]
+            return [p for p in a.namelist() if p.startswith("docProps/") == properties
+                    and a.read(p) != b.read(p)]
+
+    def dated(n):
+        with zipfile.ZipFile(place(work, "fixed", n)) as b:
+            return b"dcterms:modified" in b.read("docProps/core.xml")
 
     conf()
     first = run()
@@ -9021,6 +9135,8 @@ def case_source_target(work):
     first_missing = read(work, "table-captions-missing.csv") if exists(
         work, "table-captions-missing.csv") else ""
     first_differ = {n: differ(n) for n in ("ch1.docx", "ch2.docx")} \
+        if os.path.exists(place(work, "fixed", "ch1.docx")) else None
+    first_properties = {n: (differ(n, True), dated(n)) for n in ("ch1.docx", "ch2.docx")} \
         if os.path.exists(place(work, "fixed", "ch1.docx")) else None
     shutil.copy(place(work, "table-headers-new.csv"), place(work, "table-headers.csv"))
     with open(place(work, "table-headers.csv"), encoding="utf-8") as fh:
@@ -9063,6 +9179,11 @@ def case_source_target(work):
         ("a first run, with no sidecar, changes only a missing language, and says what's left to a guess",
          lambda: first_differ == {"ch1.docx": [], "ch2.docx": ["word/styles.xml"]}
          and "left as they are, with only the census's guess" in first.stderr),
+        ("and the copy's own properties lose their dates, as every output's do "
+         "(project.strip_metadata)",
+         lambda: first_properties and all("docProps/core.xml" in parts and not still
+                                          for parts, still in first_properties.values())
+         or fail(repr(first_properties))),
         ("once a table's row is adopted, its headers are written; a table with none is left alone",
          lambda: re.search(r'w:name="(?:Column|Row)?Title_\d+"', one)
          and not re.search(r'w:name="(?:Column|Row)?Title_\d+"', two)
@@ -13391,6 +13512,7 @@ CASES = [
     ("the build record, of a program a limit stopped", case_build_record_stops),
     ("the book's people in the cartridge", case_people_cartridge),
     ("the book's identifiers in the cartridge", case_identified_cartridge),
+    ("a picture's metadata taken out of the outputs", case_metadata_strip),
     ("a license page by page", case_page_licenses),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),

@@ -168,6 +168,14 @@ How long working through it takes, as an ISO 8601 duration (PT40H for 40 hours).
 
 The license for the book's metadata, as distinct from the book: CC0-1.0, the default, lets a catalog copy the record freely. An SPDX identifier where it has one. Read and checked; for the book's records (see ROADMAP.md).
 
+**`strip_metadata`**—one of `private`, `report`, `bare`; default `private`
+
+What's taken out of the pictures in every output the run writes, as each target's folder is put in place: their files' metadata about the people who made them. private, the default, keeps the color profile, orientation, and resolution; rights, license, and credit; the creator; and the description, alt text, and extended description, and takes out the rest: a camera's position, its make, model, and serial number, the owner, the software, the dates taken and modified, thumbnails, maker notes, and an edit's history. bare keeps only what a picture needs to be drawn as it is: its color profile and orientation. report changes nothing. At each level the part's report metadata-stripped.csv lists, picture by picture, what was taken out, or at report what private would take out. JPEG and PNG files are stripped where they're written, in the HTML target's folder and inside an EPUB, a Word or PowerPoint file, or a cartridge, and a PDF's JPEG pictures, without their pixels changed; and a Word, PowerPoint, or Excel file in an output loses its last editor, revision count, dates, company, manager, template path, and editing time, its title, subject, language, creator, and custom properties kept (a docx or pptx target's own file keeps its dates, the run's moment). The source files aren't touched.
+
+**`keep_metadata`**—`list`; default `[]`
+
+What strip_metadata at private keeps besides its own list: a category, gps, software, timestamps, or device (a camera's make, model, lens, and serial numbers), or an EXIF field by the name exiftool gives it (Make, LensModel, OwnerName, and the like).
+
 **`work_type`**—`worktype`; default `""` (empty)
 
 What kind of work the book is, as one of DataCite's types (resourceTypeGeneral: Book, Presentation, Poster, Dataset, and the rest), matched without regard to case. Where it's not given, a book is a Book, slides a Presentation, and a folder of files a Dataset; a part may give its own (parts). A PDF's XMP gives a Book as a book and anything else as other; education.resource_type stays the kind in your own words.

@@ -406,6 +406,42 @@ keys:
       SPDX identifier where it has one. Read and checked; for the book's
       records (see ROADMAP.md).
 
+  strip_metadata:
+    type: enum
+    values: [private, report, bare]
+    default: private
+    description: >
+      What's taken out of the pictures in every output the run writes,
+      as each target's folder is put in place: their files' metadata
+      about the people who made them. private, the default, keeps the
+      color profile, orientation, and resolution; rights, license, and
+      credit; the creator; and the description, alt text, and extended
+      description, and takes out the rest: a camera's position, its make,
+      model, and serial number, the owner, the software, the dates taken
+      and modified, thumbnails, maker notes, and an edit's history. bare
+      keeps only what a picture needs to be drawn as it is: its color
+      profile and orientation. report changes nothing. At each level the
+      part's report metadata-stripped.csv lists, picture by picture, what was
+      taken out, or at report what private would take out. JPEG and PNG
+      files are stripped where they're written, in the HTML target's
+      folder and inside an EPUB, a Word or PowerPoint file, or a
+      cartridge, and a PDF's JPEG pictures, without their pixels changed;
+      and a Word, PowerPoint, or Excel file in an output loses its last
+      editor, revision count, dates, company, manager, template path, and
+      editing time, its title, subject, language, creator, and custom
+      properties kept (a docx or pptx target's own file keeps its dates,
+      the run's moment). The source files aren't touched.
+
+  keep_metadata:
+    type: list
+    item: keptmetadata
+    default: []
+    description: >
+      What strip_metadata at private keeps besides its own list: a
+      category, gps, software, timestamps, or device (a camera's make,
+      model, lens, and serial numbers), or an EXIF field by the name
+      exiftool gives it (Make, LensModel, OwnerName, and the like).
+
   work_type:
     type: worktype
     default: ""

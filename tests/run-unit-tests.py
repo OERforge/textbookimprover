@@ -929,6 +929,165 @@ def check_licenses():
     ]
 
 
+def check_metastrip():
+    """lib/metastrip.py, what a picture's file says of its people taken out:
+    a JPEG's EXIF filtered to the keep list (the orientation, resolution,
+    artist, and copyright kept; the camera, serial number, software,
+    dates, and position gone, and IFD1's thumbnail), its XMP to rights,
+    IPTC to the by-line, Photoshop's thumbnail, a comment, and the bytes
+    after the picture's end; the pixels the same, a second strip the same
+    bytes; bare keeping only the orientation; a category and a field
+    kept by name; a PNG's text and EXIF chunks alike; report changing
+    nothing; and broken files left as they are, never a traceback."""
+    import io
+    import random
+    import metastrip
+    try:
+        from PIL import Image, PngImagePlugin
+    except ImportError:
+        return [("the strip, on pictures made for it",
+                 lambda: print("  skip  no Pillow (python3-pil) to make the pictures")
+                 or True)]
+    picture = Image.new("RGB", (40, 30), (10, 200, 30))
+    for x in range(40):
+        picture.putpixel((x, x % 30), (255, 0, 0))
+    exif = Image.Exif()
+    for tag, value in ((0x010F, "Canon"), (0x0110, "EOS"), (0x0112, 6),
+                       (0x013B, "Ana Photographer"), (0x0131, "Editor 25"),
+                       (0x0132, "2026:01:02 03:04:05"), (0x8298, "CC BY 4.0 Ana"),
+                       (0x011A, 300), (0x011B, 300), (0x0128, 2)):
+        exif[tag] = value
+    sub = exif.get_ifd(0x8769)
+    sub[0x9003], sub[0xA431], sub[0xA001] = "2026:01:02 03:04:05", "SN12345", 1
+    gps = exif.get_ifd(0x8825)
+    gps[1], gps[2], gps[3], gps[4] = "N", (40.0, 26.0, 46.0), "W", (79.0, 58.0, 56.0)
+    held = io.BytesIO()
+    picture.save(held, "JPEG", exif=exif.tobytes(), quality=90)
+    plain = held.getvalue()
+    xmp = ('<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta '
+           'xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-'
+           'syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/'
+           '1.1/" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:xmpMM="http://ns.adobe.com/'
+           'xap/1.0/mm/" xmp:CreatorTool="Editor" xmpMM:DocumentID="xmp.did:123"><dc:rights>'
+           '<rdf:Alt><rdf:li xml:lang="x-default">CC BY 4.0</rdf:li></rdf:Alt></dc:rights>'
+           '<xmpMM:History><rdf:Seq><rdf:li>edit</rdf:li></rdf:Seq></xmpMM:History>'
+           '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>').encode("utf-8")
+    app1 = (b"\xff\xe1" + struct.pack(">H", len(xmp) + 31) + b"http://ns.adobe.com/xap/1.0/\x00"
+            + xmp)
+    iptc = b"\x1c\x02\x00\x00\x02\x00\x04" + b"\x1c\x02\x50\x00\x03Ana" \
+        + b"\x1c\x02\x5a\x00\x0cShepherdstwn"
+    resources = (b"8BIM\x04\x04\x00\x00" + struct.pack(">I", len(iptc)) + iptc + b"\x00"
+                 + b"8BIM\x04\x0c\x00\x00" + struct.pack(">I", 4) + b"THMB")
+    app13 = (b"\xff\xed" + struct.pack(">H", len(resources) + 16) + b"Photoshop 3.0\x00"
+             + resources)
+    comment = b"\xff\xfe" + struct.pack(">H", 10) + b"gd-jpeg!"
+    jpeg = plain[:2] + app1 + app13 + comment + plain[2:] + b"TRAILERDATA"
+    private, removed = metastrip.strip("photo.jpg", jpeg, "private")
+    again, more = metastrip.strip("photo.jpg", private, "private")
+    bare, _ = metastrip.strip("photo.jpg", jpeg, "bare")
+    reported, would = metastrip.strip("photo.jpg", jpeg, "report")
+    kept, _ = metastrip.strip("photo.jpg", jpeg, "private", ["gps", "Model"])
+
+    def opened(data):
+        return Image.open(io.BytesIO(data))
+
+    def tags(data, ifd=None):
+        found = opened(data).getexif()
+        return dict(found.get_ifd(ifd)) if ifd else {k: v for k, v in found.items()
+                                                    if k not in (0x8769, 0x8825)}
+    info = PngImagePlugin.PngInfo()
+    info.add_text("Author", "Ana")
+    info.add_text("Software", "GIMP")
+    info.add_itxt("XML:com.adobe.xmp", xmp.decode("utf-8"))
+    held = io.BytesIO()
+    picture.save(held, "PNG", pnginfo=info, exif=exif.tobytes())
+    png = held.getvalue()
+    png_private, png_removed = metastrip.strip("figure.png", png, "private")
+    office = os.path.join(scratch("strip-office-"), "edited.docx")
+    core = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties '
+            'xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/'
+            'terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Trade'
+            '</dc:title><dc:creator>Ana Writer</dc:creator><cp:lastModifiedBy>Bo Editor'
+            '</cp:lastModifiedBy><cp:revision>41</cp:revision><dcterms:created xsi:type='
+            '"dcterms:W3CDTF">2026-01-02T03:04:05Z</dcterms:created></cp:coreProperties>')
+    app = ('<?xml version="1.0" encoding="UTF-8"?>\n<Properties xmlns="http://schemas.'
+           'openxmlformats.org/officeDocument/2006/extended-properties"><Template>C:\\Users'
+           '\\bo\\Normal.dotm</Template><TotalTime>613</TotalTime><Company>Acme</Company>'
+           '<Pages>3</Pages></Properties>')
+    custom = '<Properties><property name="Reviewer">Cy</property></Properties>'
+    with zipfile.ZipFile(office, "w") as archive:
+        archive.writestr("docProps/core.xml", core)
+        archive.writestr("docProps/app.xml", app)
+        archive.writestr("docProps/custom.xml", custom)
+        archive.writestr("word/media/image1.jpeg", jpeg)
+    office_rows = metastrip.strip_zip(office, "private", [])
+    with zipfile.ZipFile(office) as archive:
+        stripped = {n: archive.read(n) for n in archive.namelist()}
+    random.seed(7)
+    broken = 0
+    for _ in range(400):
+        damaged = bytearray(random.choice((jpeg, png)))
+        for _ in range(random.randint(1, 8)):
+            damaged[random.randrange(len(damaged))] = random.randrange(256)
+        damaged = bytes(damaged[:random.randrange(16, len(damaged) + 1)])
+        try:
+            for name in ("a.jpg", "a.png"):
+                metastrip.strip(name, damaged, "private")
+        except Exception:
+            broken += 1
+    return [
+        ("the camera, its serial number, the software, the dates, the position, IPTC's "
+         "city, Photoshop's thumbnail, the comment, the bytes after the end, and XMP's "
+         "history taken out; the orientation, resolution, artist, copyright, color space, "
+         "rights, and by-line kept",
+         lambda: tags(private) == {0x0112: 6, 0x011A: 300.0, 0x011B: 300.0, 0x0128: 2,
+                                   0x013B: "Ana Photographer", 0x8298: "CC BY 4.0 Ana"}
+         and tags(private, 0x8769) == {0xA001: 1} and not tags(private, 0x8825)
+         and all(word not in private for word in (b"Canon", b"SN12345", b"Editor",
+                                                 b"Shepherdstwn", b"THMB", b"TRAILER",
+                                                 b"gd-jpeg", b"History", b"DocumentID"))
+         and b"CC BY 4.0</rdf:li>" in private and b"\x1c\x02\x50\x00\x03Ana" in private
+         or fail(repr((tags(private), removed)))),
+        ("the pixels decoded the same, and a second strip the same bytes, with nothing to take",
+         lambda: opened(private).tobytes() == opened(jpeg).tobytes() and again == private
+         and more == [] or fail(repr(more))),
+        ("bare keeping only the orientation; report changing nothing, listing what private "
+         "takes; and a category and a field kept by name",
+         lambda: tags(bare) == {0x0112: 6} and b"CC BY" not in bare
+         and reported == jpeg and would == removed
+         and tags(kept, 0x8825) == dict(gps) and tags(kept).get(0x0110) == "EOS"
+         and 0x010F not in tags(kept) or fail(repr((tags(bare), tags(kept))))),
+        ("a PNG's software text, its EXIF's camera and position, and its XMP's history taken "
+         "out, its author and the pixels kept",
+         lambda: "PNG text Software" in png_removed and "GPS position" in png_removed
+         and opened(png_private).info.get("Author") == "Ana"
+         and "Software" not in opened(png_private).info and b"SN12345" not in png_private
+         and opened(png_private).tobytes() == opened(png).tobytes()
+         and metastrip.strip("figure.png", png_private)[0] == png_private
+         or fail(repr(png_removed))),
+        ("a Word file's last editor, revision count, dates, template path, editing time, "
+         "and company taken out, its title, creator, page count, and custom properties kept, "
+         "and its picture stripped",
+         lambda: all(word not in stripped["docProps/core.xml"] + stripped["docProps/app.xml"]
+                     for word in (b"Bo Editor", b"41", b"2026-01-02", b"Normal.dotm", b"613",
+                                  b"Acme"))
+         and b"<dc:title>Trade</dc:title>" in stripped["docProps/core.xml"]
+         and b"Ana Writer" in stripped["docProps/core.xml"]
+         and b"<Pages>3</Pages>" in stripped["docProps/app.xml"]
+         and stripped["docProps/custom.xml"] == custom.encode()
+         and b"SN12345" not in stripped["word/media/image1.jpeg"]
+         and sorted(m for m, _ in office_rows) == ["docProps/app.xml", "docProps/core.xml",
+                                                   "word/media/image1.jpeg"]
+         or fail(repr(office_rows))),
+        ("a picture damaged at random never stops the strip, and a field to keep that isn't "
+         "known is named",
+         lambda: broken == 0 and metastrip.check_keep(["gps", "LensModel", "Location"])
+         and len(metastrip.check_keep(["gps", "LensModel", "Location"])) == 1
+         or fail(repr(broken))),
+    ]
+
+
 def check_page_licenses():
     """lib/licenses.py's licenses page by page: an entry's TASL parts or
     statement checked, each mistake named by its place; its pages by name
@@ -13675,6 +13834,7 @@ GROUPS = [
     ("lib/education.py, a book's subjects, readers' ages, and time", check_education),
     ("a book's release: its date, copyright, type of work, and period", check_release),
     ("lib/licenses.py, a license page by page", check_page_licenses),
+    ("lib/metastrip.py, a picture's metadata taken out", check_metastrip),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
