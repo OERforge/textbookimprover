@@ -1071,8 +1071,10 @@ def case_pieces(work):
          and noted_levels == [2]),
         ("a table in the notes isn't the PDF's, for the captions' repair",
          lambda: decks.captioned_tables(noted) == [True, False]),
-        ("columns' alignment and width become ltx-talk's, and a footnote loses the overlay",
-         lambda: "\\begin{columns}[t,width=0.9\\textwidth]" in out
+        ("columns' width becomes ltx-talk's and their alignment each column's, set on "
+         "ltx-talk's column keys, and a footnote loses the overlay",
+         lambda: "\\begin{columns}[width=0.9\\textwidth]"
+         "\\SetKeys[talk/column]{vertical-alignment=top}" in out
          and "\\begin{column}[b]{0.48\\linewidth}" in out
          and "\\footnote{N.}\\footnote{M.}" in out and "beamerpauses" not in out),
         ("a frame with no end is left as it is", lambda: decks.talkify(
