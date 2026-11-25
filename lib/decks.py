@@ -364,6 +364,8 @@ TALK_FRAME_KEYS = ("action-spec", "auto-break", "auto-break-coverage", "label", 
 COLUMNS = re.compile(r"\\begin\{(columns|column)\}\[([^\]]*)\]")
 # beamer's alignments as ltx-talk's keys, which have no baseline variant.
 COLUMN_KEYS = {"T": "t", "t": "t", "c": "c", "b": "b"}
+# ltx-talk's vertical-alignment for each.
+COLUMN_ALIGNMENTS = {"t": "top", "c": "center", "b": "bottom"}
 # A footnote as the writer writes one for beamer (inlineToLaTeX's Note,
 # Writers/LaTeX.hs): from the current overlay on, and on the frame rather
 # than a column. ltx-talk takes the overlay for an action and stops on
@@ -581,16 +583,25 @@ def talkify(tex):
     tex = VERBATIM_TEXT.sub(hold, tex)
 
     def columns(m):
-        keys = []
+        keys, aligned = [], ""
         for option in m.group(2).split(","):
             option = option.strip()
-            if option in COLUMN_KEYS:
+            if option in COLUMN_KEYS and m.group(1) == "columns":
+                # The columns' alignment, each column's that names none:
+                # set on ltx-talk's column keys, not given to columns,
+                # whose t, c, and b it inherits from column, which l3keys
+                # of 2026-11-16 refuses (the key 'talk/column/vertical-
+                # alignment' unknown, measured with l3kernel r81255).
+                aligned = "\\SetKeys[talk/column]{vertical-alignment=%s}" % (
+                    COLUMN_ALIGNMENTS[COLUMN_KEYS[option]])
+            elif option in COLUMN_KEYS:
                 keys.append(COLUMN_KEYS[option])
             elif option.startswith("totalwidth=") and m.group(1) == "columns":
                 keys.append("width=" + option.split("=", 1)[1])
             elif option and option != "onlytextwidth" and option not in counts["dropped"]:
                 counts["dropped"].append(option)
-        return "\\begin{%s}%s" % (m.group(1), "[%s]" % ",".join(keys) if keys else "")
+        return "\\begin{%s}%s%s" % (m.group(1), "[%s]" % ",".join(keys) if keys else "",
+                                   aligned)
     tex = COLUMNS.sub(columns, tex)
     tex = BEAMER_FOOTNOTE.sub(lambda m: "\\footnote", tex)
     tex = list_styles(tex)
