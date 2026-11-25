@@ -5743,10 +5743,18 @@ def warn_stand_ins(name, all_counts, where):
         shimmed += [n.strip() for n in (counts.get("tag_shims") or "").split(",")
                     if n.strip() and n.strip() not in shimmed]
     if shimmed:
+        rated = [n for n in shimmed if n not in texremediate.SHIM_ANY_RATING]
+        why = []
+        if rated:
+            why.append("the tagging project's status list rates "
+                       + ("it" if len(rated) == 1 else "each")
+                       + " currently incompatible or never to be supported")
+        why += [f"{n}, or the emulation of it LaTeX's tagging loads in its place where it "
+                "has one, stops on what books write with it, whatever the list rates it"
+                for n in shimmed if n in texremediate.SHIM_ANY_RATING]
         say(f"WARNING: {name}: {where} loads none of "
             + ", ".join(shimmed) + ", since LaTeX's tagging can't build a tagged PDF "
-            "with them or can't tag what they make (the tagging project's status list "
-            "rates each currently incompatible or never to be supported). Their commands "
+            "with them or can't tag what they make (" + "; ".join(why) + "). Their commands "
             "are defined in the copy instead, to keep what the book says, not how it "
             "looks, so its PDF looks different from the book's own: "
             + texremediate.shim_changes(shimmed) + ".")
