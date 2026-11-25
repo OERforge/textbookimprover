@@ -14,7 +14,7 @@ First comes the next release's work, on a project's layout and what it makes saf
 
 **A sandbox, and limits.** Every run inside bubblewrap where it works, and Landlock where it doesn't, with no network and nothing writable but `output/`, and stopping where there's neither unless `--no-sandbox` says to go on; and limits on each program's memory and time (`--max-memory`, `--max-time`, `--jobs`), with defaults from the machine's memory.
 
-**Packing a project whole**, to hand on or keep: its upstream files where its sources still match them and its sources where they don't, its settings and sidecars, a record of the build, and each part's license, with a license per page later; a part that isn't openly licensed left out unless asked for; the book's record of itself, with what settings take now and no output has a place for (`place`, `contact`, a funder's grant, `metadata_license`, a target's `url`); and the metadata in the outputs, and in the sources when asked, stripped to a level the project sets.
+**Packing a project whole**, to hand on or keep: its upstream files where its sources still match them and its sources where they don't, its settings and sidecars, a record of the build, and each part's license, with a license per page later; a part that isn't openly licensed left out unless asked for; the book's record of itself, with what settings take now and no output has a place for (`place`, `contact`, a funder's award, `metadata_license`, a target's `url`); and the metadata in the outputs, and in the sources when asked, stripped to a level the project sets.
 
 ## 1. PDF, and Word output
 

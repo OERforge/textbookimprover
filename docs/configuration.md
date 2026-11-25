@@ -84,15 +84,30 @@ A DOI is checked for its form and kept bare; an ISBN, of 13 digits or the older 
 
 ### The book's rights
 
-`project.copyright` is the book's copyright line, as it should read, and `project.license` the license it's published under, as its [SPDX identifier](https://spdx.org/licenses/) where it has one, and otherwise as its name:
+`project.copyright` is the book's copyright line, as it should read, `project.license` the license it's published under, as its [SPDX identifier](https://spdx.org/licenses/) where it has one, and otherwise as its name, and `project.published` the day this version of the book was published:
 
 ```yaml
 project:
   copyright: © 2026 Robert Szarka
   license: CC-BY-4.0                    # CC-BY-NC-SA-4.0, CC0-1.0, or a name
+  published: 2026-11-14
 ```
 
-A Creative Commons license and CC0 are known by their deed's name and address (CC-BY-4.0 is Creative Commons Attribution 4.0 International, at its deed on creativecommons.org); another license is given as it's written, with no address. An EPUB records the copyright line and then the license, by name and address, as its rights ("© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/)."). A book's PDF, tagged as the default page makes it, gives the copyright line as its XMP's `dc:rights` and the license's address as its web statement. A cartridge's manifest says a Creative Commons license or CC0 costs nothing, that the book has conditions of use but under CC0, and gives the same statement as its rights' description. A part's own `license` ([Project settings](project-settings.md)) is its outputs' in place of the project's: a test bank's `LicenseRef-instructors-only`, say, in the cartridge of its pages. `unpack-cnx.py` sets `license` from the deed's address an OpenStax collection names, and `unpack-epub.py` from the first deed's address in an EPUB's rights.
+The copyright can be given instead as its parts, from which the line is made:
+
+```yaml
+project:
+  copyright:
+    holder: Robert Szarka               # or a list of them, or {name: ..., ror: ...}
+    year: 2024-2026                     # the year of published where it's not given
+    text: Some rights reserved.         # words of your own after the line
+```
+
+which reads "Copyright 2024–2026 Robert Szarka. Some rights reserved." A holder is a person or an organization as `publisher` is given, an organization's ROR ID checked; two holders read "A and B", and more "A, B, and C". `published` is the release's date as YYYY-MM-DD, a day the calendar has, and not the day a copy is built: an EPUB records it as its date and shows it on its title page, as a PDF's title page does, whose XMP has it as its date too, where without it each has the build's; and a cartridge's manifest dates its publisher by it.
+
+An SPDX identifier is written as SPDX writes it, CC-BY-4.0, with a hyphen after CC; Creative Commons itself writes its licenses' short names with a space there (CC BY 4.0). TextbookImprover reads the SPDX form, since it's the one the license lists and deposits match, and writes each license's full name, which is the same in both.
+
+A Creative Commons license and CC0 are known by their deed's name and address (CC-BY-4.0 is Creative Commons Attribution 4.0 International, at its deed on creativecommons.org); another license is given as it's written, with no address. An EPUB records the copyright line and then the license, by name and address, as its rights ("© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/)."). A book's PDF, tagged as the default page makes it, gives the copyright line as its XMP's `dc:rights` and the license's address as its web statement. A cartridge's manifest says a Creative Commons license or CC0 costs nothing, that the book has conditions of use but under CC0, and gives the same statement as its rights' description. The copyright line made from its parts is the one each of them gives. A part's own `license` ([Project settings](project-settings.md)) is its outputs' in place of the project's: a test bank's `LicenseRef-instructors-only`, say, in the cartridge of its pages. `unpack-cnx.py` sets `license` from the deed's address an OpenStax collection names, and `unpack-epub.py` from the first deed's address in an EPUB's rights.
 
 ### The book's other facts
 
@@ -103,14 +118,15 @@ project:
   funding:
     - Example Trust                     # a funder's name alone
     - funder: {name: Example Foundation, ror: 02mhbdp94}
-      grant: OER-2026-17
-  coverage: {place: United States, time: 1865 to 1900}
+      award: OER-2026-17                # or {number: ..., title: ..., url: ...}
+  coverage: {place: United States, time: 1865 to 1900}   # or time: 1865/1900
   contact: econ-book@example.edu        # or an http or https address
   place: {city: Shepherdstown, country: United States}
   metadata_license: CC0-1.0             # the default
+  work_type: Book                       # one of DataCite's types of work
 ```
 
-and, in a target of `conversion.yaml`, `url`, the address where that target's output is published. A funder's ROR ID is checked for its checksum, and the contact must be an email address or an address. An EPUB records each funder as a contributor in MARC's `fnd` role, and the coverage, its place and time a semicolon apart; a cartridge's manifest has the place and the time each as a coverage. The grants, the contact, the place of publication, the license for the metadata, and a target's `url` are read and checked and reach no output yet; they're for the book's own record, which packing a project is to write ([ROADMAP.md](../ROADMAP.md)).
+and, in a target of `conversion.yaml`, `url`, the address where that target's output is published. A funder's ROR ID is checked for its checksum, and the contact must be an email address or an address. An award is its number or name as the funder gives it, or a mapping with `number`, `title`, and `url` (DataCite's awardNumber, awardTitle, and awardURI), with a number or a title, its `url` checked as an address. The coverage's `time` is a period in words, or an ISO 8601 interval of two dates, each a year, a month, or a day (1865/1900, 1929-10/1939-09-01), which is checked: a time with one slash that begins with a digit is taken for an interval. `work_type` is what kind of work the book is, as one of [DataCite's types](https://datacite-metadata-schema.readthedocs.io/en/4.7/appendices/appendix-1/resourceTypeGeneral/) (Book, Presentation, Poster, Dataset, and the rest), matched without regard to case; where it's not given, a book is a Book, slides a Presentation, and a folder of files a Dataset, and a part may give its own ([Project settings](project-settings.md)), as a poster made from a book or from slides would. A PDF's XMP gives a Book as the aggregation type book and any other type as other; `education.resource_type` stays the kind in your own words. An EPUB records each funder as a contributor in MARC's `fnd` role, and the coverage, its place and time a semicolon apart; a cartridge's manifest has the place and the time each as a coverage. The awards, the contact, the place of publication, the license for the metadata, and a target's `url` are read and checked and reach no output yet; they're for the book's own record, which packing a project is to write ([ROADMAP.md](../ROADMAP.md)).
 
 ### The book's use in teaching
 
@@ -124,6 +140,7 @@ project:
     audience: learners
     subjects:
       - {name: "Economics, General", id: "45.0601", scheme: CIP 2020}
+      - {name: Trade, url: "https://example.edu/subjects/trade"}
     objectives: [Explain how prices coordinate a market]
     prerequisites: [High school algebra]
     resource_type: textbook
@@ -131,7 +148,7 @@ project:
     time_required: PT40H                # an ISO 8601 duration, 40 hours
 ```
 
-`context` is one of IEEE LOM's four; a subject is a name, or a mapping with its code in a scheme, which should be quoted, since YAML reads `45.0600` as the number 45.06 (the run stops on one it reads as a number); `typical_age` is a range as schema.org writes one; and `time_required` an ISO 8601 duration. An EPUB records each subject as a subject, after the keywords, its scheme the authority and its code the term. A cartridge's manifest gives the context as its educational context, beside the one resource type Common Cartridge 1.1 allows, and classifies the book by each subject as a discipline, a classification for each scheme with its description naming the scheme, by the level, and by each objective and prerequisite, which Brightspace's Learning Object Repository can browse by; the manifest stays valid against the profile's schemas. The audience, the resource type, the typical age, and the time required reach no output yet, since Common Cartridge 1.1 has no place for them; they're for the book's own record ([ROADMAP.md](../ROADMAP.md)).
+`context` is one of IEEE LOM's four; a subject is a name, or a mapping with its code in a scheme, which should be quoted, since YAML reads `45.0600` as the number 45.06 (the run stops on one it reads as a number), and as you like a `url`, the code's own page, checked as an address and kept for the book's record; `typical_age` is a range as schema.org writes one; and `time_required` an ISO 8601 duration. An EPUB records each subject as a subject, after the keywords, its scheme the authority and its code the term. A cartridge's manifest gives the context as its educational context, beside the one resource type Common Cartridge 1.1 allows, and classifies the book by each subject as a discipline, a classification for each scheme with its description naming the scheme, by the level, and by each objective and prerequisite, which Brightspace's Learning Object Repository can browse by; the manifest stays valid against the profile's schemas. The audience, the resource type, the typical age, and the time required reach no output yet, since Common Cartridge 1.1 has no place for them; they're for the book's own record ([ROADMAP.md](../ROADMAP.md)).
 
 ### Targets
 

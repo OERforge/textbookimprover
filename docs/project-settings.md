@@ -90,7 +90,7 @@ The country it's published in.
 
 **`funding`**—`list`; default `[]`
 
-Who paid for the book, one entry each: the funder's name, or a mapping with funder (a name, or a mapping with name and ror, the funder's ROR ID, checked for its checksum) and, as you like, grant (the award's number or name, as the funder gives it). An EPUB records each funder as a contributor, a funder (MARC's fnd); the grants are kept for the book's records.
+Who paid for the book, one entry each: the funder's name, or a mapping with funder (a name, or a mapping with name and ror, the funder's ROR ID, checked for its checksum) and, as you like, award: the award's number or name as the funder gives it, or a mapping with number, title, and url, as DataCite's awardNumber, awardTitle, and awardURI. An EPUB records each funder as a contributor, a funder (MARC's fnd); the awards are kept for the book's records.
 
 **`contact`**—`contact`; default `""` (empty)
 
@@ -104,13 +104,17 @@ The place and the time the book is about, where it's about one (a history of the
 
 The place, as a reader would name it (United States).
 
-**`coverage.time`**—`string`; default `""` (empty)
+**`coverage.time`**—`period`; default `""` (empty)
 
-The time, as a reader would name it (1865 to 1900, or the twentieth century).
+The time, as a reader would name it (1865 to 1900, or the twentieth century), or as an ISO 8601 interval of two dates, each a year, a month, or a day (1865/1900), which is checked.
 
-**`copyright`**—`string`; default `""` (empty)
+**`published`**—`date`; default `""` (empty)
 
-The book's copyright line, as it should read (© 2026 Robert Szarka). An EPUB records it, with the license, as its rights; a PDF as its copyright; a cartridge's manifest in its rights' description.
+The day this version of the book was published, as YYYY-MM-DD: the release's date, not the day a copy is built. An EPUB records it as its date and shows it on its title page, as a PDF does, whose XMP has it as its date too; a cartridge's manifest dates its publisher by it; and the copyright line takes its year from it.
+
+**`copyright`**—`copyright`; default `""` (empty)
+
+The book's copyright line, as it should read (© 2026 Robert Szarka), or its parts: holder, a person or an organization as the publisher is given, or a list of them; year, a year or a range of years (2024-2026), the year of published where it's not given; and text, words of your own after them. From the parts the line reads "Copyright 2026 Robert Szarka." and then the text. An EPUB records the line, with the license, as its rights; a PDF as its copyright; a cartridge's manifest in its rights' description.
 
 **`license`**—`string`; default `""` (empty)
 
@@ -134,7 +138,7 @@ Who reads it, in your own words (learners, instructors). Read and checked; for t
 
 **`education.subjects`**—`list`; default `[]`
 
-The subjects the book is classed under, each a name, or a mapping with name, id (its code in a scheme), and scheme (the scheme's name): {name: "Economics, General", id: "45.0601", scheme: CIP 2020}. An EPUB records each as a subject, with its scheme as the authority and its code as the term; a cartridge's manifest classifies the book by each as a discipline, the classification's description naming the scheme.
+The subjects the book is classed under, each a name, or a mapping with name, id (its code in a scheme), scheme (the scheme's name), and url (the code's own page, checked as an address): {name: "Economics, General", id: "45.0601", scheme: CIP 2020}. An EPUB records each as a subject, with its scheme as the authority and its code as the term; a cartridge's manifest classifies the book by each as a discipline, the classification's description naming the scheme.
 
 **`education.objectives`**—`list`; default `[]`
 
@@ -159,6 +163,10 @@ How long working through it takes, as an ISO 8601 duration (PT40H for 40 hours).
 **`metadata_license`**—`string`; default `CC0-1.0`
 
 The license for the book's metadata, as distinct from the book: CC0-1.0, the default, lets a catalog copy the record freely. An SPDX identifier where it has one. Read and checked; for the book's records (see ROADMAP.md).
+
+**`work_type`**—`worktype`; default `""` (empty)
+
+What kind of work the book is, as one of DataCite's types (resourceTypeGeneral: Book, Presentation, Poster, Dataset, and the rest), matched without regard to case. Where it's not given, a book is a Book, slides a Presentation, and a folder of files a Dataset; a part may give its own (parts). A PDF's XMP gives a Book as a book and anything else as other; education.resource_type stays the kind in your own words.
 
 **`numbering`**—`bool`; default `false`
 
@@ -190,7 +198,7 @@ The book's structure as a nested list of pages and groups. This describes the bo
 
 **`parts`**—`opaque`; default `{}`
 
-What the project is made of, when it's more than one thing: a block of names, each a part with its kind, book, slides, or files (a folder of files that travel with the project and that no target uses; testbank is kept for the test banks to come). A part may name the file it's unpacked from, its from, as a path inside the project (upstream/book.zip) or as a block with file, unpacker (cartridge, cnx, epub, jekyll, site, or archive), and options, the unpacker's options that change what it writes; and a license, when the part's isn't the book's. A part's name is a lowercase letter, then lowercase letters, digits, - and _. In a project with a folder for each part under src/, a part's kind is what its run takes it for, and a project that names no parts has one, the folder src/ holds; with more than one folder there the run stops and asks for them. A part may have an identifier, title, contents, and numbering of its own, which its run takes in place of the project's: a second book in a project (an instructor's version beside the student's) is then another course to an LMS, with its own order. Where a part has none, the project's is used, but for a part that isn't a book (decks), which gets no contents or numbering it doesn't set. An unpacker given --part writes the part's from, and a run unpacks the file it names into the part's folder under src/ when that folder holds nothing, and says afterwards when the folder no longer matches it (convert.py --src-status lists how). A part's license is its run's in place of the project's, so its EPUB, its PDF, and a cartridge of its pages give it as their rights.
+What the project is made of, when it's more than one thing: a block of names, each a part with its kind, book, slides, or files (a folder of files that travel with the project and that no target uses; testbank is kept for the test banks to come). A part may name the file it's unpacked from, its from, as a path inside the project (upstream/book.zip) or as a block with file, unpacker (cartridge, cnx, epub, jekyll, site, or archive), and options, the unpacker's options that change what it writes; and a license, when the part's isn't the book's. A part's name is a lowercase letter, then lowercase letters, digits, - and _. In a project with a folder for each part under src/, a part's kind is what its run takes it for, and a project that names no parts has one, the folder src/ holds; with more than one folder there the run stops and asks for them. A part may have an identifier, title, contents, numbering, and work_type of its own, which its run takes in place of the project's: a second book in a project (an instructor's version beside the student's) is then another course to an LMS, with its own order. Where a part has none, the project's is used, but for a part that isn't a book (decks), which gets no contents or numbering it doesn't set. An unpacker given --part writes the part's from, and a run unpacks the file it names into the part's folder under src/ when that folder holds nothing, and says afterwards when the folder no longer matches it (convert.py --src-status lists how). A part's license is its run's in place of the project's, so its EPUB, its PDF, and a cartridge of its pages give it as their rights.
 
 **`include`**—`list`; default `[]`
 

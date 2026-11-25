@@ -91,14 +91,16 @@ FALSE_WORDS = {"false", "no", "off", "0"}
 
 SCALAR_TYPES = ("string", "text", "path", "language", "ncname", "bool",
                 "int", "float", "enum", "date", "doi", "isbn", "url", "contact",
-                "agerange", "duration")
+                "agerange", "duration", "period", "worktype")
 # A person, a contributor (a person with a role), an organization, or a
-# funder and its grant: a name, or a mapping lib/people.py checks.
+# funder and its award: a name, or a mapping lib/people.py checks.
 PEOPLE_TYPES = ("person", "contributor", "organization", "funding")
 # The mappings a list's entries may be, each entry named by its place: a
 # person's kinds, and a subject the book is classed under
 # (lib/education.py).
 ENTRY_TYPES = PEOPLE_TYPES + ("subject",)
+# The copyright, the line whole or its parts (lib/licenses.py).
+MAPPING_TYPES = ("copyright",)
 
 # An XML NCName: a letter or underscore, then letters, digits, and any of
 # . - _ . No colons, and it may not start with a digit. IMS types the
@@ -262,7 +264,7 @@ class Node:
         if self.type is None:
             raise ConfigError(f"schema entry {path!r} has neither keys nor "
                               "a type")
-        if self.type not in SCALAR_TYPES + ENTRY_TYPES + ("list", "opaque"):
+        if self.type not in SCALAR_TYPES + ENTRY_TYPES + MAPPING_TYPES + ("list", "opaque"):
             raise ConfigError(f"schema entry {path!r} has unknown type "
                               f"{self.type!r}")
         if self.type == "enum":
@@ -602,6 +604,14 @@ def _coerce(node, value, where, problems):
                     {"type": node.item, "default": None})
         return [_coerce(item, v, where, problems) for v in value]
 
+    if kind == "copyright":
+        if value is None or value == "":
+            return node.default
+        import licenses
+        checked, more = licenses.check_copyright(value, node.path)
+        problems += [f"{where}: {p}" for p in more]
+        return node.default if more else checked
+
     if kind == "subject":
         if value is None or value == "":
             return node.default
@@ -752,7 +762,16 @@ def _coerce(node, value, where, problems):
             problems.append(f"{where}: {node.path}: {exc}")
             return node.default
 
-    if kind in ("doi", "isbn", "url", "contact") and value.strip():
+    if kind == "worktype" and value.strip():
+        # A work's type, as DataCite names it (lib/worktypes.py).
+        import worktypes
+        try:
+            return worktypes.normalize(value)
+        except ValueError as exc:
+            problems.append(f"{where}: {node.path}: {exc}")
+            return node.default
+
+    if kind in ("doi", "isbn", "url", "contact", "period") and value.strip():
         # The book's identifiers, each checked as lib/identifiers.py says:
         # a DOI and an ISBN kept in the form a record takes them.
         import identifiers
@@ -983,6 +1002,14 @@ def resolve(schema, project_schema, documents, target=None,
     if not projectpaths.contents_apply() and own.get("kind") != "book":
         changes.setdefault("contents", [])
         changes.setdefault("numbering", False)
+    # The work's type: the part's, then the project's, and otherwise what
+    # the part's kind is taken for, or the project's kind where it names
+    # no parts (lib/worktypes.py).
+    import worktypes
+    if changes.get("work_type"):
+        changes["work_type"] = worktypes.normalize(changes["work_type"])
+    elif not project.get("work_type"):
+        changes["work_type"] = worktypes.default(own.get("kind") or project.get("kind"))
     if changes:
         project = dict(project, **changes)
     return Resolved(project, settings, target, warnings)
@@ -1120,7 +1147,7 @@ def _inside_path_problem(value, what):
 # What a part may say of its own in place of the project's: a second book
 # in a project (an instructor's version) is another course to an LMS and
 # has its own order.
-PART_OWN = ("identifier", "title", "contents", "numbering", "license")
+PART_OWN = ("identifier", "title", "contents", "numbering", "license", "work_type")
 
 
 def parts_problems(project, where):
@@ -1148,7 +1175,7 @@ def parts_problems(project, where):
             problems.append(f"{what} has {', '.join(map(str, unknown))}, which a "
                             "part doesn't have: a part has kind, from, and "
                             "license, and may have an identifier, title, contents, "
-                            "and numbering of its own.")
+                            "numbering, and work_type of its own.")
         identifier = block.get("identifier")
         if identifier is not None and not (isinstance(identifier, str)
                                            and NCNAME_RE.match(identifier)):
@@ -1171,6 +1198,12 @@ def parts_problems(project, where):
         elif kind == "testbank":
             warnings.append(f"{what} has kind testbank, which is kept for the "
                             "test banks to come; nothing is built from it.")
+        if block.get("work_type") is not None:
+            import worktypes
+            try:
+                worktypes.normalize(block["work_type"])
+            except ValueError as exc:
+                problems.append(f"{what}'s work_type: {exc}")
         license = block.get("license")
         if license is not None and (not isinstance(license, str) or not license.strip()):
             problems.append(f"{what} has a license that isn't text; give its "

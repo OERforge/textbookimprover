@@ -971,6 +971,112 @@ def check_book_identifiers():
     ]
 
 
+def check_release():
+    """The release's settings (project.published, copyright, work_type, and
+    coverage.time) as a run resolves them: a date the calendar has, a date
+    YAML reads that it hasn't named and not a traceback, the copyright's
+    parts and the line made from them, a work's type as DataCite spells
+    it, the part's own or its kind's, and an interval checked; and a
+    funder's award and a subject's url checked as addresses."""
+    import licenses
+    import projectpaths
+    import identifiers
+    conversion = oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+
+    def resolved(project, part=None):
+        path = os.path.join(scratch(), "conversion.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.release\n" + project
+                     + "targets:\n  html:\n    format: html\n")
+        projectpaths.set_part(part, os.path.dirname(path))
+        try:
+            return oerconfig.resolve(conversion, project_schema,
+                                     [oerconfig.load_document(path)], target="html").project
+        except oerconfig.ConfigError as error:
+            return str(error)
+        finally:
+            projectpaths.set_part(None)
+    good = resolved("  published: 2026-11-14\n"
+                    "  copyright: {holder: Robert Szarka, year: 2024 - 2026, text: Some rights "
+                    "reserved.}\n  work_type: poster\n  coverage: {time: 1865/1900}\n"
+                    "  education:\n    subjects:\n      - {name: Trade, url: "
+                    "\"https://example.org/trade\"}\n")
+    by_kind = [resolved("  kind: slides\n"), resolved(""),
+               resolved("  parts:\n    book: {kind: book}\n    decks: {kind: slides}\n"
+                        "    poster: {kind: slides, work_type: POSTER}\n", "decks"),
+               resolved("  parts:\n    book: {kind: book}\n    decks: {kind: slides}\n"
+                        "    poster: {kind: slides, work_type: POSTER}\n", "poster"),
+               resolved("  work_type: Text\n  parts:\n    book: {kind: book}\n"
+                        "    decks: {kind: slides}\n", "decks")]
+    wrong = resolved("  published: 2026-13-01\n"
+                     "  copyright: {holder: [A, {name: B, ror: 01k4yrm30}], year: 2026-2024, "
+                     "owner: x}\n  work_type: Textbook\n  coverage: {time: 1900/1865}\n"
+                     "  education:\n    subjects:\n      - {name: Trade, url: example.org}\n")
+    part_wrong = resolved("  parts:\n    book: {kind: book, work_type: Novel}\n")
+    quoted = resolved("  published: \"2026-02-30\"\n  copyright: {text: Mine.}\n"
+                      "  coverage: {time: 19xx/1900}\n")
+    periods = [identifiers.period(v) for v in ("1865/1900", "1929-10/1939-09-01",
+                                               " the  twentieth century ", "1865 to 1900",
+                                               "and/or", "2026-02/2026-02")]
+    lines = [licenses.copyright_line(v, published) for v, published in (
+        ({"holder": "Robert Szarka"}, "2026-11-14"),
+        ({"holder": ["A. Writer", "B. Writer"], "year": "2024\u20132026"}, ""),
+        ({"holder": ["A", {"name": "B"}, "C"], "text": "Some rights reserved."}, "2026-01-01"),
+        ({"holder": "Robert Szarka"}, ""), ("© 2026 Robert Szarka", "2020-01-01"), ("", ""))]
+    said = licenses.statement({"holder": "Robert Szarka", "text": "Some rights reserved."},
+                              "CC-BY-4.0", "2026-11-14")
+    return [
+        ("a date the calendar has, the copyright's parts with a range of years given a "
+         "dash, a work's type as DataCite spells it, an interval, and a subject's url",
+         lambda: not isinstance(good, str) and good["published"] == "2026-11-14"
+         and good["copyright"] == {"holder": "Robert Szarka", "year": "2024\u20132026",
+                                   "text": "Some rights reserved."}
+         and good["work_type"] == "Poster" and good["coverage"]["time"] == "1865/1900"
+         and good["education"]["subjects"] == [{"name": "Trade",
+                                                "url": "https://example.org/trade"}]
+         or fail(repr(good))),
+        ("a work's type its kind's where none is given, slides a Presentation and a book a "
+         "Book, a part's own in place of the project's, and the project's in place of a "
+         "kind's",
+         lambda: [r["work_type"] if isinstance(r, dict) else r for r in by_kind]
+         == ["Presentation", "Book", "Presentation", "Poster", "Text"]
+         or fail(repr(by_kind))),
+        ("each mistake named by its place, a day YAML reads that no calendar has among them, "
+         "and none a traceback",
+         lambda: isinstance(wrong, str) and all(part in wrong for part in (
+             "published is '2026-13-01'; dates are written as YYYY-MM-DD",
+             "copyright has owner", "copyright.holder's second entry's ror: '01k4yrm30'",
+             "copyright's year is '2026-2024'", "work_type: 'Textbook' isn't one of DataCite's",
+             "coverage.time: '1900/1865' ends before it begins",
+             "education.subjects' first entry's url: 'example.org'")) or fail(wrong)),
+        ("a part's own type of work checked too",
+         lambda: isinstance(part_wrong, str) and "work_type: 'Novel' isn't one of DataCite's"
+         in part_wrong or fail(repr(part_wrong))),
+        ("a quoted day no calendar has, parts with no holder, and a slash between words "
+         "that read as dates refused",
+         lambda: isinstance(quoted, str) and all(part in quoted for part in (
+             "published is '2026-02-30'", "copyright has no holder",
+             "coverage.time: '19xx/1900' isn't an interval")) or fail(quoted)),
+        ("a period in words kept, its spaces one, and an interval of years, months, or days "
+         "as written, one month long too",
+         lambda: periods == ["1865/1900", "1929-10/1939-09-01", "the twentieth century",
+                             "1865 to 1900", "and/or", "2026-02/2026-02"]
+         or fail(repr(periods))),
+        ("the line from its parts: Copyright, the year or the release's, the holders "
+         "joined, a full stop, then the text; and a line given whole as it is",
+         lambda: lines == ["Copyright 2026 Robert Szarka.",
+                           "Copyright 2024\u20132026 A. Writer and B. Writer.",
+                           "Copyright 2026 A, B, and C. Some rights reserved.",
+                           "Copyright Robert Szarka.", "© 2026 Robert Szarka", ""]
+         or fail(repr(lines))),
+        ("the rights the line from its parts, then the license",
+         lambda: said == "Copyright 2026 Robert Szarka. Some rights reserved. Licensed under "
+         "Creative Commons Attribution 4.0 International "
+         "(https://creativecommons.org/licenses/by/4.0/)." or fail(said)),
+    ]
+
+
 def check_education():
     """lib/education.py and project.education: a subject a name or a
     mapping, a typical age and a time required as schema.org takes them,
@@ -1076,9 +1182,13 @@ def check_people():
                      "  editors:\n    - {name: E. Ditor, email: e@example.org}\n"
                      "  contributors:\n    - Ill Ustrator\n    - {name: Tran Slator}\n"
                      "  publisher: {name: OERforge, ror: 01k4yrm30}\n"
-                     "  funding:\n    - {grant: G-1}\n    - {funder: Example, award: 1}\n")
+                     "  funding:\n    - {award: G-1}\n    - {funder: Example, grant: 1}\n"
+                     "    - {funder: Example, award: {number: G-2, url: example.org}}\n"
+                     "    - {funder: Example, award: {url: https://example.org/g}}\n")
     funded = resolved("  funding:\n    - Example Trust\n"
-                      "    - {funder: {name: Example Foundation, ror: 02mhbdp94}, grant: OER-17}\n"
+                      "    - {funder: {name: Example Foundation, ror: 02mhbdp94}, award: OER-17}\n"
+                      "    - {funder: Example Fund, award: {number: \"17\", title: Open Books,"
+                      " url: \"https://example.org/awards/17\"}}\n"
                       "  contact: mailto:econ-book@example.edu\n")
     return [
         ("an ORCID iD bare, as its address, or without hyphens is its address, an X its "
@@ -1112,14 +1222,19 @@ def check_people():
              "authors' second entry has no name", "authors' second entry's orcid: '1234'",
              "editors' first entry has email", "contributors' first entry is 'Ill Ustrator'",
              "contributors' second entry has no role", "publisher's ror: '01k4yrm30'",
-             "funding's first entry has no funder", "funding's second entry has award"))
+             "funding's first entry has no funder", "funding's second entry has grant",
+             "funding's third entry's award's url: 'example.org'",
+             "funding's fourth entry's award has neither a number nor a title"))
          or fail(wrong)),
-        ("a funder a name, or a mapping with funder, its ROR ID an address, and grant, and "
-         "an email address with mailto: taken off",
+        ("a funder a name, or a mapping with funder, its ROR ID an address, and award, a "
+         "number or name, or a mapping of number, title, and url, and an email address with "
+         "mailto: taken off",
          lambda: not isinstance(funded, str) and funded.project["funding"] == [
              {"funder": "Example Trust"},
              {"funder": {"name": "Example Foundation", "ror": "https://ror.org/02mhbdp94"},
-              "grant": "OER-17"}]
+              "award": "OER-17"},
+             {"funder": "Example Fund", "award": {"number": "17", "title": "Open Books",
+                                                  "url": "https://example.org/awards/17"}}]
          and funded.project["contact"] == "econ-book@example.edu" or fail(repr(funded))),
     ]
 
@@ -13427,6 +13542,7 @@ GROUPS = [
     ("lib/identifiers.py, a book's DOI, ISBNs, and address", check_book_identifiers),
     ("lib/licenses.py, a book's license and copyright line", check_licenses),
     ("lib/education.py, a book's subjects, readers' ages, and time", check_education),
+    ("a book's release: its date, copyright, type of work, and period", check_release),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

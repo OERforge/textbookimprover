@@ -97,6 +97,15 @@ def unusual(node):
         return "https://example.edu/a,b?no=1.10"
     if kind == "contact":
         return "no@example.edu"
+    if kind == "period":
+        return "1865/1900"
+    if kind == "worktype":
+        return "Poster"
+    if kind == "copyright":
+        # The copyright's parts: holders YAML would read as a boolean and
+        # a number, a range of years with its dash, and text with a comma
+        # and a colon.
+        return {"holder": ["no", "1.10"], "year": "2024\u20132026", "text": "a, b: c"}
     if kind == "agerange":
         return "18-"
     if kind == "duration":

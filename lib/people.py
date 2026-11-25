@@ -54,7 +54,8 @@ CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 PERSON_KEYS = ("name", "given", "family", "orcid", "affiliation")
 CONTRIBUTOR_KEYS = PERSON_KEYS + ("role",)
 ORGANIZATION_KEYS = ("name", "ror")
-FUNDING_KEYS = ("funder", "grant")
+FUNDING_KEYS = ("funder", "award")
+AWARD_KEYS = ("number", "title", "url")
 
 RELATORS = {
     "abridger": "abr", "actor": "act", "adapter": "adp", "addressee": "rcp",
@@ -238,10 +239,50 @@ def names(entries):
     return [n for n in (name(e) for e in entries or []) if n]
 
 
+def _award(value, where):
+    """An award as a setting takes it, its number or name as the funder
+    gives it, or a mapping with number, title, and url, as DataCite's
+    awardNumber, awardTitle, and awardURI, and the problems it has."""
+    import identifiers
+    if not isinstance(value, dict):
+        text = str(value).strip()
+        if isinstance(value, (bool, list)):
+            return None, [f"{where} is {value!r}; give its number or name, or a mapping "
+                          "with number, title, and url"]
+        if CONTROL.search(text):
+            return None, [f"{where} is {text!r}, which holds a control character"]
+        return (text or None), []
+    problems = []
+    unknown = sorted(str(k) for k in value if k not in AWARD_KEYS)
+    if unknown:
+        problems.append(f"{where} has {', '.join(unknown)}, which it doesn't take; it takes "
+                        + ", ".join(AWARD_KEYS))
+    out = {}
+    for key in AWARD_KEYS:
+        item = value.get(key)
+        if item is None:
+            continue
+        text = str(item).strip()
+        if isinstance(item, (bool, dict, list)):
+            problems.append(f"{where}'s {key} is {item!r}; give it as text")
+        elif CONTROL.search(text):
+            problems.append(f"{where}'s {key} is {text!r}, which holds a control character")
+        elif key == "url" and text:
+            try:
+                out[key] = identifiers.url(text)
+            except ValueError as exc:
+                problems.append(f"{where}'s url: {exc}")
+        elif text:
+            out[key] = text
+    if not out.get("number") and not out.get("title"):
+        problems.append(f"{where} has neither a number nor a title; give the award's "
+                        "number, its title, or both")
+    return out, problems
+
+
 def _funding(value, where):
-    """A funder and its grant as {funder, grant}: a funder's name alone, or
-    a mapping with funder, an organization, and grant, the award's number
-    or name as the funder gives it."""
+    """A funder and its award as {funder, award}: a funder's name alone, or
+    a mapping with funder, an organization, and award (_award)."""
     if not isinstance(value, dict):
         funder, problems = _check(value, where, "organization")
         return ({"funder": funder} if funder is not None else None), problems
@@ -249,22 +290,18 @@ def _funding(value, where):
     unknown = sorted(str(k) for k in value if k not in FUNDING_KEYS)
     if unknown:
         problems.append(f"{where} has {', '.join(unknown)}, which it doesn't take; it takes "
-                        "funder and grant")
+                        "funder and award")
     if value.get("funder") is None:
         return None, problems + [f"{where} has no funder; give the funder's name, or a "
                                  "mapping with name and ror"]
     funder, more = _check(value["funder"], f"{where}'s funder", "organization")
     problems += more
     out = {"funder": funder}
-    grant = value.get("grant")
-    if grant is not None:
-        text = str(grant).strip()
-        if isinstance(grant, (bool, dict, list)):
-            problems.append(f"{where}'s grant is {grant!r}; give it as text")
-        elif CONTROL.search(text):
-            problems.append(f"{where}'s grant is {text!r}, which holds a control character")
-        elif text:
-            out["grant"] = text
+    if value.get("award") is not None:
+        award, more = _award(value["award"], f"{where}'s award")
+        problems += more
+        if award:
+            out["award"] = award
     return out, problems
 
 

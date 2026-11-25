@@ -1,6 +1,6 @@
 """
 identifiers.py -- the identifiers a book's settings give it: a DOI, its
-ISBNs, an address, and a contact.
+ISBNs, an address, and a contact; and the period a book covers.
 
 Each is checked where it's set, so that a mistyped one is caught there
 rather than in a store's or a registry's record: a DOI by its form (10.,
@@ -10,8 +10,9 @@ ISBN by its check digit, ISBN-13's (ISO 2108: weights 1 and 3, mod 10)
 or ISBN-10's (weights 10 to 1, mod 11, X for 10), its hyphens and spaces
 taken out and an ISBN-10 written as the ISBN-13 it's part of, since an
 EPUB types it ISBN-13; an address as an http or https URL with a host,
-no space or control character in it; and a contact as an email address
-or such an address.
+no space or control character in it; a contact as an email address
+or such an address; and a period, words or an ISO 8601 interval of two
+dates (1865/1900), the second not before the first.
 
 Copyright 2026 Robert Szarka
 
@@ -103,4 +104,51 @@ def contact(value):
                          "address that begins http:// or https:// and names a host") from None
 
 
-CHECKS = {"doi": doi, "isbn": isbn, "url": url, "contact": contact}
+# A date as an interval's end may give it: a year, a month, or a day.
+ISO_DATE = re.compile(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$")
+
+
+def _date_bounds(text):
+    """The first and last days a date of a year, a month, or a day spans,
+    or None where it isn't one."""
+    import calendar
+    import datetime
+    found = ISO_DATE.match(text)
+    if not found:
+        return None
+    year = int(found.group(1))
+    month = int(found.group(2)) if found.group(2) else None
+    day = int(found.group(3)) if found.group(3) else None
+    try:
+        if month is None:
+            return datetime.date(year, 1, 1), datetime.date(year, 12, 31)
+        if day is None:
+            last = calendar.monthrange(year, month)[1]
+            return datetime.date(year, month, 1), datetime.date(year, month, last)
+        when = datetime.date(year, month, day)
+        return when, when
+    except ValueError:
+        return None
+
+
+def period(value):
+    """A period as a setting gives it: words (the twentieth century), kept
+    as they are, or an ISO 8601 interval of two dates, each a year, a
+    month, or a day (1865/1900, 1929-10/1939-09-01), checked, or
+    ValueError where it reads as an interval and isn't one."""
+    text = " ".join(str(value).split())
+    if text.count("/") == 1:
+        start, end = (part.strip() for part in text.split("/"))
+        if start[:1].isdigit() or end[:1].isdigit():
+            first, last = _date_bounds(start), _date_bounds(end)
+            if first is None or last is None:
+                raise ValueError(f"{value!r} isn't an interval of two dates, each a year, a "
+                                 "month, or a day (1865/1900, 1929-10/1939-09-01); write "
+                                 "a period in words without a slash")
+            if last[1] < first[0]:
+                raise ValueError(f"{value!r} ends before it begins")
+            return f"{start}/{end}"
+    return text
+
+
+CHECKS = {"doi": doi, "isbn": isbn, "url": url, "contact": contact, "period": period}

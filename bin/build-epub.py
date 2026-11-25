@@ -114,8 +114,8 @@ def creators(project):
               for person in project.get("contributors") or []
               if isinstance(person, dict) and people.name(person) and people.relator(
                   person.get("role"))]
-    others += [entry(grant["funder"], "fnd") for grant in project.get("funding") or []
-               if isinstance(grant, dict) and people.name(grant.get("funder"))]
+    others += [entry(funding["funder"], "fnd") for funding in project.get("funding") or []
+               if isinstance(funding, dict) and people.name(funding.get("funder"))]
     return made, others
 
 
@@ -214,9 +214,15 @@ def book_metadata(project, resolved, found, paths):
         meta["subject"] = {"t": "MetaList", "c": subjects}
     # The copyright line and the license, by name and deed, as one
     # statement of the book's rights (lib/licenses.py).
-    rights = licenses.statement(project.get("copyright"), project.get("license"))
+    rights = licenses.statement(project.get("copyright"), project.get("license"),
+                                project.get("published"))
     if rights:
         meta["rights"] = meta_string(rights)
+    # The release's date as the book's date, which Pandoc's writer gives
+    # as dc:date and shows on its title page; without one, its dc:date is
+    # the build's moment, as before.
+    if project.get("published"):
+        meta["date"] = meta_string(str(project["published"]))
     # The place and the time the book is about as its one coverage, a
     # semicolon apart: Pandoc's writer takes one string, and writes a
     # list as an empty element (measured with 3.14).

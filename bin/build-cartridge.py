@@ -891,7 +891,8 @@ def manifest_rights(project):
     where the license says it, the profile's vocabularies being yes and
     no alone."""
     license_id = str(project.get("license") or "").strip()
-    statement = licenses.statement(project.get("copyright"), license_id)
+    statement = licenses.statement(project.get("copyright"), license_id,
+                                   project.get("published"))
     if not statement:
         return ""
     out = "      <lomimscc:rights>\n"
@@ -916,8 +917,9 @@ def contributes(project, modified):
     person or organization an entity, a vCard (lib/people.py). The
     authors are author; the adapters, then the editors, editor, the
     nearest the profile has for an adapter; and the publisher publisher,
-    with the date, which a book with no publisher gives a contribute of
-    its own, as before. Contributors in other roles have none of the
+    with the date, the release's (project.published) where it's given and
+    otherwise the package's, which a book with no publisher gives a
+    contribute of its own, as before. Contributors in other roles have none of the
     profile's that fits, and aren't written."""
     def contribute(role, entities, date=None):
         out = "        <lomimscc:contribute>\n"
@@ -1020,7 +1022,8 @@ def build_manifest(config, tree, page_files, common_files):
         language=xml_escape(manifest.get("language", "en")),
         version=xml_escape(str(manifest.get("version", "1.0"))),
         keywords=keywords,
-        contributes=contributes(project, manifest.get("modified") or build_day()),
+        contributes=contributes(project, project.get("published") or manifest.get("modified")
+                                or build_day()),
     )
 
     organization = config.get("organization") or {}

@@ -5,7 +5,8 @@ each checked where it's set, and the classifications and the educational
 category a Common Cartridge's manifest gives them.
 
 A subject is a name, or a mapping with name, id (its code in a scheme),
-and scheme (the scheme's name, CIP 2020 say). A typical age is a range
+scheme (the scheme's name, CIP 2020 say), and url (the code's own page,
+DataCite's valueURI). A typical age is a range
 as schema.org's typicalAgeRange writes one (18-22, or 18- for 18 and
 over), and a time required an ISO 8601 duration (PT40H), as its
 timeRequired takes. The manifest's classifications follow Common
@@ -32,7 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import re
 from xml.sax.saxutils import escape
 
-SUBJECT_KEYS = ("name", "id", "scheme")
+SUBJECT_KEYS = ("name", "id", "scheme", "url")
 # A control character has no place in a record, and breaks the XML a
 # value is written into.
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -79,6 +80,12 @@ def subject(value, where):
         text = str(item).strip()
         if CONTROL.search(text):
             problems.append(f"{where}'s {key} is {text!r}, which holds a control character")
+        elif key == "url" and text:
+            import identifiers
+            try:
+                out[key] = identifiers.url(text)
+            except ValueError as exc:
+                problems.append(f"{where}'s url: {exc}")
         elif text:
             out[key] = text
     if not out.get("name"):
@@ -114,7 +121,7 @@ CHECKS = {"agerange": age_range, "duration": duration}
 def subject_parts(entry):
     """(name, id, scheme) of a subject, each "" where it isn't set."""
     if isinstance(entry, dict):
-        return tuple(str(entry.get(k) or "").strip() for k in SUBJECT_KEYS)
+        return tuple(str(entry.get(k) or "").strip() for k in ("name", "id", "scheme"))
     return (str(entry or "").strip(), "", "")
 
 

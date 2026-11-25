@@ -985,7 +985,8 @@ def xmp_setup(project, own=None):
     Pandoc's had a semicolon); the subtitle as
     prism:subtitle; the publisher as dc:publisher; the PDF's own ISBN as
     dc:identifier, a urn:isbn:; the DOI as prism:doi; the address as
-    prism:url; the book as prism:aggregationType book, which it always is;
+    prism:url; the release's date (project.published) as dc:date; the
+    work as prism:aggregationType, book for a Book and other for the rest;
     the copyright line as dc:rights; and the license's deed as
     xmpRights:WebStatement. A value the code takes as a list, split at its
     commas, is braced whole. The title, the authors, and the subtitle are
@@ -1021,11 +1022,20 @@ def xmp_setup(project, own=None):
     key("pdfidentifier", "urn:isbn:" + isbn if isbn else "")
     key("pdfdoi", project.get("doi"))
     key("pdfurl", project.get("url"))
-    key("pdfcopyright", project.get("copyright"), listed=True)
+    key("pdfcopyright", licenses.copyright_line(project.get("copyright"),
+                                                project.get("published")), listed=True)
+    # The release's date as the XMP's dc:date, in the PDF date form the
+    # code reads (D:YYYYMMDD), where it would otherwise be the build's.
+    published = str(project.get("published") or "")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", published):
+        keys.append("pdfdate={D:%s}" % published.replace("-", ""))
     found = licenses.known(project.get("license"))
     if found and re.fullmatch(r"[A-Za-z0-9:/._-]+", found[1]):
         keys.append("pdflicenseurl={%s}" % found[1])
-    keys.append("pdfpubtype={book}")
+    # The aggregation type PRISM names: book for a Book, other for every
+    # other type of work (lib/worktypes.py).
+    keys.append("pdfpubtype={%s}" % ("book" if (project.get("work_type") or "Book") == "Book"
+                                     else "other"))
     return ("\\AtBeginDocument{\\IfDocumentMetadataTF{\\hypersetup{%s}}{}}\n"
             % ",".join(keys))
 
@@ -1058,6 +1068,10 @@ def book_metadata(project, resolved, base, numbered):
     keywords = [str(k).strip() for k in project.get("keywords") or [] if str(k).strip()]
     if keywords:
         meta["keywords"] = {"t": "MetaList", "c": [meta_string(k) for k in keywords]}
+    # The release's date on the title page (the template's \date, empty
+    # without it), the metadata file's taking its place where it gives one.
+    if project.get("published"):
+        meta["date"] = meta_string(str(project["published"]))
     standards = [str(s) for s in (resolved["pdf.standard"] or []) if str(s)]
     if standards:
         meta["pdfstandard"] = {"t": "MetaList",

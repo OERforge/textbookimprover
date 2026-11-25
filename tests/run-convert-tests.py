@@ -1081,18 +1081,22 @@ def case_xmp_pdf(work):
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
 
-    def build(own_title=False):
+    def build(own_title=False, released=False):
         write("project.yaml", "project:\n  identifier: org.example.xmp\n"
-              "  title: 'Principles, Economics'\n"
+              + ("  published: 2026-11-14\n  work_type: presentation\n"
+                 "  copyright: {holder: [A. Writer, B. Writer], text: 'Some, rights.'}\n"
+                 if released else "")
+              + "  title: 'Principles, Economics'\n"
               "  subtitle: '[Draft] An Open Textbook'\n"
               "  authors: ['Szarka, Robert', {name: Ana Adapter}]\n"
               "  publisher: 'Shepherd University, Shepherdstown'\n"
               "  isbn: {pdf: 978-1-234567-89-7, epub: 0-306-40615-2}\n"
               "  doi: 10.5281/zenodo.1234567\n"
               "  url: 'https://example.edu/a?b=1&c=%20#x~y'\n"
-              "  copyright: '© 2026 A & B, {x} 100% $5 #1 \\relax ~ ^ _'\n"
-              "  license: CC-BY-4.0\n  contents:\n    - one\n")
+              + ("" if released else "  copyright: '© 2026 A & B, {x} 100% $5 #1 \\relax ~ ^ _'\n")
+              + "  license: CC-BY-4.0\n  contents:\n    - one\n")
         write("conversion.yaml", "targets:\n  pdf:\n    format: pdf\n"
+              + ("    title_page: \"on\"\n" if released else "")
               + ("    pdf:\n      metadata: book-meta.yaml\n" if own_title else ""))
         write("book-meta.yaml", "---\ntitle: Its Own Title\n---\n")
         write("src/book/one.md", "# One\n\nText.\n")
@@ -1105,13 +1109,18 @@ def case_xmp_pdf(work):
         # PRISM 3.0's namespace by its address, which pikepdf knows no prefix
         # for.
         prism = "{http://prismstandard.org/namespaces/basic/3.0/}"
+        import pdftext
+        first_page = "".join(text for (page, _), text in pdftext.marked_text(path).items()
+                             if page == 0)
         with pikepdf.open(path) as pdf, pdf.open_metadata() as meta:
-            return ({key: meta.get(key.replace("prism:", prism)) for key in (
+            found = {key: meta.get(key.replace("prism:", prism)) for key in (
                 "dc:title", "dc:creator", "prism:subtitle", "dc:publisher", "dc:identifier",
                 "prism:doi", "prism:url", "dc:rights", "xmpRights:WebStatement",
-                "prism:aggregationType")}, done.stderr[-800:])
+                "prism:aggregationType", "dc:date")}
+        return dict(found, first_page=first_page), done.stderr[-800:]
     found, said = build()
     titled, said_titled = build(own_title=True)
+    released, said_released = build(released=True)
     return [
         ("the title and the copyright line with commas each one item",
          lambda: found.get("dc:title") == "Principles, Economics"
@@ -1133,13 +1142,20 @@ def case_xmp_pdf(work):
          and found.get("prism:aggregationType") == "book" or fail(repr(found))),
         ("a title the metadata file gives the XMP's",
          lambda: titled.get("dc:title") == "Its Own Title" or fail(repr(titled) + said_titled)),
+        ("the release's date the XMP's date and on the title page, the copyright line from "
+         "its parts with its year, and a Presentation the aggregation type other",
+         lambda: released.get("dc:date") == ["2026-11-14"]
+         and "2026-11-14" in released.get("first_page", "")
+         and released.get("dc:rights") == "Copyright 2026 A. Writer and B. Writer. Some, rights."
+         and released.get("prism:aggregationType") == "other"
+         or fail(repr(released) + said_released)),
     ]
 
 
 def case_people_cartridge(work):
     """The book's people in the cartridge's manifest: the authors as
     author, the adapters and then the editors as editor, the publisher as
-    publisher with the date, each a vCard with the name's parts, the
+    publisher with the release's date, each a vCard with the name's parts, the
     affiliation, and the iD; a name's comma and semicolon escaped and its
     ampersand the XML's; and the manifest valid against Common Cartridge
     1.1."""
@@ -1160,7 +1176,8 @@ def case_people_cartridge(work):
           "      affiliation: {name: Shepherd University, ror: 05dxps055}\n"
           "    - B. Writer & Co\n  adapters: [Ana Adapter]\n  editors: [E. Ditor]\n"
           "  contributors:\n    - {name: Ill Ustrator, role: ill}\n"
-          "  publisher: {name: OERforge Press, ror: 02mhbdp94}\n  contents:\n    - one\n")
+          "  publisher: {name: OERforge Press, ror: 02mhbdp94}\n  published: 2026-11-14\n"
+          "  contents:\n    - one\n")
     write("conversion.yaml", "targets:\n  html:\n    format: html\n")
     write("src/book/one.md", "# One\n\nText.\n")
     done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
@@ -1183,9 +1200,9 @@ def case_people_cartridge(work):
     roles = [role for role, _, _ in found]
     first = found[0][1] if found else []
     return [
-        ("each kind of person a contribute in its role, the publisher's dated",
+        ("each kind of person a contribute in its role, the publisher's dated by the release",
          lambda: done.returncode == 0 and roles == ["author", "editor", "editor", "publisher"]
-         and [len(e) for _, e, _ in found] == [2, 1, 1, 1] and found[-1][2]
+         and [len(e) for _, e, _ in found] == [2, 1, 1, 1] and found[-1][2] == "2026-11-14"
          and not found[0][2] or fail(repr(found) + done.stderr[-400:])),
         ("an author's vCard with the name escaped, its parts, the affiliation, and the iD",
          lambda: first and first[0] == "BEGIN:VCARD\nVERSION:3.0\nFN:Szarka\\, Robert\\; Jr."

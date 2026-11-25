@@ -3,7 +3,10 @@ licenses.py -- what a book's license and copyright line say, for the
 outputs that record them.
 
 project.license is the license's SPDX identifier where it has one and
-otherwise its name; project.copyright the line as it should read. The
+otherwise its name; project.copyright the line as it should read, or its
+parts, a holder, a year (the year of project.published where it's not
+given), and words of the author's own after them, from which the line is
+"Copyright 2026 Robert Szarka." and then the words. The
 Creative Commons licenses and CC0, the ones open textbooks use, are known
 here by name and deed; another license is given as it's written, with no
 address, since an identifier that only looks like SPDX's would be given
@@ -110,12 +113,101 @@ def is_open(license_id):
     return text.upper() == "CC0-1.0" or bool(CC.match(text))
 
 
-def statement(copyright_line, license_id):
+COPYRIGHT_KEYS = ("holder", "year", "text")
+# A year, or a range of them, its two years a hyphen or a dash apart.
+YEARS = re.compile(r"^(\d{4})(?:\s*[-\u2013]\s*(\d{4}))?$")
+
+
+def check_copyright(value, where):
+    """project.copyright as a setting takes it, the line whole or a
+    mapping of its parts (holder, year, text), and the problems it has,
+    each naming where. A holder is a person or an organization, as a
+    publisher is given, or a list of them; a year is one, or a range of
+    two (2024-2026), kept with a dash between."""
+    import people
+    if not isinstance(value, dict):
+        if isinstance(value, (bool, list)):
+            return None, [f"{where} is {value!r}; give the line as it should read, or a "
+                          "mapping with holder, year, and text"]
+        text = str(value).strip()
+        if CONTROL.search(text):
+            return None, [f"{where} is {text!r}, which holds a control character"]
+        return text, []
+    problems = []
+    unknown = sorted(str(k) for k in value if k not in COPYRIGHT_KEYS)
+    if unknown:
+        problems.append(f"{where} has {', '.join(unknown)}, which it doesn't take; it takes "
+                        "holder, year, and text")
+    out = {}
+    holders = value.get("holder")
+    if holders in (None, "", []):
+        problems.append(f"{where} has no holder; give who holds the copyright, or write the "
+                        "line whole")
+    else:
+        checked = []
+        many = isinstance(holders, list)
+        for index, holder in enumerate(holders if many else [holders]):
+            here = people.entry(f"{where}.holder", index + 1) if many else f"{where}'s holder"
+            kind = "organization" if isinstance(holder, dict) and "ror" in holder else "person"
+            done, more = people.check(holder, here, kind)
+            problems += more
+            if done is not None:
+                checked.append(done)
+        out["holder"] = checked if many else (checked[0] if checked else None)
+    year = value.get("year")
+    if year is not None:
+        found = YEARS.match(str(year).strip()) if not isinstance(year, bool) else None
+        if not found or (found.group(2) and found.group(2) < found.group(1)):
+            problems.append(f"{where}'s year is {year!r}; give a year (2026) or a range of "
+                            "years, the earlier first (2024-2026)")
+        else:
+            out["year"] = found.group(1) + ("\u2013" + found.group(2) if found.group(2)
+                                            else "")
+    text = value.get("text")
+    if text is not None:
+        line = str(text).strip()
+        if isinstance(text, (bool, dict, list)):
+            problems.append(f"{where}'s text is {text!r}; give it as text")
+        elif CONTROL.search(line):
+            problems.append(f"{where}'s text is {line!r}, which holds a control character")
+        elif line:
+            out["text"] = line
+    return out, problems
+
+
+def holders(value):
+    """The copyright's holders' names, in order, from its parts."""
+    import people
+    holder = (value or {}).get("holder") if isinstance(value, dict) else None
+    return people.names(holder if isinstance(holder, list) else [holder] if holder else [])
+
+
+def copyright_line(value, published=""):
+    """The copyright line: the line whole as given, or, from its parts,
+    "Copyright", the year (published's where the parts give none), the
+    holders ("A", "A and B", "A, B, and C"), a full stop, and the text.
+    "" where nothing is given."""
+    if not isinstance(value, dict):
+        return one_line(value)
+    names = holders(value)
+    if len(names) > 2:
+        named = ", ".join(names[:-1]) + ", and " + names[-1]
+    else:
+        named = " and ".join(names)
+    year = str(value.get("year") or str(published or "")[:4]).strip()
+    line = " ".join(part for part in ("Copyright", year, named) if part)
+    line = one_line(line if line.endswith(".") else line + ".") if named else ""
+    extra = one_line(value.get("text"))
+    return " ".join(part for part in (line, extra) if part)
+
+
+def statement(copyright, license_id, published=""):
     """The rights as one statement, as an EPUB's dc:rights and a
-    cartridge's rights description give them: the copyright line, then
-    the license by name and address, or as given where it has neither."""
+    cartridge's rights description give them: the copyright line
+    (copyright_line), then the license by name and address, or as given
+    where it has neither."""
     parts = []
-    line = one_line(copyright_line)
+    line = copyright_line(copyright, published)
     if line:
         parts.append(line if line.endswith(".") else line + ".")
     text = one_line(license_id)

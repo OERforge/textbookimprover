@@ -957,7 +957,7 @@ PEOPLE = """\
   publisher: {name: OERforge Press, ror: https://ror.org/02mhbdp94}
   funding:
     - Example Trust
-    - {funder: {name: Example Foundation, ror: 02mhbdp94}, grant: OER-2026-17}
+    - {funder: {name: Example Foundation, ror: 02mhbdp94}, award: OER-2026-17}
 """
 
 
@@ -1086,10 +1086,57 @@ def case_identified(work):
     ]
 
 
+
+RELEASED = """\
+  published: 2026-11-14
+  copyright: {holder: Robert Szarka, text: Some rights reserved.}
+  license: CC-BY-4.0
+  funding:
+    - {funder: Example Fund, award: {number: "17", title: Open Books,
+                                     url: "https://example.org/awards/17"}}
+  coverage: {time: 1865/1900}
+"""
+
+
+def case_released(work):
+    """The release's settings as the EPUB records them: its date the
+    book's dc:date and on its title page, where without it dc:date is the
+    build's moment; the copyright line made from its parts, the year the
+    release's, in the rights; a funder with an award a funder still; and
+    an interval of time its coverage, as written."""
+    convert(work, NEEDED)
+    write_config(work, TREE, RELEASED, "    title_page: \"on\"\n")
+    out = Built(work)
+    page = next((text for name, text in out.files.items()
+                 if name.endswith("title_page.xhtml")), "")
+    write_config(work, TREE, "  license: CC-BY-4.0\n")
+    undated = Built(work)
+    return [
+        ("the build succeeds", lambda: out.status == 0 or raised(out.stderr)),
+        ("the release's date the book's dc:date, and on its title page",
+         lambda: '<dc:date id="epub-date">2026-11-14</dc:date>' in out.opf
+         and '<p class="date">2026-11-14</p>' in page or raised(out.opf[:3000] + page)),
+        ("without it, dc:date the build's moment, as before",
+         lambda: re.search(r"<dc:date[^>]*>\d{4}-\d{2}-\d{2}T[\d:]+Z</dc:date>", undated.opf)
+         or raised(undated.opf[:3000])),
+        ("the copyright line from its parts, the year the release's, then the license",
+         lambda: "<dc:rights>Copyright 2026 Robert Szarka. Some rights reserved. Licensed "
+         "under Creative Commons Attribution 4.0 International "
+         "(https://creativecommons.org/licenses/by/4.0/).</dc:rights>" in out.opf
+         or raised(out.opf[:3000])),
+        ("a funder with an award a funder",
+         lambda: re.search(r'<dc:contributor id="([^"]+)">Example Fund</dc:contributor>\s*'
+                           r'<meta refines="#\1" property="role" scheme="marc:relators">fnd',
+                           out.opf) or raised(out.opf[:3000])),
+        ("an interval of time the coverage, as written",
+         lambda: "<dc:coverage>1865/1900</dc:coverage>" in out.opf or raised(out.opf[:3000])),
+    ]
+
 CASES = [
     ("the shape of the book", case_structure),
     ("the book's people", case_people),
     ("the book's identifiers", case_identified),
+    ("the book's release", case_released),
     ("the table of contents read back", case_outline),
     ("tables survive assembly", case_tables_survive),
     ("accessibility claims", case_claims),
