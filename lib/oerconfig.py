@@ -1090,13 +1090,12 @@ def _inside_path_problem(value, what):
 # What a part may say of its own in place of the project's: a second book
 # in a project (an instructor's version) is another course to an LMS and
 # has its own order.
-PART_OWN = ("identifier", "title", "contents", "numbering")
+PART_OWN = ("identifier", "title", "contents", "numbering", "license")
 
 
 def parts_problems(project, where):
     """What's wrong with project.parts and project.include, a part's
-    license among them, as messages, and what to warn of. Read and
-    checked; nothing builds from them yet."""
+    license among them, as messages, and what to warn of."""
     problems, warnings = [], []
     parts = project.get("parts")
     if parts in (None, {}, []):

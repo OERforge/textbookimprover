@@ -280,8 +280,8 @@ keys:
       address as its license's; a cartridge's manifest says it costs
       nothing where it's Creative Commons' or CC0, that it has conditions
       but for CC0, and names it in its rights' description. A part may
-      have a license of its own (parts), read and checked and not acted
-      on yet (see ROADMAP.md).
+      have a license of its own (parts), which its outputs give in its
+      place.
 
   education:
     description: >
@@ -485,8 +485,8 @@ keys:
       the file it names into the part's folder under src/ when that
       folder holds nothing, and says afterwards when the folder no
       longer matches it (convert.py --src-status lists how). A part's
-      license is read and checked, and no run acts on it yet (see
-      ROADMAP.md).
+      license is its run's in place of the project's, so its EPUB, its
+      PDF, and a cartridge of its pages give it as their rights.
 
   include:
     type: list

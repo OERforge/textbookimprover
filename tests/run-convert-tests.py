@@ -2688,7 +2688,8 @@ def case_two_books(work):
     """Two books in one project, a student's and an instructor's version:
     each part's cartridge is its own course where the part has an
     identifier and title of its own, the instructor's pages are in its
-    own order, and what it doesn't say is the project's."""
+    own order, its license is its own where it has one, and what it
+    doesn't say is the project's."""
     def fail(message):
         raise AssertionError(message)
 
@@ -2715,10 +2716,12 @@ def case_two_books(work):
                 re.findall(r"<title>([^<]*)", text), folder.group(1) if folder else "")
 
     project = ("project:\n  identifier: org.example.course\n  title: The Course\n"
+               "  license: CC-BY-4.0\n"
                "  numbering: true\n  contents:\n    - one\n    - two\n  parts:\n"
                "    book:\n      kind: book\n    instructor:\n      kind: book\n")
     own = ("      identifier: org.example.course.instructor\n"
            "      title: The Course for Instructors\n"
+           "      license: LicenseRef-instructors-only\n"
            "      contents:\n        - answers\n        - one\n        - two\n")
     write("conversion.yaml", "targets:\n  html:\n    format: html\n  instructor-html:\n"
           "    format: html\n    part: instructor\n")
@@ -2733,6 +2736,16 @@ def case_two_books(work):
     write("project.yaml", project + own)
     apart = build()
     book, instructor = manifest("cartridge"), manifest("cartridge-instructor")
+
+    def rights(package):
+        """The manifest's rights: its cost, and its description."""
+        path = os.path.join(work, "output", "packages", package, "imsmanifest.xml")
+        text = read(path) if os.path.isfile(path) else ""
+        found = re.search(r"<lomimscc:rights>.*?</lomimscc:rights>", text, re.S)
+        found = found.group(0) if found else ""
+        return ("<lomimscc:cost>" in found,
+                re.findall(r"<lomimscc:string>([^<]*)</lomimscc:string>", found))
+    licensed = (rights("cartridge"), rights("cartridge-instructor"))
     write("project.yaml", project + "      identifier: 9 lives\n      pages: 3\n")
     wrong = build()
     return [
@@ -2753,6 +2766,11 @@ def case_two_books(work):
          and instructor[2] != book[2] and book == same[0]
          and "has no identifier of its own" not in apart.stderr
          or fail(str((book, instructor)))),
+        ("its license its own, the book's the project's",
+         lambda: licensed == (
+             (True, ["Licensed under Creative Commons Attribution 4.0 International "
+                     "(https://creativecommons.org/licenses/by/4.0/)."]),
+             (False, ["License: LicenseRef-instructors-only."])) or fail(repr(licensed))),
         ("its pages are in its own order, numbered as the project says",
          lambda: instructor[1][1:] == ["1 Answers", "2 One", "3 Two"]
          and book[1][1:] == ["1 One", "2 Two"] or fail(str((book, instructor)))),
