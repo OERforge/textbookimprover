@@ -955,6 +955,9 @@ PEOPLE = """\
     - {name: Ill Ustrator, role: illustrator}
     - {name: Tran Slator, role: trl}
   publisher: {name: OERforge Press, ror: https://ror.org/02mhbdp94}
+  funding:
+    - Example Trust
+    - {funder: {name: Example Foundation, ror: 02mhbdp94}, grant: OER-2026-17}
 """
 
 
@@ -988,9 +991,11 @@ def case_people(work):
          lambda: [filed.get(i) for i, _ in created] == [None, "Szarka, Robert",
                                                         "Adapter, Ana", None]
          or raised(repr(filed))),
-        ("a contributor is in the role its term or code names",
+        ("a contributor is in the role its term or code names, and each funder after them "
+         "a funder",
          lambda: [(name, roles.get(i)) for i, name in others]
-         == [("Ill Ustrator", "ill"), ("Tran Slator", "trl")] or raised(repr(others))),
+         == [("Ill Ustrator", "ill"), ("Tran Slator", "trl"), ("Example Trust", "fnd"),
+             ("Example Foundation", "fnd")] or raised(repr(others))),
         ("the publisher given as a mapping is recorded by name",
          lambda: "<dc:publisher>OERforge Press</dc:publisher>" in out.opf),
         ("a mistyped ORCID iD stops the build, naming the setting and its check digit",
@@ -1009,6 +1014,7 @@ IDENTIFIED = """\
   keywords: [economics, micro & macro]
   copyright: © 2026 Robert Szarka
   license: CC-BY-4.0
+  coverage: {place: United States, time: 1865 to 1900}
 """
 
 
@@ -1059,6 +1065,9 @@ def case_identified(work):
          lambda: "<dc:rights>© 2026 Robert Szarka. Licensed under Creative Commons Attribution "
          "4.0 International (https://creativecommons.org/licenses/by/4.0/).</dc:rights>"
          in out.opf or raised(out.opf[:3000])),
+        ("the place and the time the book is about its coverage",
+         lambda: "<dc:coverage>United States; 1865 to 1900</dc:coverage>" in out.opf
+         or raised(out.opf[:3000])),
         ("a mistyped ISBN stops the build, naming it and its check digit",
          lambda: mistyped.status != 0 and "isbn.epub" in mistyped.stderr
          and "check digit" in mistyped.stderr or raised(mistyped.stderr[-600:])),

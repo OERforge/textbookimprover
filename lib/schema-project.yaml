@@ -205,6 +205,60 @@ keys:
       as a PDF's XMP does, and a cartridge's manifest the publisher, with
       the date.
 
+  place:
+    description: >
+      Where the book is published, where that says something of it.
+      Read and checked; for the book's records (see ROADMAP.md).
+    keys:
+      city:
+        type: string
+        default: ""
+        description: >
+          The city it's published in.
+      country:
+        type: string
+        default: ""
+        description: >
+          The country it's published in.
+
+  funding:
+    type: list
+    item: funding
+    default: []
+    description: >
+      Who paid for the book, one entry each: the funder's name, or a
+      mapping with funder (a name, or a mapping with name and ror, the
+      funder's ROR ID, checked for its checksum) and, as you like, grant
+      (the award's number or name, as the funder gives it). An EPUB
+      records each funder as a contributor, a funder (MARC's fnd); the
+      grants are kept for the book's records.
+
+  contact:
+    type: contact
+    default: ""
+    description: >
+      Where a reader writes about the book, to report a mistake say: an
+      email address (econ-book@example.edu) or an http or https URL.
+      Read and checked; for the book's records (see ROADMAP.md).
+
+  coverage:
+    description: >
+      The place and the time the book is about, where it's about one (a
+      history of the United States, say). An EPUB records them as its
+      coverage, and a cartridge's manifest each as a coverage of its own.
+    keys:
+      place:
+        type: string
+        default: ""
+        description: >
+          The place, as a reader would name it (United States).
+      time:
+        type: string
+        default: ""
+        description: >
+          The time, as a reader would name it (1865 to 1900, or the
+          twentieth century).
+
   copyright:
     type: string
     default: ""
@@ -228,6 +282,15 @@ keys:
       but for CC0, and names it in its rights' description. A part may
       have a license of its own (parts), read and checked and not acted
       on yet (see ROADMAP.md).
+
+  metadata_license:
+    type: string
+    default: CC0-1.0
+    description: >
+      The license for the book's metadata, as distinct from the book:
+      CC0-1.0, the default, lets a catalog copy the record freely. An
+      SPDX identifier where it has one. Read and checked; for the book's
+      records (see ROADMAP.md).
 
   numbering:
     type: bool

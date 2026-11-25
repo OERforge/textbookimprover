@@ -968,6 +968,14 @@ def build_manifest(config, tree, page_files, common_files):
                      "        </lomimscc:keyword>\n")
 
     project = config.get("project") or {}
+    # The place and the time the book is about, each a coverage of its
+    # own, after the keywords.
+    for part in ("place", "time"):
+        text = str((project.get("coverage") or {}).get(part) or "").strip()
+        if text:
+            keywords += ("        <lomimscc:coverage>\n"
+                         f"          <lomimscc:string>{xml_escape(text)}</lomimscc:string>\n"
+                         "        </lomimscc:coverage>\n")
     # The subtitle after the title, the profile's title holding one string.
     subtitle = str(project.get("subtitle") or "").strip()
     title = manifest["title"] + (": " + subtitle if subtitle else "")

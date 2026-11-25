@@ -977,7 +977,7 @@ def case_identified_cartridge(work):
                        "  url: https://example.edu/ids/\n"
                        "  series: {name: Shepherd Open Textbooks, position: '3'}\n"
                        "  keywords: [economics]\n  copyright: © 2026 Robert Szarka\n"
-                       "  license: CC-BY-4.0\n")
+                       "  license: CC-BY-4.0\n  coverage: {place: United States, time: 1865 to 1900}\n")
     general = root.find(".//l:general", ns) if root is not None else None
     rights = root.find(".//l:rights", ns) if root is not None else None
     ids = [(i.findtext("l:catalog", "", ns), i.findtext("l:entry", "", ns))
@@ -1011,6 +1011,9 @@ def case_identified_cartridge(work):
          and rights.findtext("l:description/l:string", "", ns)
          == "© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 International "
          "(https://creativecommons.org/licenses/by/4.0/)." or fail(repr(rights))),
+        ("the place and the time the book is about, each a coverage",
+         lambda: general is not None and [c.findtext("l:string", "", ns) for c in general.findall(
+             "l:coverage", ns)] == ["United States", "1865 to 1900"] or fail(repr(general))),
         ("the project's keywords, not the package's",
          lambda: words == ["economics"] or fail(repr(words))),
         ("the manifest valid against Common Cartridge 1.1",

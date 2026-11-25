@@ -94,6 +94,24 @@ project:
 
 A Creative Commons license and CC0 are known by their deed's name and address (CC-BY-4.0 is Creative Commons Attribution 4.0 International, at its deed on creativecommons.org); another license is given as it's written, with no address. An EPUB records the copyright line and then the license, by name and address, as its rights ("© 2026 Robert Szarka. Licensed under Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/)."). A book's PDF, tagged as the default page makes it, gives the copyright line as its XMP's `dc:rights` and the license's address as its web statement. A cartridge's manifest says a Creative Commons license or CC0 costs nothing, that the book has conditions of use but under CC0, and gives the same statement as its rights' description. `unpack-cnx.py` sets `license` from the deed's address an OpenStax collection names, and `unpack-epub.py` from the first deed's address in an EPUB's rights.
 
+### The book's other facts
+
+A few settings say what a catalog or a deposit asks of a book, and the formats that have a place for one get it:
+
+```yaml
+project:
+  funding:
+    - Example Trust                     # a funder's name alone
+    - funder: {name: Example Foundation, ror: 02mhbdp94}
+      grant: OER-2026-17
+  coverage: {place: United States, time: 1865 to 1900}
+  contact: econ-book@example.edu        # or an http or https address
+  place: {city: Shepherdstown, country: United States}
+  metadata_license: CC0-1.0             # the default
+```
+
+and, in a target of `conversion.yaml`, `url`, the address where that target's output is published. A funder's ROR ID is checked for its checksum, and the contact must be an email address or an address. An EPUB records each funder as a contributor in MARC's `fnd` role, and the coverage, its place and time a semicolon apart; a cartridge's manifest has the place and the time each as a coverage. The grants, the contact, the place of publication, the license for the metadata, and a target's `url` are read and checked and reach no output yet; they're for the book's own record, which packing a project is to write ([ROADMAP.md](../ROADMAP.md)).
+
 ### Targets
 
 Both `conversion.yaml` and `packaging.yaml` have the same shape: a `defaults:` block, then a `targets:` block naming one or more things to build. A target inherits the defaults and overrides what it needs.

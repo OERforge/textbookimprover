@@ -90,10 +90,10 @@ TRUE_WORDS = {"true", "yes", "on", "1"}
 FALSE_WORDS = {"false", "no", "off", "0"}
 
 SCALAR_TYPES = ("string", "text", "path", "language", "ncname", "bool",
-                "int", "float", "enum", "date", "doi", "isbn", "url")
-# A person, a contributor (a person with a role), or an organization: a
-# name, or a mapping lib/people.py checks.
-PEOPLE_TYPES = ("person", "contributor", "organization")
+                "int", "float", "enum", "date", "doi", "isbn", "url", "contact")
+# A person, a contributor (a person with a role), an organization, or a
+# funder and its grant: a name, or a mapping lib/people.py checks.
+PEOPLE_TYPES = ("person", "contributor", "organization", "funding")
 
 # An XML NCName: a letter or underscore, then letters, digits, and any of
 # . - _ . No colons, and it may not start with a digit. IMS types the
@@ -697,7 +697,7 @@ def _coerce(node, value, where, problems):
             f"name{hint}")
         return node.default
 
-    if kind in ("doi", "isbn", "url") and value.strip():
+    if kind in ("doi", "isbn", "url", "contact") and value.strip():
         # The book's identifiers, each checked as lib/identifiers.py says:
         # a DOI and an ISBN kept in the form a record takes them.
         import identifiers

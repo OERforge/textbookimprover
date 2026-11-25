@@ -54,6 +54,7 @@ CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 PERSON_KEYS = ("name", "given", "family", "orcid", "affiliation")
 CONTRIBUTOR_KEYS = PERSON_KEYS + ("role",)
 ORGANIZATION_KEYS = ("name", "ror")
+FUNDING_KEYS = ("funder", "grant")
 
 RELATORS = {
     "abridger": "abr", "actor": "act", "adapter": "adp", "addressee": "rcp",
@@ -237,9 +238,42 @@ def names(entries):
     return [n for n in (name(e) for e in entries or []) if n]
 
 
+def _funding(value, where):
+    """A funder and its grant as {funder, grant}: a funder's name alone, or
+    a mapping with funder, an organization, and grant, the award's number
+    or name as the funder gives it."""
+    if not isinstance(value, dict):
+        funder, problems = _check(value, where, "organization")
+        return ({"funder": funder} if funder is not None else None), problems
+    problems = []
+    unknown = sorted(str(k) for k in value if k not in FUNDING_KEYS)
+    if unknown:
+        problems.append(f"{where} has {', '.join(unknown)}, which it doesn't take; it takes "
+                        "funder and grant")
+    if value.get("funder") is None:
+        return None, problems + [f"{where} has no funder; give the funder's name, or a "
+                                 "mapping with name and ror"]
+    funder, more = _check(value["funder"], f"{where}'s funder", "organization")
+    problems += more
+    out = {"funder": funder}
+    grant = value.get("grant")
+    if grant is not None:
+        text = str(grant).strip()
+        if isinstance(grant, (bool, dict, list)):
+            problems.append(f"{where}'s grant is {grant!r}; give it as text")
+        elif CONTROL.search(text):
+            problems.append(f"{where}'s grant is {text!r}, which holds a control character")
+        elif text:
+            out["grant"] = text
+    return out, problems
+
+
 def _check(value, where, kind):
-    """value as kind ("person", "contributor", or "organization"), and the
-    problems it has: a name, or a mapping of the kind's keys."""
+    """value as kind ("person", "contributor", "organization", or
+    "funding"), and the problems it has: a name, or a mapping of the
+    kind's keys."""
+    if kind == "funding":
+        return _funding(value, where)
     problems = []
     if isinstance(value, bool) or value is None:
         return None, [f"{where} is {value!r}; give a name, or a mapping with name"]
@@ -307,8 +341,8 @@ def _check(value, where, kind):
 
 
 def check(value, where, kind, prefix=""):
-    """value as a setting of kind ("person", "contributor", or
-    "organization") takes it, and the problems it has, each a sentence
+    """value as a setting of kind ("person", "contributor", "organization",
+    or "funding") takes it, and the problems it has, each a sentence
     naming where (publisher, authors' second entry), after
     prefix. An ORCID iD and a ROR ID come back as their addresses."""
     value, problems = _check(value, where, kind)

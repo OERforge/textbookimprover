@@ -76,6 +76,16 @@ keys:
       in a folder that holds its sources itself, it's read and checked
       and nothing more.
 
+  url:
+    type: url
+    default: ""
+    target_only: true
+    stage: package
+    description: >
+      Where this target's output is published, where it is, as an http or
+      https URL (https://example.edu/econ/econ.pdf). Read and checked;
+      for the book's records (see ROADMAP.md).
+
   archive:
     type: enum
     values: ["none", "zip", "tar.gz"]

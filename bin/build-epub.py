@@ -98,7 +98,8 @@ def creators(project):
     contributors), each a list of mappings with text, role, and file-as
     where there is one. The authors, the adapters, and the editors are
     creators, in that order, as MARC's aut, adp, and edt; contributors
-    are contributors, each in its own role (lib/people.py)."""
+    are contributors, each in its own role, and then each funder, as fnd
+    (lib/people.py)."""
     def entry(person, role):
         fields = {"text": meta_string(people.name(person)), "role": meta_string(role)}
         filed = people.file_as(person)
@@ -112,6 +113,8 @@ def creators(project):
               for person in project.get("contributors") or []
               if isinstance(person, dict) and people.name(person) and people.relator(
                   person.get("role"))]
+    others += [entry(grant["funder"], "fnd") for grant in project.get("funding") or []
+               if isinstance(grant, dict) and people.name(grant.get("funder"))]
     return made, others
 
 
@@ -199,6 +202,13 @@ def book_metadata(project, resolved, found, paths):
     rights = licenses.statement(project.get("copyright"), project.get("license"))
     if rights:
         meta["rights"] = meta_string(rights)
+    # The place and the time the book is about as its one coverage, a
+    # semicolon apart: Pandoc's writer takes one string, and writes a
+    # list as an empty element (measured with 3.14).
+    coverage = "; ".join(t for t in (str((project.get("coverage") or {}).get(k) or "").strip()
+                                     for k in ("place", "time")) if t)
+    if coverage:
+        meta["coverage"] = meta_string(coverage)
     if people.name(project.get("publisher")):
         meta["publisher"] = meta_string(people.name(project["publisher"]))
     if project.get("description"):

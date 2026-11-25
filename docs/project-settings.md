@@ -76,6 +76,38 @@ Words a catalog can find the book by. An EPUB records each as a subject, a PDF a
 
 Who published the book: a name, or a mapping with name and ror, the organization's ROR ID (https://ror.org/05dxps055 or 05dxps055), checked for its checksum. An EPUB records the name as its publisher, as a PDF's XMP does, and a cartridge's manifest the publisher, with the date.
 
+## place
+
+Where the book is published, where that says something of it. Read and checked; for the book's records (see ROADMAP.md).
+
+**`place.city`**—`string`; default `""` (empty)
+
+The city it's published in.
+
+**`place.country`**—`string`; default `""` (empty)
+
+The country it's published in.
+
+**`funding`**—`list`; default `[]`
+
+Who paid for the book, one entry each: the funder's name, or a mapping with funder (a name, or a mapping with name and ror, the funder's ROR ID, checked for its checksum) and, as you like, grant (the award's number or name, as the funder gives it). An EPUB records each funder as a contributor, a funder (MARC's fnd); the grants are kept for the book's records.
+
+**`contact`**—`contact`; default `""` (empty)
+
+Where a reader writes about the book, to report a mistake say: an email address (econ-book@example.edu) or an http or https URL. Read and checked; for the book's records (see ROADMAP.md).
+
+## coverage
+
+The place and the time the book is about, where it's about one (a history of the United States, say). An EPUB records them as its coverage, and a cartridge's manifest each as a coverage of its own.
+
+**`coverage.place`**—`string`; default `""` (empty)
+
+The place, as a reader would name it (United States).
+
+**`coverage.time`**—`string`; default `""` (empty)
+
+The time, as a reader would name it (1865 to 1900, or the twentieth century).
+
 **`copyright`**—`string`; default `""` (empty)
 
 The book's copyright line, as it should read (© 2026 Robert Szarka). An EPUB records it, with the license, as its rights; a PDF as its copyright; a cartridge's manifest in its rights' description.
@@ -83,6 +115,10 @@ The book's copyright line, as it should read (© 2026 Robert Szarka). An EPUB re
 **`license`**—`string`; default `""` (empty)
 
 The license the book is published under, as its SPDX identifier where it has one (CC-BY-4.0, CC-BY-NC-SA-4.0, CC0-1.0) and otherwise as its name. A Creative Commons license and CC0 are known by name and deed; another is given as it's written. An EPUB records it, after the copyright line, as its rights; a PDF its address as its license's; a cartridge's manifest says it costs nothing where it's Creative Commons' or CC0, that it has conditions but for CC0, and names it in its rights' description. A part may have a license of its own (parts), read and checked and not acted on yet (see ROADMAP.md).
+
+**`metadata_license`**—`string`; default `CC0-1.0`
+
+The license for the book's metadata, as distinct from the book: CC0-1.0, the default, lets a catalog copy the record freely. An SPDX identifier where it has one. Read and checked; for the book's records (see ROADMAP.md).
 
 **`numbering`**—`bool`; default `false`
 

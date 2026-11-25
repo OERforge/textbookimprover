@@ -942,7 +942,10 @@ def check_book_identifiers():
     for check, value in ((identifiers.doi, "11.1000/x"), (identifiers.isbn, "978-1-234567-89-8"),
                          (identifiers.isbn, "0-306-40615-3"), (identifiers.isbn, "12345"),
                          (identifiers.url, "javascript:alert(1)"),
-                         (identifiers.url, "https://example.edu/a b"), (identifiers.url, "https://")):
+                         (identifiers.url, "https://example.edu/a b"), (identifiers.url, "https://"),
+                         (identifiers.contact, "a b@example.edu"),
+                         (identifiers.contact, "<a@example.edu>"),
+                         (identifiers.contact, "a@localhost"), (identifiers.contact, "example.edu")):
         try:
             check(value)
             refused.append("")
@@ -959,6 +962,12 @@ def check_book_identifiers():
          "address not http, with a space, or with no host refused",
          lambda: all(refused) and "check digit" in refused[1] and "check digit" in refused[2]
          or fail(repr(refused))),
+        ("a contact an email address or an address, and one with a space, in brackets, with "
+         "no dot in its domain, or neither refused",
+         lambda: [identifiers.contact(v) for v in ("econ@example.edu", "mailto:a.b@c.example.org",
+                                                   "https://example.edu/fix")]
+         == ["econ@example.edu", "a.b@c.example.org", "https://example.edu/fix"]
+         and all("isn't an email address" in r for r in refused[7:]) or fail(repr(refused))),
     ]
 
 
@@ -1001,7 +1010,11 @@ def check_people():
     wrong = resolved("  authors:\n    - A. Writer\n    - {given: Robert, orcid: 1234}\n"
                      "  editors:\n    - {name: E. Ditor, email: e@example.org}\n"
                      "  contributors:\n    - Ill Ustrator\n    - {name: Tran Slator}\n"
-                     "  publisher: {name: OERforge, ror: 01k4yrm30}\n")
+                     "  publisher: {name: OERforge, ror: 01k4yrm30}\n"
+                     "  funding:\n    - {grant: G-1}\n    - {funder: Example, award: 1}\n")
+    funded = resolved("  funding:\n    - Example Trust\n"
+                      "    - {funder: {name: Example Foundation, ror: 02mhbdp94}, grant: OER-17}\n"
+                      "  contact: mailto:econ-book@example.edu\n")
     return [
         ("an ORCID iD bare, as its address, or without hyphens is its address, an X its "
          "check digit too",
@@ -1033,8 +1046,16 @@ def check_people():
          lambda: isinstance(wrong, str) and all(part in wrong for part in (
              "authors' second entry has no name", "authors' second entry's orcid: '1234'",
              "editors' first entry has email", "contributors' first entry is 'Ill Ustrator'",
-             "contributors' second entry has no role", "publisher's ror: '01k4yrm30'"))
+             "contributors' second entry has no role", "publisher's ror: '01k4yrm30'",
+             "funding's first entry has no funder", "funding's second entry has award"))
          or fail(wrong)),
+        ("a funder a name, or a mapping with funder, its ROR ID an address, and grant, and "
+         "an email address with mailto: taken off",
+         lambda: not isinstance(funded, str) and funded.project["funding"] == [
+             {"funder": "Example Trust"},
+             {"funder": {"name": "Example Foundation", "ror": "https://ror.org/02mhbdp94"},
+              "grant": "OER-17"}]
+         and funded.project["contact"] == "econ-book@example.edu" or fail(repr(funded))),
     ]
 
 

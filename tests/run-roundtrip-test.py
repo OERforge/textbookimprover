@@ -95,6 +95,8 @@ def unusual(node):
         return "9781234567897"
     if kind == "url":
         return "https://example.edu/a,b?no=1.10"
+    if kind == "contact":
+        return "no@example.edu"
     if kind == "list" and node.item == "contributor":
         # A contributor is a mapping with a role, its name the word YAML
         # would make a boolean of.

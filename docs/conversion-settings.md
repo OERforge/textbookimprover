@@ -16,6 +16,10 @@ Where this target writes. Defaults to the target's own name, so two targets in t
 
 Which of the project's parts (project.parts) this target is built from; left empty, the book's. In a project with a folder for each part (src/book/, src/slides/), a run builds each part that has a target, one after another, and convert.py --part NAME builds one; in a folder that holds its sources itself, it's read and checked and nothing more.
 
+**`url`**—`url`; default `""` (empty); *target only*
+
+Where this target's output is published, where it is, as an http or https URL (https://example.edu/econ/econ.pdf). Read and checked; for the book's records (see ROADMAP.md).
+
 **`archive`**—one of `none`, `zip`, `tar.gz`; default `none`
 
 Whether this target's folder is packed into one file too, once it's written: a zip or a tar.gz beside the folder, named after it (remediated.zip), holding the folder, less the intermediates folder the run keeps there for a target whose filter settings differ from the first target's. The folder stays, and each run writes both afresh. Each file in it is dated the moment SOURCE_DATE_EPOCH names, where the run has it set, with a mode of 0644 (0755 for one anyone may run) and no owner, so a target built again under it is packed into the same bytes. A Common Cartridge is the packager's (--zip); this is for handing a folder on whole, such as a set of remediated decks.

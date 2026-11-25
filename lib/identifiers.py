@@ -1,6 +1,6 @@
 """
 identifiers.py -- the identifiers a book's settings give it: a DOI, its
-ISBNs, and an address.
+ISBNs, an address, and a contact.
 
 Each is checked where it's set, so that a mistyped one is caught there
 rather than in a store's or a registry's record: a DOI by its form (10.,
@@ -9,8 +9,9 @@ address and kept bare, as an EPUB's identifier typed DOI holds it; an
 ISBN by its check digit, ISBN-13's (ISO 2108: weights 1 and 3, mod 10)
 or ISBN-10's (weights 10 to 1, mod 11, X for 10), its hyphens and spaces
 taken out and an ISBN-10 written as the ISBN-13 it's part of, since an
-EPUB types it ISBN-13; and an address as an http or https URL with a
-host, no space or control character in it.
+EPUB types it ISBN-13; an address as an http or https URL with a host,
+no space or control character in it; and a contact as an email address
+or such an address.
 
 Copyright 2026 Robert Szarka
 
@@ -80,4 +81,26 @@ def url(value):
     return text
 
 
-CHECKS = {"doi": doi, "isbn": isbn, "url": url}
+# An email address as a person writes one: a local part and a domain with
+# a dot, nothing that would end it in a record (a space, a quote, an angle
+# bracket, a control character), and mailto: before it taken off.
+EMAIL_RE = re.compile(r"^(?:mailto:)?([^@\s<>\"'(),;:\\\[\]\x00-\x1f\x7f]+"
+                      r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+                      r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+)$", re.I)
+
+
+def contact(value):
+    """Where to write about the book, an email address (mailto: before it
+    taken off) or an http or https URL, or ValueError where it's neither."""
+    text = str(value).strip()
+    found = EMAIL_RE.match(text)
+    if found:
+        return found.group(1)
+    try:
+        return url(text)
+    except ValueError:
+        raise ValueError(f"{value!r} isn't an email address (corrections@example.edu) or an "
+                         "address that begins http:// or https:// and names a host") from None
+
+
+CHECKS = {"doi": doi, "isbn": isbn, "url": url, "contact": contact}
