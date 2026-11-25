@@ -1680,7 +1680,8 @@ def enumitem_settings(texts):
 # this command"), at OpenIntro Statistics' first heading. Each was built
 # tagged with what it's written with in the book, the text checked, and
 # veraPDF's PDF/UA-2 profile passed. A package the installed status list
-# rates compatible, or partially, is loaded as the book has it.
+# rates compatible, or partially, is loaded as the book has it, but for
+# those in SHIM_ANY_RATING.
 #
 # The definitions are written in expl3 under internal names, and the
 # command each package's load runs makes them the package's own; a
@@ -2073,11 +2074,26 @@ SHIM_NOTE = (
     "% defined as below instead, to keep what the book says, not how it looks.\n")
 
 
+# Packages the copy replaces whatever the status list rates them: LaTeX's
+# tagging loads an emulation of its own in their place, which stops on
+# what books write with them. The list of 2026-11-22 rates titlesec
+# partially compatible (2026-09-27's, currently incompatible), for
+# latex-lab-titlesec 0.6c (2026-10-24), which LaTeX's tagging loads for
+# titlesec.sty (latex-lab-testphase-sec-template's file substitution). It
+# stopped on the explicit option ("Unknown option `explicit' for package
+# `latex-lab-titlesec'"), on \titleclass, and on \newpagestyle, neither of
+# which it defines ("Undefined control sequence"), and ignores
+# \titleformat and \titlespacing with a warning, as the stand-in does
+# (measured with the book class, 2026-11-24); the stand-in builds with all
+# three.
+SHIM_ANY_RATING = frozenset({"titlesec"})
+
+
 def shimmed_packages(packages, base=None):
     """The packages among packages the copy replaces (SHIMS, SHIM_ALIASES),
     in SHIMS' order: each one the tagging status list installed with TeX
     doesn't rate compatible or partially compatible, or every one, when
-    the list isn't installed."""
+    the list isn't installed; SHIM_ANY_RATING's, whatever it rates them."""
     statuses = {}
     if base:
         import taggingstatus
@@ -2086,7 +2102,8 @@ def shimmed_packages(packages, base=None):
             statuses = taggingstatus.load(path)[1]
     found = [name for name in list(SHIMS) + list(SHIM_ALIASES)
              if name in packages and name not in STAND_IN_FONTS]
-    return [name for name in found if statuses.get((name, "sty")) not in (3, 4)]
+    return [name for name in found
+            if name in SHIM_ANY_RATING or statuses.get((name, "sty")) not in (3, 4)]
 
 
 def shim_block(names, stand_ins=(), pagestyles=False):

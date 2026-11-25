@@ -9902,7 +9902,20 @@ def case_unsupported(work):
                  "  pdf:\n    format: pdf\n")
     with open(os.path.join(work, "plot.pdf"), "rb") as fh:
         original = fh.read()
-    result = convert(work)
+    # LaTeX's tagging status data where TeX is told to look ahead of its
+    # own, rating the packages as the list of 2026-11-22 does: titlesec
+    # partially compatible, which the copy replaces all the same
+    # (texremediate.SHIM_ANY_RATING), and the rest as before. A folder
+    # beside the book's, not among its files.
+    listed = work.rstrip(os.sep) + "-status"
+    os.makedirs(listed, exist_ok=True)
+    with open(os.path.join(listed, "latex-tagging-status.ltx"), "w") as fh:
+        fh.write("\\ProvidesFile{latex-tagging-status.ltx}[2026-11-22]\n" + "".join(
+            "\\@kernel@tagging@status{%s}{sty}{%d}\n" % pair for pair in (
+                ("titlesec", 3), ("mdframed", 1), ("framed", 2), ("soul", 2), ("ulem", 2),
+                ("tabto", 2), ("wrapfig", 2), ("enumerate", 2), ("wasysym", 3))))
+    result = convert(work, dict(os.environ, TEXINPUTS=os.path.abspath(listed) + os.pathsep
+                                + os.environ.get("TEXINPUTS", "")))
     said = result.stdout + result.stderr
     built = os.path.join(work, "pdf", "book.pdf")
     copy = read(work, "tagged", "book.tex") \
@@ -9979,11 +9992,16 @@ def case_unsupported(work):
             and "2 of the book's PDF figures written in the copy with their fonts embedded" \
             in said and "written in the copy LaTeX builds with their fonts embedded" in said
     return [
-        ("the run says the copy loads none of the packages tagging can't take, and what "
-         "replacing each changes, for the source target and for the PDF it builds",
+        ("the run says the copy loads none of the packages tagging can't take, titlesec "
+         "even where the status list rates it partially compatible, and what replacing "
+         "each changes, for the source target and for the PDF it builds",
          lambda: "WARNING: tagged: the copy loads none of titlesec, mdframed, framed, soul, "
          "ulem, tabto, wrapfig, enumerate," in said
          and "WARNING: pdf: the copy LaTeX builds loads none of titlesec," in said
+         and "(the tagging project's status list rates each currently incompatible or never "
+         "to be supported; titlesec, or the emulation of it LaTeX's tagging loads in its "
+         "place where it has one, stops on what books write with it, whatever the list "
+         "rates it)" in said
          and "titlesec: headings are set as the class sets them" in said
          and "enumerate: a list's label pattern" in said),
         ("wasysym's symbols are the Unicode characters they draw, so unicode-math gives "

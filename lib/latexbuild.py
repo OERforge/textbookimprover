@@ -5092,15 +5092,14 @@ def failure_advice(log):
     # main memory). A stack that overflows is usually a macro that calls
     # itself without end instead.
     # titlesec's \titleformat, which LaTeX's tagging can't build with; a
-    # tagged copy loads it only when the tagging status list rates it
-    # compatible, and defines its commands otherwise (texremediate.SHIMS).
+    # tagged copy doesn't load it, whatever the tagging status list rates
+    # it, and defines its commands (texremediate.SHIMS, SHIM_ANY_RATING).
     if "Package titlesec Error: No format for this command" in log:
         said.append("titlesec can't build with LaTeX's tagging (the tagging project "
                     "rated it currently incompatible), and the book sets its headings "
                     "with it: without its \\titleformat settings, and the package, "
                     "LaTeX's own headings would build. A source target with tagging on "
-                    "writes a copy that doesn't load it, unless the status list "
-                    "installed with TeX rates it compatible.")
+                    "writes a copy that doesn't load it.")
     # KOMA-Script 3.49.3 (2026-10-19) stops on \DocumentMetadata, which a
     # tagged PDF begins with (Pandoc's template writes it for pdfstandard,
     # and a LaTeX book's tagged copy before \documentclass), and tells the
