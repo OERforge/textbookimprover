@@ -1015,6 +1015,10 @@ IDENTIFIED = """\
   copyright: © 2026 Robert Szarka
   license: CC-BY-4.0
   coverage: {place: United States, time: 1865 to 1900}
+  education:
+    subjects:
+      - {name: "Economics, General", id: "45.0601", scheme: CIP 2020}
+      - Trade
 """
 
 
@@ -1058,13 +1062,21 @@ def case_identified(work):
          lambda: '<meta property="belongs-to-collection" id="epub-collection-1">Shepherd Open '
          'Textbooks</meta>' in out.opf
          and '<meta refines="#epub-collection-1" property="group-position">3</meta>' in out.opf),
-        ("each keyword a subject",
+        ("each keyword a subject, before the subjects the book is classed under",
          lambda: re.findall(r"<dc:subject[^>]*>([^<]*)</dc:subject>", out.opf)
-         == ["economics", "micro &amp; macro"] or raised(out.opf[:3000])),
+         == ["economics", "micro &amp; macro", "Economics, General", "Trade"]
+         or raised(out.opf[:3000])),
         ("the copyright line and the license, by name and deed, the rights",
          lambda: "<dc:rights>© 2026 Robert Szarka. Licensed under Creative Commons Attribution "
          "4.0 International (https://creativecommons.org/licenses/by/4.0/).</dc:rights>"
          in out.opf or raised(out.opf[:3000])),
+        ("a subject the book is classed under a subject, its scheme the authority and its "
+         "code the term, and one named alone a subject too",
+         lambda: re.search(r'<dc:subject id="([^"]+)">Economics, General</dc:subject>\s*'
+                           r'<meta refines="#\1" property="authority">CIP 2020</meta>\s*'
+                           r'<meta refines="#\1" property="term">45\.0601</meta>', out.opf)
+         and re.search(r'<dc:subject[^>]*>Trade</dc:subject>', out.opf)
+         or raised(out.opf[:4000])),
         ("the place and the time the book is about its coverage",
          lambda: "<dc:coverage>United States; 1865 to 1900</dc:coverage>" in out.opf
          or raised(out.opf[:3000])),

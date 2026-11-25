@@ -283,6 +283,82 @@ keys:
       have a license of its own (parts), read and checked and not acted
       on yet (see ROADMAP.md).
 
+  education:
+    description: >
+      Who the book is for and what it teaches, for the catalogs and the
+      learning management systems that read a book's educational
+      metadata.
+    keys:
+      level:
+        type: string
+        default: ""
+        description: >
+          The level it's written for, in your own words (Undergraduate,
+          lower division). A cartridge's manifest classifies the book by
+          it, as its educational level.
+      context:
+        type: enum
+        values: ["", "higher education", "school", "training", "other"]
+        default: ""
+        description: >
+          Where it's used, as IEEE LOM names the setting: higher
+          education, school, training, or other. A cartridge's manifest
+          gives it as its context, which Common Cartridge's guide calls
+          information only, not meant to change what an LMS does.
+      audience:
+        type: string
+        default: ""
+        description: >
+          Who reads it, in your own words (learners, instructors). Read
+          and checked; for the book's records (see ROADMAP.md).
+      subjects:
+        type: list
+        item: subject
+        default: []
+        description: >
+          The subjects the book is classed under, each a name, or a
+          mapping with name, id (its code in a scheme), and scheme (the
+          scheme's name): {name: "Economics, General", id: "45.0601",
+          scheme: CIP 2020}. An EPUB records each as a subject, with its
+          scheme as the authority and its code as the term; a cartridge's
+          manifest classifies the book by each as a discipline, the
+          classification's description naming the scheme.
+      objectives:
+        type: list
+        item: string
+        default: []
+        description: >
+          What a reader learns from the book, one entry each. A
+          cartridge's manifest classifies the book by each, as an
+          educational objective.
+      prerequisites:
+        type: list
+        item: string
+        default: []
+        description: >
+          What a reader should know first, one entry each. A cartridge's
+          manifest classifies the book by each, as a prerequisite.
+      resource_type:
+        type: string
+        default: ""
+        description: >
+          What kind of resource the book is, in your own words (textbook).
+          Read and checked; for the book's records (see ROADMAP.md), since
+          a cartridge takes one value alone, IMS Common Cartridge.
+      typical_age:
+        type: agerange
+        default: ""
+        description: >
+          Its readers' ages, as a range (18-22, or 18- for 18 and over).
+          Read and checked; for the book's records (see ROADMAP.md).
+      time_required:
+        type: duration
+        default: ""
+        description: >
+          How long working through it takes, as an ISO 8601 duration (PT40H
+          for 40 hours). Read and checked; for the book's records (see
+          ROADMAP.md).
+
   metadata_license:
     type: string
     default: CC0-1.0

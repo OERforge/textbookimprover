@@ -971,6 +971,71 @@ def check_book_identifiers():
     ]
 
 
+def check_education():
+    """lib/education.py and project.education: a subject a name or a
+    mapping, a typical age and a time required as schema.org takes them,
+    the context one of LOM's, and each mistake named by its place."""
+    import education
+    ages, times, refused = [], [], []
+    for value in ("18-22", "18-", " 7-9 "):
+        ages.append(education.age_range(value))
+    for value in ("PT40H", "p2w", "P1DT2H30M", "PT0.5S"):
+        times.append(education.duration(value))
+    for check, value in ((education.age_range, "22-18"), (education.age_range, "adults"),
+                         (education.age_range, "-18"), (education.duration, "40 hours"),
+                         (education.duration, "P"), (education.duration, "PT"),
+                         (education.duration, "P1H")):
+        try:
+            check(value)
+            refused.append("")
+        except ValueError as exc:
+            refused.append(str(exc))
+    conversion = oerconfig.load_schema(os.path.join(ROOT, "bin", "schema-conversion.yaml"))
+    project_schema = oerconfig.load_schema(os.path.join(ROOT, "lib", "schema-project.yaml"))
+
+    def resolved(project):
+        path = os.path.join(scratch(), "conversion.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("project:\n  identifier: org.example.education\n" + project
+                     + "targets:\n  html:\n    format: html\n")
+        try:
+            return oerconfig.resolve(conversion, project_schema,
+                                     [oerconfig.load_document(path)], target="html")
+        except oerconfig.ConfigError as error:
+            return str(error)
+    good = resolved("  education:\n    context: higher education\n    subjects:\n"
+                    "      - Trade\n      - {name: 'Economics, General', id: '45.0601', "
+                    "scheme: CIP 2020}\n    typical_age: 18-\n    time_required: pt40h\n")
+    wrong = resolved("  education:\n    context: college\n    subjects:\n"
+                     "      - {id: '45.0601'}\n      - {name: Trade, code: 1}\n"
+                     "      - {name: Economics, id: 45.0600}\n"
+                     "    typical_age: adults\n    time_required: 40 hours\n")
+    return [
+        ("a range of ages, open at its end too, and ISO 8601's durations",
+         lambda: ages == ["18-22", "18-", "7-9"] and times == ["PT40H", "P2W", "P1DT2H30M",
+                                                                "PT0.5S"]
+         or fail(repr((ages, times)))),
+        ("a range from older to younger, words, no youngest, and a duration in words, "
+         "empty, or with an hour before its T refused",
+         lambda: all(refused) or fail(repr(refused))),
+        ("a subject a name or a mapping, the context and the rest as given",
+         lambda: not isinstance(good, str) and good.project["education"]["subjects"] == [
+             "Trade", {"name": "Economics, General", "id": "45.0601", "scheme": "CIP 2020"}]
+         and good.project["education"]["context"] == "higher education"
+         and good.project["education"]["typical_age"] == "18-"
+         and good.project["education"]["time_required"] == "PT40H" or fail(repr(good))),
+        ("each mistake named by its place, a context not LOM's and a code YAML read as a "
+         "number among them",
+         lambda: isinstance(wrong, str) and all(part in wrong for part in (
+             "education.context is 'college', which is not one of higher education, school, "
+             "training, other, or nothing", "education.subjects' first entry has no name",
+             "education.subjects' second entry has code",
+             "education.subjects' third entry's id is 45.06, a number to YAML",
+             "education.typical_age: 'adults'",
+             "education.time_required: '40 hours'")) or fail(wrong)),
+    ]
+
+
 def check_people():
     """lib/people.py and the settings that name people: an ORCID iD and a
     ROR ID checked and written as their addresses, a MARC role by its term
@@ -13361,6 +13426,7 @@ GROUPS = [
     ("lib/people.py, the people and organizations a book's settings name", check_people),
     ("lib/identifiers.py, a book's DOI, ISBNs, and address", check_book_identifiers),
     ("lib/licenses.py, a book's license and copyright line", check_licenses),
+    ("lib/education.py, a book's subjects, readers' ages, and time", check_education),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

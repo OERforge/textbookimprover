@@ -82,6 +82,7 @@ from bookcontents import (  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import archivedates  # noqa: E402
+import education  # noqa: E402
 import licenses  # noqa: E402
 import people  # noqa: E402
 import projectpaths  # noqa: E402
@@ -755,7 +756,7 @@ MANIFEST_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
 {identifiers}{keywords}      </lomimscc:general>
       <lomimscc:lifeCycle>
 {contributes}      </lomimscc:lifeCycle>
-{rights}{relations}
+{educational}{rights}{relations}{classifications}
     </lomimscc:lom>
   </metadata>
   <organizations>
@@ -1007,6 +1008,8 @@ def build_manifest(config, tree, page_files, common_files):
                      "      </lomimscc:relation>\n")
     head = MANIFEST_HEAD.format(
         rights=manifest_rights(project),
+        educational=education.manifest_educational(project.get("education")),
+        classifications=education.manifest_classifications(project.get("education")),
         identifier=xml_escape(manifest["identifier"]),
         title=xml_escape(title),
         identifiers=identifiers,

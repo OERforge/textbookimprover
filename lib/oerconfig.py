@@ -90,10 +90,15 @@ TRUE_WORDS = {"true", "yes", "on", "1"}
 FALSE_WORDS = {"false", "no", "off", "0"}
 
 SCALAR_TYPES = ("string", "text", "path", "language", "ncname", "bool",
-                "int", "float", "enum", "date", "doi", "isbn", "url", "contact")
+                "int", "float", "enum", "date", "doi", "isbn", "url", "contact",
+                "agerange", "duration")
 # A person, a contributor (a person with a role), an organization, or a
 # funder and its grant: a name, or a mapping lib/people.py checks.
 PEOPLE_TYPES = ("person", "contributor", "organization", "funding")
+# The mappings a list's entries may be, each entry named by its place: a
+# person's kinds, and a subject the book is classed under
+# (lib/education.py).
+ENTRY_TYPES = PEOPLE_TYPES + ("subject",)
 
 # An XML NCName: a letter or underscore, then letters, digits, and any of
 # . - _ . No colons, and it may not start with a digit. IMS types the
@@ -231,7 +236,7 @@ class Node:
         if self.type is None:
             raise ConfigError(f"schema entry {path!r} has neither keys nor "
                               "a type")
-        if self.type not in SCALAR_TYPES + PEOPLE_TYPES + ("list", "opaque"):
+        if self.type not in SCALAR_TYPES + ENTRY_TYPES + ("list", "opaque"):
             raise ConfigError(f"schema entry {path!r} has unknown type "
                               f"{self.type!r}")
         if self.type == "enum":
@@ -555,7 +560,7 @@ def _coerce(node, value, where, problems):
             # A single value where a list is expected is almost always
             # meant, and rejecting it would be pedantry.
             value = [value]
-        if node.item in PEOPLE_TYPES:
+        if node.item in ENTRY_TYPES:
             # Each entry named by its place, since a list of people is
             # where a mapping's mistake is likeliest.
             out = []
@@ -570,6 +575,14 @@ def _coerce(node, value, where, problems):
         item = Node(node.name, node.path,
                     {"type": node.item, "default": None})
         return [_coerce(item, v, where, problems) for v in value]
+
+    if kind == "subject":
+        if value is None or value == "":
+            return node.default
+        import education
+        checked, more = education.subject(value, node.path)
+        problems += [f"{where}: {p}" for p in more]
+        return node.default if more else checked
 
     if kind in PEOPLE_TYPES:
         if value is None or value == "":
@@ -653,8 +666,11 @@ def _coerce(node, value, where, problems):
         for allowed in node.values:
             if allowed.lower() == text:
                 return allowed
+        # An empty value, where it's one of them, is unset, and said so.
+        named = ", ".join(v for v in node.values if v) + (
+            ", or nothing" if "" in node.values else "")
         problems.append(f"{where}: {node.path} is {value!r}, which is not "
-                        f"one of {', '.join(node.values)}")
+                        f"one of {named}")
         return node.default
 
     # string, text, path, language
@@ -696,6 +712,15 @@ def _coerce(node, value, where, problems):
             f"{where}: {node.path} is {value!r}, which is not a valid XML "
             f"name{hint}")
         return node.default
+
+    if kind in ("agerange", "duration") and value.strip():
+        # A typical age and a time required, as schema.org takes them.
+        import education
+        try:
+            return education.CHECKS[kind](value)
+        except ValueError as exc:
+            problems.append(f"{where}: {node.path}: {exc}")
+            return node.default
 
     if kind in ("doi", "isbn", "url", "contact") and value.strip():
         # The book's identifiers, each checked as lib/identifiers.py says:

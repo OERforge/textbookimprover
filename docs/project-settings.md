@@ -116,6 +116,46 @@ The book's copyright line, as it should read (© 2026 Robert Szarka). An EPUB re
 
 The license the book is published under, as its SPDX identifier where it has one (CC-BY-4.0, CC-BY-NC-SA-4.0, CC0-1.0) and otherwise as its name. A Creative Commons license and CC0 are known by name and deed; another is given as it's written. An EPUB records it, after the copyright line, as its rights; a PDF its address as its license's; a cartridge's manifest says it costs nothing where it's Creative Commons' or CC0, that it has conditions but for CC0, and names it in its rights' description. A part may have a license of its own (parts), read and checked and not acted on yet (see ROADMAP.md).
 
+## education
+
+Who the book is for and what it teaches, for the catalogs and the learning management systems that read a book's educational metadata.
+
+**`education.level`**—`string`; default `""` (empty)
+
+The level it's written for, in your own words (Undergraduate, lower division). A cartridge's manifest classifies the book by it, as its educational level.
+
+**`education.context`**—one of ``, `higher education`, `school`, `training`, `other`; default `""` (empty)
+
+Where it's used, as IEEE LOM names the setting: higher education, school, training, or other. A cartridge's manifest gives it as its context, which Common Cartridge's guide calls information only, not meant to change what an LMS does.
+
+**`education.audience`**—`string`; default `""` (empty)
+
+Who reads it, in your own words (learners, instructors). Read and checked; for the book's records (see ROADMAP.md).
+
+**`education.subjects`**—`list`; default `[]`
+
+The subjects the book is classed under, each a name, or a mapping with name, id (its code in a scheme), and scheme (the scheme's name): {name: "Economics, General", id: "45.0601", scheme: CIP 2020}. An EPUB records each as a subject, with its scheme as the authority and its code as the term; a cartridge's manifest classifies the book by each as a discipline, the classification's description naming the scheme.
+
+**`education.objectives`**—`list`; default `[]`
+
+What a reader learns from the book, one entry each. A cartridge's manifest classifies the book by each, as an educational objective.
+
+**`education.prerequisites`**—`list`; default `[]`
+
+What a reader should know first, one entry each. A cartridge's manifest classifies the book by each, as a prerequisite.
+
+**`education.resource_type`**—`string`; default `""` (empty)
+
+What kind of resource the book is, in your own words (textbook). Read and checked; for the book's records (see ROADMAP.md), since a cartridge takes one value alone, IMS Common Cartridge.
+
+**`education.typical_age`**—`agerange`; default `""` (empty)
+
+Its readers' ages, as a range (18-22, or 18- for 18 and over). Read and checked; for the book's records (see ROADMAP.md).
+
+**`education.time_required`**—`duration`; default `""` (empty)
+
+How long working through it takes, as an ISO 8601 duration (PT40H for 40 hours). Read and checked; for the book's records (see ROADMAP.md).
+
 **`metadata_license`**—`string`; default `CC0-1.0`
 
 The license for the book's metadata, as distinct from the book: CC0-1.0, the default, lets a catalog copy the record freely. An SPDX identifier where it has one. Read and checked; for the book's records (see ROADMAP.md).

@@ -977,9 +977,26 @@ def case_identified_cartridge(work):
                        "  url: https://example.edu/ids/\n"
                        "  series: {name: Shepherd Open Textbooks, position: '3'}\n"
                        "  keywords: [economics]\n  copyright: © 2026 Robert Szarka\n"
-                       "  license: CC-BY-4.0\n  coverage: {place: United States, time: 1865 to 1900}\n")
+                       "  license: CC-BY-4.0\n  coverage: {place: United States, time: 1865 to 1900}\n"
+                       "  education:\n    level: Undergraduate, lower division\n"
+                       "    context: higher education\n    subjects:\n"
+                       "      - {name: 'Economics, General', id: '45.0601', scheme: CIP 2020}\n"
+                       "      - {name: Economics, id: '1.1', scheme: Own & Co}\n"
+                       "      - Trade\n    objectives: [Explain how prices <coordinate> a market]\n"
+                       "    prerequisites: [High school algebra]\n")
     general = root.find(".//l:general", ns) if root is not None else None
     rights = root.find(".//l:rights", ns) if root is not None else None
+    educational = root.find(".//l:educational", ns) if root is not None else None
+
+    def classified():
+        """Each classification as (purpose, [(id, entry)], description)."""
+        found = []
+        for c in root.findall(".//l:classification", ns) if root is not None else []:
+            found.append((c.findtext("l:purpose/l:value", "", ns),
+                          [(t.findtext("l:id", "", ns), t.findtext("l:entry/l:string", "", ns))
+                           for t in c.findall("l:taxonPath/l:taxon", ns)],
+                          c.findtext("l:description/l:string", "", ns)))
+        return found
     ids = [(i.findtext("l:catalog", "", ns), i.findtext("l:entry", "", ns))
            for i in general.iterfind("l:identifier", ns)] if general is not None else []
     words = [k.findtext("l:string", "", ns) for k in general.iterfind("l:keyword", ns)] \
@@ -1014,6 +1031,21 @@ def case_identified_cartridge(work):
         ("the place and the time the book is about, each a coverage",
          lambda: general is not None and [c.findtext("l:string", "", ns) for c in general.findall(
              "l:coverage", ns)] == ["United States", "1865 to 1900"] or fail(repr(general))),
+        ("the context its educational category's, with its one resource type",
+         lambda: educational is not None
+         and educational.findtext("l:learningResourceType/l:value", "", ns)
+         == "IMS Common Cartridge"
+         and educational.findtext("l:context/l:value", "", ns) == "higher education"
+         or fail(repr(educational))),
+        ("the subjects disciplines, a classification for each scheme naming it, then the "
+         "level, the objectives, and the prerequisites",
+         lambda: classified() == [
+             ("discipline", [("45.0601", "Economics, General")], "CIP 2020"),
+             ("discipline", [("1.1", "Economics")], "Own & Co"),
+             ("discipline", [("", "Trade")], ""),
+             ("educational level", [("", "Undergraduate, lower division")], ""),
+             ("educational objective", [("", "Explain how prices <coordinate> a market")], ""),
+             ("prerequisite", [("", "High school algebra")], "")] or fail(repr(classified()))),
         ("the project's keywords, not the package's",
          lambda: words == ["economics"] or fail(repr(words))),
         ("the manifest valid against Common Cartridge 1.1",

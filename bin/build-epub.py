@@ -69,6 +69,7 @@ import languages  # noqa: E402
 import pagefooter  # noqa: E402
 import pandocversion  # noqa: E402
 import pandocrun
+import education  # noqa: E402
 import licenses  # noqa: E402
 import people  # noqa: E402
 import projectpaths  # noqa: E402
@@ -195,8 +196,22 @@ def book_metadata(project, resolved, found, paths):
         if str(series.get("position") or "").strip():
             meta["group-position"] = meta_string(series["position"])
     keywords = [str(k).strip() for k in project.get("keywords") or [] if str(k).strip()]
-    if keywords:
-        meta["subject"] = meta_list(keywords)
+    # Each keyword a subject, and then each subject the book is classed
+    # under, its scheme the authority and its code the term, as Pandoc's
+    # writer takes a subject's mapping (lib/education.py).
+    subjects = [meta_string(k) for k in keywords]
+    for entry in (project.get("education") or {}).get("subjects") or []:
+        name, code, scheme = education.subject_parts(entry)
+        if not name:
+            continue
+        fields = {"text": meta_string(name)}
+        if scheme:
+            fields["authority"] = meta_string(scheme)
+        if code:
+            fields["term"] = meta_string(code)
+        subjects.append({"t": "MetaMap", "c": fields} if len(fields) > 1 else fields["text"])
+    if subjects:
+        meta["subject"] = {"t": "MetaList", "c": subjects}
     # The copyright line and the license, by name and deed, as one
     # statement of the book's rights (lib/licenses.py).
     rights = licenses.statement(project.get("copyright"), project.get("license"))

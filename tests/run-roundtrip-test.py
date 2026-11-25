@@ -97,6 +97,14 @@ def unusual(node):
         return "https://example.edu/a,b?no=1.10"
     if kind == "contact":
         return "no@example.edu"
+    if kind == "agerange":
+        return "18-"
+    if kind == "duration":
+        return "PT40H"
+    if kind == "list" and node.item == "subject":
+        # A subject a name, or a mapping whose code YAML would read as a
+        # number.
+        return [{"name": "a, b", "id": "45.0601", "scheme": "no"}, "1.10"]
     if kind == "list" and node.item == "contributor":
         # A contributor is a mapping with a role, its name the word YAML
         # would make a boolean of.

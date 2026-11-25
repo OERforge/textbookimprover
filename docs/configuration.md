@@ -112,6 +112,27 @@ project:
 
 and, in a target of `conversion.yaml`, `url`, the address where that target's output is published. A funder's ROR ID is checked for its checksum, and the contact must be an email address or an address. An EPUB records each funder as a contributor in MARC's `fnd` role, and the coverage, its place and time a semicolon apart; a cartridge's manifest has the place and the time each as a coverage. The grants, the contact, the place of publication, the license for the metadata, and a target's `url` are read and checked and reach no output yet; they're for the book's own record, which packing a project is to write ([ROADMAP.md](../ROADMAP.md)).
 
+### The book's use in teaching
+
+`project.education` says who the book is for and what it teaches, for the catalogs and the learning management systems that read a book's educational metadata:
+
+```yaml
+project:
+  education:
+    level: Undergraduate, lower division
+    context: higher education           # school, training, or other
+    audience: learners
+    subjects:
+      - {name: "Economics, General", id: "45.0601", scheme: CIP 2020}
+    objectives: [Explain how prices coordinate a market]
+    prerequisites: [High school algebra]
+    resource_type: textbook
+    typical_age: 18-                    # 18 and over; 18-22 for a range
+    time_required: PT40H                # an ISO 8601 duration, 40 hours
+```
+
+`context` is one of IEEE LOM's four; a subject is a name, or a mapping with its code in a scheme, which should be quoted, since YAML reads `45.0600` as the number 45.06 (the run stops on one it reads as a number); `typical_age` is a range as schema.org writes one; and `time_required` an ISO 8601 duration. An EPUB records each subject as a subject, after the keywords, its scheme the authority and its code the term. A cartridge's manifest gives the context as its educational context, beside the one resource type Common Cartridge 1.1 allows, and classifies the book by each subject as a discipline, a classification for each scheme with its description naming the scheme, by the level, and by each objective and prerequisite, which Brightspace's Learning Object Repository can browse by; the manifest stays valid against the profile's schemas. The audience, the resource type, the typical age, and the time required reach no output yet, since Common Cartridge 1.1 has no place for them; they're for the book's own record ([ROADMAP.md](../ROADMAP.md)).
+
 ### Targets
 
 Both `conversion.yaml` and `packaging.yaml` have the same shape: a `defaults:` block, then a `targets:` block naming one or more things to build. A target inherits the defaults and overrides what it needs.
