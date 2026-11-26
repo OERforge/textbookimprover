@@ -7894,19 +7894,25 @@ def generated_pages(tree):
 
 
 def write_generated(target, tree, titles, api, base, work, fragments,
-                    language, env, others=None):
+                    language, env, others=None, project=None):
     """The pages contents asks the run to write: a contents page, as a
     nested list of links, numbered when the book is, an entry's link in
     the language of its title where others (other_languages) gives one
-    other than the book's."""
+    other than the book's; and a colophon, the book's credits and how
+    this copy was made (lib/colophon.py)."""
+    import colophon
     written = []
     for entry in generated_pages(tree):
         kind, name, title = entry
-        if entry.generate != "toc":
+        if entry.generate == "toc":
+            body = toc_blocks(tree, titles, lambda s: s + ".html", others)
+        elif entry.generate == "colophon":
+            body = colophon.blocks(project or {}, *colophon.this_run())
+        else:
             continue
         doc = {"pandoc-api-version": api,
                "meta": {"title": {"t": "MetaString", "c": title}},
-               "blocks": toc_blocks(tree, titles, lambda s: s + ".html", others)}
+               "blocks": body}
         source = os.path.join(work, f"{target.name}-{name}.json")
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
@@ -8452,6 +8458,9 @@ def main():
     # are dated alike (lib/tiversion.py).
     global MOMENT
     MOMENT = tiversion.one_moment()
+    # And one answer for the copy's commit, which the colophon and the
+    # build record both name, found here, outside the sandbox.
+    tiversion.one_commit()
     global LATEXMKRC, ALLOW_ARGS, ALLOW_REMOTE
     LATEXMKRC = args.latexmkrc
     ALLOW_REMOTE = args.allow_remote_pictures
@@ -9138,7 +9147,7 @@ def main():
                 others = other_languages(pages_by_dir[target.pages_dir], language)
                 written[target.name] += write_generated(
                     target, tree, titles, api, base, work,
-                    fragments[target.name], language, tenv, others)
+                    fragments[target.name], language, tenv, others, project)
                 for path in arrange_notes(target, rendered, base, work,
                                           fragments[target.name], language,
                                           tenv, tree, titles, others):

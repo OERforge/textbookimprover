@@ -338,6 +338,9 @@ class Assembly:
         self.blocks = []
         self.depth = 1              # deepest heading level a page sits at
         self.pages = []
+        # A generated colophon's body (lib/colophon.py), which the builder
+        # sets, it knowing the project and the run; none places no page.
+        self.colophon = None
         self.found = {"images": 0, "without_alt": 0, "math": 0, "notes": 0}
         self.notes_placed = False    # the Notes chapter, where contents put it
         self.title_preceded = False  # a one-page book's title heading had something before it
@@ -413,13 +416,18 @@ class Assembly:
         marks where the book's divisions change does it here."""
 
     def add_generated(self, entry, depth):
-        """A page the run writes: the contents page, as blocks."""
+        """A page the run writes, as blocks: the contents page, or a
+        colophon where the builder gave one (colophon)."""
         kind, name, title = entry
         if entry.generate == "toc":
             self.blocks.append(header(depth, inlines(title), page_id(name)))
             self.blocks.extend(toc_blocks(
                 self.tree, self.titles, lambda stem: "#" + page_id(stem),
                 self.other_languages(), xml=True))
+            self.pages.append((name, title, depth))
+        elif entry.generate == "colophon" and self.colophon is not None:
+            self.blocks.append(header(depth, inlines(title), page_id(name)))
+            self.blocks.extend(copy.deepcopy(self.colophon))
             self.pages.append((name, title, depth))
 
     def add_page(self, stem, title_override, depth, heading=True,

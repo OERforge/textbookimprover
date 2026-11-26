@@ -200,6 +200,11 @@ class PageParser(HTMLParser):
         self.blockquotes = 0
         self.lists = []             # every list, in the order it opens
         self._list_stack = []
+        # A colophon's production statement (class oer-colophon), which
+        # names the software and the day and so differs between builds
+        # made with different software: its words counted apart.
+        self.colophon_words = 0
+        self._colophon = 0          # elements open inside it, itself one
 
     # -- text capture ------------------------------------------------------
 
@@ -219,7 +224,9 @@ class PageParser(HTMLParser):
         # not notice a filter that dropped a document's prose, and a count
         # is insensitive to the rewrapping and re-encoding that make a
         # character-level comparison useless here.
-        if not self._skip_depth:
+        if self._colophon:
+            self.colophon_words += len(data.split())
+        elif not self._skip_depth:
             self.words += len(data.split())
 
     # -- elements ----------------------------------------------------------
@@ -233,6 +240,12 @@ class PageParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attr = dict(attrs)
 
+        if self._colophon:
+            if tag not in VOID_ELEMENTS:
+                self._colophon += 1
+        elif "oer-colophon" in (attr.get("class") or "").split() \
+                and tag not in VOID_ELEMENTS:
+            self._colophon = 1
         if tag in SKIP_ELEMENTS:
             self._skip_depth += 1
         # Block structure outside the chrome: a quotation that became a
@@ -330,6 +343,8 @@ class PageParser(HTMLParser):
             return default
 
     def handle_endtag(self, tag):
+        if self._colophon:
+            self._colophon -= 1
         if tag in SKIP_ELEMENTS and self._skip_depth:
             self._skip_depth -= 1
         if tag in LIST_TAGS and self._list_stack and not self._skip_depth:
@@ -387,6 +402,11 @@ def read_page(path, fold=False):
     sig["heading_outline"] = ",".join(str(lv) for lv, _ in parser.headings)
     sig["heading_count"] = len(parser.headings)
     sig["word_count"] = parser.words
+    if parser.colophon_words:
+        # Apart, so that --ignore colophon_word_count compares two builds
+        # made with different software; only where there's one, so that a
+        # saved run's pages compare as they did.
+        sig["colophon_word_count"] = parser.colophon_words
     sig["figure_count"] = parser.figures
     sig["figcaption_count"] = parser.figcaptions
     sig["math_count"] = parser.math

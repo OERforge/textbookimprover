@@ -49,6 +49,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The variable by which a run marks the SOURCE_DATE_EPOCH it set itself,
 # its value the same moment, for the programs it starts (one_moment).
 RUN_EPOCH = "TEXTBOOKIMPROVER_RUN_EPOCH"
+# The commit a run found its copy at, and whether the checkout had
+# changes, "<commit> <changed>", which it sets for the programs it starts
+# (one_commit), so that a colophon written in the sandbox, where Git may
+# not be able to read the checkout, names what the build record does.
+RUN_COMMIT = "TEXTBOOKIMPROVER_RUN_COMMIT"
 
 
 def one_moment(environ=None):
@@ -75,6 +80,22 @@ def given_epoch(environ=None):
     return "" if value and environ.get(RUN_EPOCH) == value else value
 
 
+def one_commit(environ=None):
+    """(commit, changed) for this copy, as _commit finds them, once for a
+    run: what a run that started this one found (RUN_COMMIT), or found
+    now and set in environ (os.environ by default) for every program the
+    run starts."""
+    environ = os.environ if environ is None else environ
+    said = environ.get(RUN_COMMIT, "").split()
+    if len(said) == 2 and said[1] in ("yes", "no", "unknown") \
+            and (said[0] == "none" or (len(said[0]) in (40, 64) and all(
+                c in "0123456789abcdef" for c in said[0]))):
+        return said[0], said[1]
+    commit, changed = _commit(ROOT)
+    environ[RUN_COMMIT] = f"{commit} {changed}"
+    return commit, changed
+
+
 def describe(root=None):
     """What a build record says of this copy of TextbookImprover: its
     version; its commit, or "none" for a copy that isn't a Git checkout or
@@ -82,6 +103,14 @@ def describe(root=None):
     ("yes", "no", or "unknown"); and its files' digest."""
     import stamps
     root = root or ROOT
+    commit, changed = one_commit() if root == ROOT else _commit(root)
+    return {"version": VERSION, "commit": commit, "changed": changed,
+            "digest": stamps.own_digest(root)}
+
+
+def _commit(root):
+    """(commit, changed): the checkout's commit, or "none", and whether
+    its tracked files had changes ("yes", "no", or "unknown")."""
     commit, changed = "none", "unknown"
     git = shutil.which("git")
     if git and os.path.exists(os.path.join(root, ".git")):
@@ -97,5 +126,4 @@ def describe(root=None):
                     changed = "yes" if status.stdout.strip() else "no"
         except (OSError, subprocess.SubprocessError):
             pass
-    return {"version": VERSION, "commit": commit, "changed": changed,
-            "digest": stamps.own_digest(root)}
+    return commit, changed

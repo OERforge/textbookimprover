@@ -70,7 +70,8 @@ from bookassembly import (  # noqa: E402
     INTERMEDIATE, Assembly, load_documents, targets_of, plan_book, load_page,
     page_id, page_title, stringify, wants_title_page,
 )
-from bookcontents import flatten_pages, is_generated, role_of  # noqa: E402
+from bookcontents import flatten_pages, is_generated, generates, role_of  # noqa: E402
+import colophon  # noqa: E402
 import highlighting  # noqa: E402
 import languages  # noqa: E402
 import latexbuild  # noqa: E402
@@ -817,6 +818,7 @@ class PdfAssembly(Assembly):
         self.book_title = book_title
         self.mark_files = mark_files
         self.file_names = set()
+        self.colophon_placed = False
 
     def add_page(self, stem, title_override, depth, heading=True,
                  number=None):
@@ -881,8 +883,11 @@ class PdfAssembly(Assembly):
 
     def _division(self, entry, depth):
         # A generated contents page belongs to whatever division it sits
-        # in; it has no role of its own to change it.
-        if depth != 1 or is_generated(entry):
+        # in; it has no role of its own to change it. A colophon is back
+        # matter, as its type says, but for the latex target, which
+        # writes none (add_generated).
+        if depth != 1 or is_generated(entry) == "toc" or (is_generated(entry)
+                                                          and self.mark_files):
             return
         role = role_of(entry)
         if role == self.division:
@@ -892,7 +897,14 @@ class PdfAssembly(Assembly):
         self.division = role
 
     def add_generated(self, entry, depth):
-        if entry.generate == "toc" and not self.contents:
+        if entry.generate == "colophon":
+            # Not in the latex target's source (mark_files), which reads
+            # back as the book: a colophon there would come back a page of
+            # it, out of date.
+            if not self.mark_files:
+                super().add_generated(entry, depth)
+                self.colophon_placed = self.colophon is not None
+        elif entry.generate == "toc" and not self.contents:
             self.toc_dropped = True
         elif entry.generate == "toc":
             # As the template writes it, depth and all.
@@ -2224,6 +2236,10 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         divisions=document_class(meta) in FRONTMATTER_CLASSES,
         toc_depth=toc_depth, mark_files=as_latex, contents=contents,
         book_language=meta_plain(meta.get("lang")))
+    if generates(tree, "colophon") and not as_latex:
+        # A colophon where contents places one, naming the TeX and the
+        # faces LaTeX set its pages in (lib/colophon.py).
+        assembly.colophon = colophon.blocks(project, *colophon.this_run(), latex=True)
     if len(tree) == 1 and tree[0][0] == "page":
         # The divisions are written where the role changes, between entries,
         # so a book of one page never reached its main matter: numbered i in
@@ -2263,6 +2279,11 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         # project.contents put the contents somewhere; it is there, and
         # not also where the template would put it.
         meta["toc"] = meta_bool(False)
+    if assembly.colophon_placed:
+        # What the colophon's line of faces is counted by, and set with.
+        meta.setdefault("header-includes", {"t": "MetaList", "c": []})
+        meta["header-includes"]["c"].append({"t": "MetaBlocks", "c": [
+            raw_latex(colophon.FACES)]})
     if assembly.toc_dropped:
         print("The book has no contents page: the pdf.metadata file says toc: false, and "
               "the one project.contents generates is left out too.", file=sys.stderr)

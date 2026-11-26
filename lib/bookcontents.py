@@ -606,7 +606,10 @@ PAGE_TYPES = {
     "bibliography": ("back", "doc-bibliography"), "glossary": ("back", "doc-glossary"),
     "index": ("back", "doc-index"), "colophon": ("back", "doc-colophon"),
 }
-GENERATED = {"toc": ("toc", "Contents")}       # kind -> (default name, title)
+# kind -> (default name, title, the page type it is); a colophon is back
+# matter, as an author's page typed colophon is.
+GENERATED = {"toc": ("toc", "Contents", None),
+             "colophon": ("colophon", "Colophon", "colophon")}
 
 
 class Entry(tuple):
@@ -688,7 +691,7 @@ def walk_contents(nodes, available, used, problems, depth=0,
             used.add(name)
             out.append(Entry(("page", name,
                               node.get("title") or GENERATED[kind][1]),
-                             role=role, generate=kind))
+                             role=role, generate=kind, kind=GENERATED[kind][2]))
             continue
         if "items" in node:
             children = walk_contents(node["items"], available, used,
@@ -733,6 +736,12 @@ def role_of(entry):
 
 def is_generated(entry):
     return getattr(entry, "generate", None)
+
+
+def generates(tree, kind):
+    """Whether the tree has a page generate: kind makes."""
+    return any(is_generated(entry) == kind or (entry[0] == "group" and generates(entry[2], kind))
+               for entry in tree)
 
 
 def letter(n):
@@ -926,7 +935,7 @@ def contents_from_tree(tree):
             if not isinstance(node, dict):
                 node = {"page": node}
             node["role"] = role
-        if getattr(entry, "type", None):
+        if getattr(entry, "type", None) and not generate:
             if not isinstance(node, dict):
                 node = {"page": node}
             node["type"] = entry.type

@@ -1640,6 +1640,138 @@ def case_page_licenses(work):
     ]
 
 
+def case_colophon(work):
+    """A colophon where contents places one (generate: colophon): in the
+    HTML target a page of its own, listed on the contents page, with the
+    book's credits from its settings, the settings' words escaped, and
+    the production statement, apart in a div of class oer-colophon,
+    naming TextbookImprover's version and commit, Pandoc's, and the day of
+    SOURCE_DATE_EPOCH; in the EPUB its own back matter, typed colophon
+    with its DPUB-ARIA role, saying the same; in the PDF the same, and the
+    TeX Live LaTeX ran from and the faces it set the pages in, named as
+    the PDF's embedded faces are and none left out; and nothing of it in
+    the latex target's source."""
+    import tiversion
+    import pandocversion
+
+    def fail(message):
+        raise AssertionError(message)
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    pdf_too = shutil.which("lualatex") is not None
+    if not pdf_too:
+        print("  skip  lualatex not installed; the PDF's colophon isn't checked")
+    write("project.yaml", "project:\n  identifier: org.example.colophon\n"
+          "  title: 'Economics <b>& Co'\n  subtitle: A Primer\n"
+          "  authors: [{name: Ann Lee, orcid: 0000-0002-1825-0097}, Bo Chen]\n"
+          "  contributors: [{name: Ed Fox, role: ill}]\n"
+          "  publisher: 'A & B Press, 100% $5 #1'\n"
+          "  copyright: {holder: Ann Lee, year: '2026'}\n  license: CC-BY-4.0\n"
+          "  doi: 10.5281/zenodo.1234567\n"
+          "  contents:\n    - generate: toc\n    - one\n    - generate: colophon\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n"
+          "  epub:\n    format: epub3\n"
+          + ("  pdf:\n    format: pdf\n    pdf:\n      metadata: book-meta.yaml\n"
+             "  tex:\n    format: latex\n" if pdf_too else ""))
+    # No contents in the PDF, whose file would have LaTeX run again
+    # whatever the colophon asked.
+    write("book-meta.yaml", "---\ntoc: false\n---\n")
+    write("src/book/one.md", "# One\n\nA page with $x \\le y$ and `code`.\n")
+    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
+                           "--quiet"], cwd=work, capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL, env=dict(os.environ,
+                                                             SOURCE_DATE_EPOCH="1764115200"))
+
+    def read(*parts):
+        path = os.path.join(work, "output", *parts)
+        if not os.path.isfile(path):
+            return ""
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+
+    def flat(markup):
+        return re.sub(r" ([.,])", r"\1", " ".join(re.sub(r"<[^>]+>", " ", markup).split()))
+    page = read("html", "colophon.html")
+    body = page.split("<main>")[-1].split("</main>")[0]
+    commit, changed = tiversion.one_commit()
+    said = "" if commit == "none" else f" (commit {commit[:7]}" + (
+        ", with changes" if changed == "yes" else "") + ")"
+    made = (f"Made with TextbookImprover {tiversion.VERSION}{said} and Pandoc "
+            + ".".join(str(n) for n in pandocversion.version()) + " on November 26, 2025.")
+    credits = ("Economics &lt;b&gt;&amp; Co: A Primer By Ann Lee and Bo Chen. "
+               "Illustrator: Ed Fox. Published by A &amp; B Press, 100% $5 #1. "
+               "Copyright 2026 Ann Lee. Licensed under Creative Commons Attribution 4.0 "
+               "International. DOI: https://doi.org/10.5281/zenodo.1234567 To reuse this "
+               "book, credit it as: Economics &lt;b&gt;&amp; Co by Ann Lee and Bo Chen, "
+               "licensed under CC BY 4.0.")
+    epub = os.path.join(work, "output", "epub", "org.example.colophon.epub")
+    chapter = ""
+    if os.path.isfile(epub):
+        with zipfile.ZipFile(epub) as archive:
+            chapter = next((archive.read(n).decode("utf-8") for n in archive.namelist()
+                            if "/text/" in n and 'id="page-colophon"' in archive.read(n)
+                            .decode("utf-8")), "")
+    checks = [
+        ("the run succeeds", lambda: done.returncode == 0 or fail(done.stderr[-1500:])),
+        ("the HTML target's page: the credits, the settings' words escaped, and the "
+         "production statement apart",
+         lambda: flat(body).startswith("Colophon " + credits)
+         and re.search(r'<div class="oer-colophon">\s*<p>(.*?)</p>\s*</div>', body, re.S)
+         and flat(re.search(r'<div class="oer-colophon">\s*<p>(.*?)</p>', body,
+                            re.S).group(1)) == made
+         and 'href="https://orcid.org/0000-0002-1825-0097"' in body
+         or fail(flat(body))),
+        ("listed on the contents page",
+         lambda: 'href="colophon.html"' in read("html", "toc.html") or fail(read("html", "toc.html"))),
+        ("the EPUB's own back matter, typed colophon with its role, saying the same",
+         lambda: '<body epub:type="backmatter">' in chapter
+         and re.search(r'<section id="page-colophon"[^>]*epub:type="colophon"'
+                       r'[^>]*role="doc-colophon"', chapter)
+         and credits in flat(chapter) and made in flat(chapter) or fail(flat(chapter)[-900:])),
+    ]
+    if not pdf_too:
+        return checks
+    pdf = os.path.join(work, "output", "pdf", "org.example.colophon.pdf")
+    text, faces = "", set()
+    if os.path.isfile(pdf):
+        import pikepdf
+        import pdftext
+        text = " ".join(" ".join(pdftext.marked_text(pdf).values()).split())
+        with pikepdf.open(pdf) as document:
+            for each in document.pages:
+                for font in (each.Resources.get("/Font") or {}).values():
+                    base = str(font.get("/BaseFont", ""))
+                    faces.add(base.split("+")[-1].split("-")[0].lstrip("/"))
+    line = re.search(r"Set with LuaLaTeX from (TeX Live [^ ]+) in (.*?)\.", text)
+    named = set(re.split(r", and |, | and ", line.group(2))) if line else set()
+    # The PDF's own LaTeX, as build-pdf.py writes it by hand.
+    subprocess.run(["python3", os.path.join(BIN, "build-pdf.py"), "-d", work, "--latex-only"],
+                   cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    latex = read("pdf", "book.tex")
+    tex = "".join(read("tex", name) for name in os.listdir(os.path.join(work, "output", "tex"))
+                  if name.endswith(".tex")) if os.path.isdir(os.path.join(work, "output",
+                                                                            "tex")) else ""
+    checks += [
+        ("the PDF's: the credits, the statement, the TeX Live, and every face it embeds by "
+         "its family, none it doesn't",
+         lambda: "Illustrator: Ed Fox." in text and "A & B Press, 100% $5 #1" in text
+         and made in text and line and faces and len(named) == len(faces)
+         and all(any(n.replace(" ", "") == face or face.startswith("LM")
+                     and n.startswith("Latin Modern") for n in named) for face in faces)
+         or fail(repr((text[-700:], faces)))),
+        ("in the PDF's back matter", lambda: re.search(
+            r"\\backmatter\s*\\chapter\{Colophon\}", latex) or fail(latex[-1500:])),
+        ("nothing of it in the latex target's source",
+         lambda: tex and "Colophon" not in tex and "OERColophon" not in tex
+         and "\\backmatter" not in tex or fail(tex[-600:])),
+    ]
+    return checks
+
+
 def case_xmp_pdf(work):
     """The book's facts in the PDF's XMP, as LaTeX's own XMP code takes them
     through hyperref's keys: a title and a copyright line with commas each
@@ -13891,6 +14023,7 @@ CASES = [
     ("a part's own files stripped with --strip-sources", case_strip_sources),
     ("what the part's files can do besides be read, listed", case_active_content),
     ("a license page by page", case_page_licenses),
+    ("a colophon, the book's credits and how a copy was made", case_colophon),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
@@ -14007,6 +14140,7 @@ SLOW = {"where the book is named", "an HTML source", "two files, one page",
         "what a run shows inside its sandbox",
         "the LaTeX a book supplies reads only what its part may",
         "the book's facts in the PDF's XMP", "a picture's metadata taken out of the outputs",
+        "a colophon, the book's credits and how a copy was made",
         "a target built again only when what it's built from changed"}
 
 

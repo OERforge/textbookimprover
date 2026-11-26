@@ -62,7 +62,8 @@ try:
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
-from bookcontents import number_tree, is_generated, PAGE_TYPES  # noqa: E402
+from bookcontents import number_tree, is_generated, generates, PAGE_TYPES  # noqa: E402
+import colophon  # noqa: E402
 import headercells  # noqa: E402
 import highlighting  # noqa: E402
 import languages  # noqa: E402
@@ -701,7 +702,7 @@ class EpubAssembly(Assembly):
         self.formula_texts = {}   # a heading formula's TeX -> its text, every page's
 
     def before_entry(self, entry, depth):
-        kind = "contents" if is_generated(entry) else entry[0]
+        kind = "contents" if is_generated(entry) == "toc" else entry[0]
         self.marks.append((len(self.blocks), depth, getattr(entry, "role", None),
                            getattr(entry, "type", None), kind))
 
@@ -1248,6 +1249,10 @@ def build(paths, name, resolved, keep, intermediates=None):
     assembly = EpubAssembly(pages_dir, placed, tree, titles,
                             notes_title=" ".join(str(resolved["notes.title"] or "").split())
                             or "Notes", book_language=project["language"])
+    # A colophon where contents places one: the credits, and how this
+    # copy was made (lib/colophon.py).
+    if generates(tree, "colophon"):
+        assembly.colophon = colophon.blocks(project, *colophon.this_run())
     if len(tree) == 1 and tree[0][0] == "page":
         assembly.add_single_page(tree[0][1], tree[0][2])
     else:

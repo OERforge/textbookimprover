@@ -549,7 +549,9 @@ keys:
       its type implies, and a type isn't inherited. An entry "generate: toc" is a
       page the run writes, a full table of contents with links, named
       toc unless "name" says otherwise and titled Contents unless "title"
-      does.
+      does; "generate: colophon" is one too, the book's credits and how
+      the copy was made, back matter, named colophon and titled Colophon
+      unless they say otherwise.
       Left empty, tools that need an order guess one and say so.
 
   parts:

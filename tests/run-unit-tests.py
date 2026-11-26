@@ -2586,6 +2586,11 @@ def check_tiversion():
         os.makedirs(os.path.join(copy, folder))
     here = tiversion.describe()
     elsewhere = tiversion.describe(copy)
+    sha = "0123456789abcdef" * 2 + "01234567"
+    said = {tiversion.RUN_COMMIT: sha + " yes"}
+    taken = tiversion.one_commit(said)
+    bad = {tiversion.RUN_COMMIT: "$(rm -rf) yes"}
+    found = tiversion.one_commit(bad)
     return [
         ("the person's SOURCE_DATE_EPOCH is the run's moment, untouched",
          lambda: given_moment == (1763251201, "SOURCE_DATE_EPOCH")
@@ -2606,6 +2611,156 @@ def check_tiversion():
               or not os.path.exists(os.path.join(ROOT, ".git")))
          and elsewhere["commit"] == "none" and elsewhere["changed"] == "unknown"
          and elsewhere["digest"] != here["digest"] or fail(repr((here, elsewhere)))),
+        ("the commit a run found taken by the programs it starts, and one that isn't a "
+         "commit found again and set",
+         lambda: taken == (sha, "yes") and found == (here["commit"], here["changed"])
+         and bad[tiversion.RUN_COMMIT] == f"{here['commit']} {here['changed']}"
+         or fail(repr((taken, found, bad)))),
+    ]
+
+
+def check_colophon():
+    """lib/colophon.py: the credits from the project's settings, each in
+    its place and words (the people by their roles, ORCID and ROR links, a
+    role's term plural for two, the series, the copyright line and the
+    license by name and deed, except where otherwise noted, the ISBNs, the
+    DOI, the address, the contact, the funders, and the credit to give);
+    CC0 dedicated and no credit asked, another license as given; the
+    production statement, its commit short, with changes said, none left
+    out, in its own div; marked English in another language; the PDF's
+    line, its Lua with no percent sign or tilde for TeX to take; and the
+    generated entry typed colophon, back matter, and written back without
+    its type; and util/compare-output.py counting its words apart."""
+    import importlib.util
+    import bookcontents
+    import colophon
+
+    def text(node):
+        if isinstance(node, list):
+            return "".join(text(n) for n in node)
+        if not isinstance(node, dict):
+            return ""
+        kind = node.get("t")
+        if kind == "Str":
+            return node["c"]
+        if kind == "Space":
+            return " "
+        if kind in ("Emph", "Para", "Plain"):
+            return ("*" if kind == "Emph" else "") + text(node["c"]) + (
+                "*" if kind == "Emph" else "")
+        if kind == "Link":
+            return "[" + text(node["c"][1]) + "](" + node["c"][2][0] + ")"
+        if kind == "Div":
+            return "<" + " ".join(node["c"][0][1]) + "|" + " ".join(
+                f"{k}={v}" for k, v in node["c"][0][2]) + ">" + "\n".join(
+                text(b) for b in node["c"][1]) + "</>"
+        if kind == "RawInline":
+            return node["c"][1]
+        return ""
+    project = {
+        "title": "Principles <b>& Co", "subtitle": "A Primer",
+        "authors": [{"name": "Ann Lee", "orcid": "0000-0002-1825-0097"}, "Bo Chen", "Cy Dee"],
+        "adapters": ["Rob Szarka"], "editors": ["Ed Itor"],
+        "contributors": [{"name": "Ed Fox", "role": "ill"}, {"name": "Fay Gu",
+                                                             "role": "illustrator"},
+                         {"name": "Gil Ho", "role": "author of introduction, etc."}],
+        "publisher": {"name": "OpenStax", "ror": "05dxps055"},
+        "place": {"city": "Houston", "country": "USA"},
+        "series": {"name": "Econ", "position": "3"},
+        "copyright": {"holder": "Rice University", "year": "2024"},
+        "license": "CC-BY-4.0", "licenses": [{"pages": ["one"], "license": "CC-BY-SA-4.0",
+                                               "title": "X"}],
+        "isbn": {"epub": "9781234567897", "pdf": "0-306-40615-2"},
+        "doi": "10.5281/zenodo.1234567", "url": "https://example.org/book",
+        "contact": "fix@example.edu",
+        "funding": [{"funder": "NSF", "award": {"number": "123", "title": "Open"}}, "Arnold"],
+        "language": "en"}
+    software = {"version": "0.11", "commit": "c9dff55" + "0" * 33, "changed": "no"}
+    full = [text(b) for b in colophon.blocks(project, software, (3, 14), 1764115200)]
+    pdf = [text(b) for b in colophon.blocks(project, software, (3, 14), 1764115200,
+                                            latex=True)]
+    plain = {"title": "Book", "authors": ["A"], "license": "CC0-1.0", "language": "es-MX"}
+    cc0 = [text(b) for b in colophon.blocks(plain, dict(software, changed="yes"), (3, 14), 0)]
+    other = [text(b) for b in colophon.blocks(
+        {"title": "Book", "license": "MIT"}, dict(software, commit="none"), (), 0)]
+    expected = [
+        "*Principles <b>& Co: A Primer*",
+        "By [Ann Lee](https://orcid.org/0000-0002-1825-0097), Bo Chen, and Cy Dee.",
+        "Adapted by Rob Szarka.", "Edited by Ed Itor.",
+        "Illustrators: Ed Fox and Fay Gu.", "Author of introduction, etc.: Gil Ho.",
+        "Published by [OpenStax](https://ror.org/05dxps055), Houston, USA.",
+        "Part of the series *Econ*, number 3.",
+        "Copyright 2024 Rice University. Except where otherwise noted, licensed under "
+        "[Creative Commons Attribution 4.0 International]"
+        "(https://creativecommons.org/licenses/by/4.0/).",
+        "ISBN 9781234567897 (EPUB) and ISBN 9780306406157 (PDF).",
+        "DOI: [https://doi.org/10.5281/zenodo.1234567](https://doi.org/10.5281/zenodo.1234567)",
+        "Online at [https://example.org/book](https://example.org/book).",
+        "To report a mistake, write to [fix@example.edu](mailto:fix@example.edu).",
+        "Funded by NSF (award 123 Open) and Arnold.",
+        "To reuse this book, credit it as: [*Principles <b>& Co*]"
+        "(https://doi.org/10.5281/zenodo.1234567) by "
+        "[Ann Lee](https://orcid.org/0000-0002-1825-0097), Bo Chen, and Cy Dee, licensed "
+        "under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).",
+        "<oer-colophon|>Made with [TextbookImprover](https://github.com/OERforge/"
+        "textbookimprover) 0.11 (commit c9dff55) and Pandoc 3.14 on November 26, 2025.</>"]
+    entries = []
+    tree = bookcontents.walk_contents(
+        [{"generate": "colophon"}, {"generate": "colophon", "name": "made", "title": "How"},
+         {"generate": "toc"}], set(), set(), entries)
+    written = bookcontents.contents_from_tree(tree)
+    spec = importlib.util.spec_from_file_location(
+        "compare_output", os.path.join(ROOT, "util", "compare-output.py"))
+    compare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(compare)
+    work = scratch("colophon-")
+    page = os.path.join(work, "page.html")
+    with open(page, "w", encoding="utf-8") as fh:
+        fh.write("<html><body><p>One two three.</p><div class=\"x oer-colophon\"><p>Made "
+                 "<em>with</em> it<br/> today.</p><table><tr><td>t</td></tr></table></div>"
+                 "<p>Four.</p></body></html>")
+    signed = compare.signature(page)
+    # Each \\directlua's Lua, to its matching brace.
+    luas = []
+    for found in re.finditer(r"\\directlua\{", colophon.FACES):
+        depth, at = 1, found.end()
+        while depth and at < len(colophon.FACES):
+            depth += {"{": 1, "}": -1}.get(colophon.FACES[at], 0)
+            at += 1
+        luas.append(colophon.FACES[found.end():at - 1])
+    return [
+        ("the credits from the settings, each in its place and words",
+         lambda: full == expected or fail("\n".join(full))),
+        ("the PDF's has its TeX and faces after its own words",
+         lambda: pdf[:-1] == expected[:-1] and pdf[-1] == expected[-1][:-3]
+         + "\n\\OERColophonSet</>" or fail(repr(pdf[-1]))),
+        ("CC0 dedicated, no credit asked; with changes said; marked English in Spanish",
+         lambda: cc0 == ["<|lang=en>*Book*\nBy A.\nDedicated to the public domain under "
+                         "[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/"
+                         "1.0/).\n<oer-colophon|>Made with [TextbookImprover](https://github"
+                         ".com/OERforge/textbookimprover) 0.11 (commit c9dff55, with changes) "
+                         "and Pandoc 3.14 on January 1, 1970.</></>"] or fail(repr(cc0))),
+        ("another license as given, no commit and no Pandoc left out",
+         lambda: other == ["*Book*", "Under the license MIT.",
+                           "<oer-colophon|>Made with [TextbookImprover](https://github.com/"
+                           "OERforge/textbookimprover) 0.11 on January 1, 1970.</>"]
+         or fail(repr(other))),
+        ("the faces' Lua holds no percent sign or tilde, which TeX would take",
+         lambda: len(luas) == 4 and all("%" not in lua and "~" not in lua for lua in luas)
+         and "Rerun" in luas[0] or fail(repr(luas))),
+        ("a generated colophon typed colophon, back matter, named and titled as asked, and "
+         "written back without its type",
+         lambda: not entries and [(e[1], e[2], e.type, bookcontents.role_of(e)) for e in tree]
+         == [("colophon", "Colophon", "colophon", "back"), ("made", "How", "colophon", "back"),
+             ("toc", "Contents", None, "main")]
+         and written == [{"generate": "colophon"}, {"generate": "colophon", "name": "made",
+                                                    "title": "How"}, {"generate": "toc"}]
+         and bookcontents.generates([("group", "G", tree[:1])], "colophon")
+         and not bookcontents.generates(tree[2:], "colophon")
+         or fail(repr((entries, written)))),
+        ("compare-output.py counts a colophon's words apart, the rest as before",
+         lambda: signed["word_count"] == 4 and signed["colophon_word_count"] == 5
+         and signed["table_count"] == 1 or fail(repr(signed))),
     ]
 
 
@@ -14501,6 +14656,7 @@ GROUPS = [
     ("lib/activecontent.py, what a file can do besides be read", check_activecontent),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("a JVM a run starts given the run's temporary folder", check_java_temp),
+    ("lib/colophon.py, a book's credits and how a copy was made", check_colophon),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
     ("what a page names by URL", check_named_by_url),
