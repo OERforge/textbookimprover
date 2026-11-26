@@ -129,6 +129,19 @@ keys:
       its own navigation and the EPUB has its reading system's. A page
       from the pass-through directory is left as it stands.
 
+  colophon:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    stage: render
+    description: >
+      For a target with format html, epub3, pdf, or docx: whether the
+      colophon that generate: colophon in the book's contents places is
+      written in this target. off leaves it out of the target, its
+      contents page, and its menu. A target with format latex, markdown,
+      asciidoc, or source never writes one, since its files read back as
+      the book.
+
   compatibility_mode:
     type: enum
     values: ["keep", "15"]

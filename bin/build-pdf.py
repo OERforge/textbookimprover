@@ -70,7 +70,8 @@ from bookassembly import (  # noqa: E402
     INTERMEDIATE, Assembly, load_documents, targets_of, plan_book, load_page,
     page_id, page_title, stringify, wants_title_page,
 )
-from bookcontents import flatten_pages, is_generated, generates, role_of  # noqa: E402
+from bookcontents import (flatten_pages, is_generated, generates, leave_out,  # noqa: E402
+                          role_of)
 import colophon  # noqa: E402
 import highlighting  # noqa: E402
 import languages  # noqa: E402
@@ -79,6 +80,7 @@ from latexbuild import (  # noqa: E402
     ENGINE, PDF_MACROS as HEADER, UA1_LINKS, is_ua1, label_prefixes, math_setup,
 )
 import pagefooter  # noqa: E402
+import identifiers  # noqa: E402
 import people  # noqa: E402
 import pdfparagraphs  # noqa: E402
 import pdfretag  # noqa: E402
@@ -1031,7 +1033,9 @@ def xmp_setup(project, own=None):
         else project.get("subtitle"))
     key("pdfpublisher", people.name(project.get("publisher")), listed=True)
     isbn = (project.get("isbn") or {}).get("pdf")
-    key("pdfidentifier", "urn:isbn:" + isbn if isbn else "")
+    # A URN's ISBN is its 13 digits, the setting's hyphens being for a
+    # reader (the colophon).
+    key("pdfidentifier", "urn:isbn:" + identifiers.isbn(isbn) if isbn else "")
     key("pdfdoi", project.get("doi"))
     key("pdfurl", project.get("url"))
     # The copyright line, and where some pages have a license of their
@@ -2212,6 +2216,8 @@ def build(base, name, resolved, keep, intermediates=None, latex_only=False,
         print(f"WARNING: {warning}", file=sys.stderr)
     pages_dir = P(base).pages(own=intermediates)
     tree, titles, placed, numbered = plan_book(pages_dir, resolved, "PDF")
+    if str(resolved["colophon"]) == "off":
+        tree = leave_out(tree, "colophon")
     real = [s for s in placed if os.path.exists(
         os.path.join(pages_dir, s + INTERMEDIATE))]
 

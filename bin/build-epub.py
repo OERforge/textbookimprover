@@ -62,7 +62,8 @@ try:
 except ImportError:
     sys.exit("Cannot find the configuration library. It should be in a "
              "lib/ directory beside bin/.")
-from bookcontents import number_tree, is_generated, generates, PAGE_TYPES  # noqa: E402
+from bookcontents import (number_tree, is_generated, generates, leave_out,  # noqa: E402
+                          PAGE_TYPES)
 import colophon  # noqa: E402
 import headercells  # noqa: E402
 import highlighting  # noqa: E402
@@ -71,6 +72,7 @@ import pagefooter  # noqa: E402
 import pandocversion  # noqa: E402
 import pandocrun
 import education  # noqa: E402
+import identifiers  # noqa: E402
 import licenses  # noqa: E402
 import people  # noqa: E402
 import projectpaths  # noqa: E402
@@ -187,6 +189,10 @@ def book_metadata(project, resolved, found, paths):
     others = [(scheme, value) for scheme, value in (
         ("DOI", project.get("doi")), ("ISBN-13", (project.get("isbn") or {}).get("epub")))
         if str(value or "").strip()]
+    # An ISBN as its 13 digits, as ONIX has it, the setting's hyphens
+    # being for a reader (the colophon).
+    others = [(scheme, identifiers.isbn(value) if scheme == "ISBN-13" else value)
+              for scheme, value in others]
     if others:
         meta["identifier"] = {"t": "MetaList", "c": [meta_string(project["identifier"])] + [
             {"t": "MetaMap", "c": {"scheme": meta_string(scheme), "text": meta_string(value)}}
@@ -1242,6 +1248,8 @@ def build(paths, name, resolved, keep, intermediates=None):
     # inside them are relative to the content directory either way.
     pages_dir = paths.pages(own=intermediates)
     tree, titles, placed, numbered = plan_book(pages_dir, resolved, "EPUB")
+    if str(resolved["colophon"]) == "off":
+        tree = leave_out(tree, "colophon")
     real = [s for s in placed if os.path.exists(paths.page(s, own=intermediates))]
     if numbered:
         number_tree(tree, titles)

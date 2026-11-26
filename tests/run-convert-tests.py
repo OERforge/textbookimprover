@@ -1647,8 +1647,11 @@ def case_colophon(work):
     book's credits from its settings, the settings' words escaped, and
     the production statement, apart in a div of class oer-colophon,
     naming TextbookImprover's version and commit, Pandoc's, and the day of
-    SOURCE_DATE_EPOCH; in the EPUB its own back matter, typed colophon
-    with its DPUB-ARIA role, saying the same; in the PDF the same, and the
+    SOURCE_DATE_EPOCH as ISO 8601 writes it, an ISBN hyphenated as its
+    setting is; in the EPUB its own back matter, typed colophon with its
+    DPUB-ARIA role, saying the same, the ISBN its 13 digits in the
+    package; in the Word target a file of its own; none in an HTML or
+    an EPUB target whose colophon is off; in the PDF the same, and the
     TeX Live LaTeX ran from and the faces it set the pages in, named as
     the PDF's embedded faces are and none left out; and nothing of it in
     the latex target's source."""
@@ -1672,12 +1675,17 @@ def case_colophon(work):
           "  contributors: [{name: Ed Fox, role: ill}]\n"
           "  publisher: 'A & B Press, 100% $5 #1'\n"
           "  copyright: {holder: Ann Lee, year: '2026'}\n  license: CC-BY-4.0\n"
-          "  doi: 10.5281/zenodo.1234567\n"
+          "  doi: 10.5281/zenodo.1234567\n  isbn: {epub: 978-0-306-40615-7}\n"
           "  contents:\n    - generate: toc\n    - one\n    - generate: colophon\n")
     write("conversion.yaml", "targets:\n  html:\n    format: html\n"
-          "  epub:\n    format: epub3\n"
+          "  epub:\n    format: epub3\n  word:\n    format: docx\n"
+          "  bare:\n    format: html\n    colophon: 'off'\n"
+          "  plain:\n    format: epub3\n    colophon: 'off'\n"
           + ("  pdf:\n    format: pdf\n    pdf:\n      metadata: book-meta.yaml\n"
              "  tex:\n    format: latex\n" if pdf_too else ""))
+    # A cartridge of the pages of the target whose colophon is off.
+    write("packaging.yaml", "targets:\n  cartridge:\n    format: common-cartridge\n"
+          "    includes: [bare]\n")
     # No contents in the PDF, whose file would have LaTeX run again
     # whatever the colophon asked.
     write("book-meta.yaml", "---\ntoc: false\n---\n")
@@ -1702,17 +1710,31 @@ def case_colophon(work):
     said = "" if commit == "none" else f" (commit {commit[:7]}" + (
         ", with changes" if changed == "yes" else "") + ")"
     made = (f"Made with TextbookImprover {tiversion.VERSION}{said} and Pandoc "
-            + ".".join(str(n) for n in pandocversion.version()) + " on November 26, 2025.")
+            + ".".join(str(n) for n in pandocversion.version()) + " on 2025-11-26.")
     credits = ("Economics &lt;b&gt;&amp; Co: A Primer By Ann Lee and Bo Chen. "
                "Illustrator: Ed Fox. Published by A &amp; B Press, 100% $5 #1. "
                "Copyright 2026 Ann Lee. Licensed under Creative Commons Attribution 4.0 "
-               "International. DOI: https://doi.org/10.5281/zenodo.1234567 To reuse this "
+               "International. ISBN 978-0-306-40615-7 (EPUB). DOI: "
+               "https://doi.org/10.5281/zenodo.1234567 To reuse this "
                "book, credit it as: Economics &lt;b&gt;&amp; Co by Ann Lee and Bo Chen, "
                "licensed under CC BY 4.0.")
     epub = os.path.join(work, "output", "epub", "org.example.colophon.epub")
+    plain = os.path.join(work, "output", "plain", "org.example.colophon.epub")
+    plain_names = zipfile.ZipFile(plain).namelist() if os.path.isfile(plain) else None
+    plain_text = "".join(zipfile.ZipFile(plain).read(n).decode("utf-8", "replace")
+                         for n in plain_names) if plain_names else ""
+    word = os.path.join(work, "output", "word", "colophon.docx")
+    word_text = ""
+    if os.path.isfile(word):
+        with zipfile.ZipFile(word) as archive:
+            word_text = flat(re.sub(r"</w:p>", " ", archive.read("word/document.xml")
+                                    .decode("utf-8")))
+    opf = ""
     chapter = ""
     if os.path.isfile(epub):
         with zipfile.ZipFile(epub) as archive:
+            opf = next((archive.read(n).decode("utf-8") for n in archive.namelist()
+                        if n.endswith(".opf")), "")
             chapter = next((archive.read(n).decode("utf-8") for n in archive.namelist()
                             if "/text/" in n and 'id="page-colophon"' in archive.read(n)
                             .decode("utf-8")), "")
@@ -1733,6 +1755,23 @@ def case_colophon(work):
          and re.search(r'<section id="page-colophon"[^>]*epub:type="colophon"'
                        r'[^>]*role="doc-colophon"', chapter)
          and credits in flat(chapter) and made in flat(chapter) or fail(flat(chapter)[-900:])),
+        ("the ISBN its 13 digits in the EPUB's package, as ONIX has it",
+         lambda: ">9780306406157</dc:identifier>" in opf or fail(opf[:2000])),
+        ("the Word target's a file of its own, saying the same",
+         lambda: os.path.isfile(os.path.join(work, "output", "word", "one.docx"))
+         and credits in word_text
+         and made in word_text or fail(word_text[-900:])),
+        ("none in an HTML target or an EPUB whose colophon is off, nor on its contents page, "
+         "nor in a cartridge of its pages",
+         lambda: os.path.isfile(os.path.join(work, "output", "bare", "toc.html"))
+         and "one.html" in read("packages", "cartridge", "imsmanifest.xml")
+         and "colophon.html" not in read("packages", "cartridge", "imsmanifest.xml")
+         and ">Colophon<" not in read("packages", "cartridge", "imsmanifest.xml")
+         and not os.path.exists(os.path.join(work, "output", "bare", "colophon.html"))
+         and "colophon" not in read("bare", "toc.html").lower()
+         and plain_names and "Colophon" not in plain_text
+         and "doc-colophon" not in plain_text
+         or fail(repr((plain_names, read("bare", "toc.html")[-600:])))),
     ]
     if not pdf_too:
         return checks

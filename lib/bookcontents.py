@@ -744,6 +744,32 @@ def generates(tree, kind):
                for entry in tree)
 
 
+def generated_entries(tree):
+    """Every entry in the tree that a run generates, in reading order."""
+    out = []
+    for entry in tree:
+        if is_generated(entry):
+            out.append(entry)
+        elif entry[0] == "group":
+            out += generated_entries(entry[2])
+    return out
+
+
+def leave_out(tree, kind):
+    """The tree without the pages generate: kind makes, a group's entry
+    kept with what it carries (its role, number, and type)."""
+    out = []
+    for entry in tree:
+        if is_generated(entry) == kind:
+            continue
+        if entry[0] == "group":
+            kept = Entry((entry[0], entry[1], leave_out(entry[2], kind)))
+            kept.__dict__.update(entry.__dict__)
+            entry = kept
+        out.append(entry)
+    return out
+
+
 def letter(n):
     """1 -> A, 26 -> Z, 27 -> AA."""
     out = ""

@@ -114,7 +114,7 @@ try:
     from bookcontents import (guess_contents, walk_contents, number_tree,
                               is_generated, toc_blocks, stem_title, declared_titles,
                               expand_split_sources, contents_from_tree, opener_types,
-                              flatten_pages)
+                              flatten_pages, leave_out)
     from names import safe_path, safe_stem, is_safe, output_path, by_url
     import sidecars
     from sidecars import math_keep_rows
@@ -7179,6 +7179,28 @@ def deck_presentations(target, stems, base, language):
     return written
 
 
+def colophon_documents(target, pages, work, project):
+    """[(file stem, intermediate)] for the colophons contents places, as a
+    docx target writes them: each a file of its own, whatever merge says,
+    since it's no page of the book's (lib/colophon.py)."""
+    import colophon
+    tree, _titles, api, _problems, _expanded = unsaid_tree(project, pages)
+    out = []
+    for entry in generated_pages(tree):
+        if entry.generate != "colophon":
+            continue
+        _kind, name, title = entry
+        doc = {"pandoc-api-version": api,
+               "meta": {"title": {"t": "MetaString", "c": title},
+                        "lang": {"t": "MetaString", "c": project["language"]}},
+               "blocks": colophon.blocks(project, *colophon.this_run())}
+        source = os.path.join(work, f"{target.name}-generated-{name}.json")
+        with open(source, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        out.append((name, source))
+    return out
+
+
 def render_markdown(target, pages, base, work, project, env, losses=None):
     """Markdown or AsciiDoc files as source: what the author decided, in
     Pandoc's own flavor of each, and nothing the filter derived. Or Word
@@ -7233,6 +7255,8 @@ def render_markdown(target, pages, base, work, project, env, losses=None):
     written = []
     asciidoc = target.format == "asciidoc"
     word = target.format == "docx"
+    if word and str(target["colophon"]) != "off":
+        jobs += colophon_documents(target, pages, work, project)
     added = {"compat": 0, "tooltips": 0, "decorative": 0, "first_columns": 0}
     # The footer setting on every page (pagefooter): a Word file's own
     # footer, its words; the end of a Markdown or AsciiDoc file's text,
@@ -9146,6 +9170,8 @@ def main():
                 tree, titles, api = book_tree(
                     project, pages_by_dir[target.pages_dir],
                     numbering_for(target, project))
+                if str(target["colophon"]) == "off":
+                    tree = leave_out(tree, "colophon")
                 if numbering_for(target, project):
                     number_page_headings(target, tree, titles, page_formula_texts(
                         pages_by_dir[target.pages_dir]))

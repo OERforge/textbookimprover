@@ -74,7 +74,8 @@ except ImportError:
 # EPUB assembler builds its table of contents from the same declaration.
 from bookcontents import (  # noqa: E402
     natural_key, chapter_of, within_chapter_key, unrecognized_roles,
-    guess_contents, walk_contents, flatten_pages, contents_from_tree,
+    guess_contents, walk_contents, flatten_pages, contents_from_tree, is_generated,
+    leave_out, generated_entries,
     expand_split_sources, page_title, page_provenance, page_role,
     typed_by_title, TITLE_RE, META_RE,
     stem_title, slugify, clean_title, number_tree, numbered_title, opener_types,
@@ -1634,6 +1635,12 @@ def main():
             for stem in extra:
                 print(f"  {stem}.html", file=sys.stderr)
             print("  Use --include-all-html to append them.", file=sys.stderr)
+
+    # A colophon the HTML target leaves out (its colophon: off) isn't in
+    # the package either.
+    if stems and any(is_generated(entry) == "colophon" and not os.path.exists(
+            os.path.join(pages_dir, entry[1] + ".html")) for entry in generated_entries(tree)):
+        tree = leave_out(tree, "colophon")
 
     # Under --init with no pages to read, contents can only fail to match.
     for problem in problems if stems or not args.init else []:

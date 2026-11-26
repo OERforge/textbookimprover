@@ -34,7 +34,7 @@ The book's DOI, bare (10.5281/zenodo.1234567) or as its address, checked for its
 
 ## isbn
 
-The book's ISBNs, one for each format that has its own: each an ISBN-13 or an ISBN-10, its hyphens as you like, checked for its check digit and kept as its 13 digits, an ISBN-10 as the ISBN-13 it becomes. The EPUB records its own, epub, as an identifier typed ISBN-13, and the PDF its own, pdf, in its XMP; the others are kept for the formats TextbookImprover doesn't make, and for the book's records.
+The book's ISBNs, one for each format that has its own: each an ISBN-13 or an ISBN-10, checked for its check digit, an ISBN-10 taken as the ISBN-13 it becomes. Write it without hyphens, or with hyphens or spaces between its parts as the ISBN agency gives them (978-0-306-40615-7: the prefix, the registration group, the registrant, the publication, and the check digit); a colophon shows it hyphenated as written, and hyphens anywhere else are refused. The EPUB records its own, epub, as an identifier typed ISBN-13, and the PDF its own, pdf, in its XMP, each as its 13 digits; the others are kept for the formats TextbookImprover doesn't make, and for the book's records.
 
 **`isbn.epub`**—`isbn`; default `""` (empty)
 

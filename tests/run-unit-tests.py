@@ -1763,13 +1763,26 @@ def check_page_licenses():
 
 def check_book_identifiers():
     """lib/identifiers.py: a DOI bare from its forms, an ISBN-13 and an
-    ISBN-10 as 13 digits, each check digit checked, and an address that
-    isn't http or https, or has a space, refused."""
+    ISBN-10 as 13 digits, each check digit checked, an ISBN shown with
+    the hyphens its setting gives between its parts and one hyphenated
+    elsewhere refused, and an address that isn't http or https, or has a
+    space, refused."""
     import identifiers
     dois = [identifiers.doi(v) for v in ("10.5281/zenodo.1234567", "doi:10.1000/xyz",
                                          "https://doi.org/10.1000/xyz")]
     isbns = [identifiers.isbn(v) for v in ("978-1-234567-89-7", "0-306-40615-2",
                                            "ISBN 978 0 306 40615 7", "080442957X")]
+    shown = [identifiers.isbn_shown(v) for v in ("978-0-306-40615-7", "9780306406157",
+                                                 "0-306-40615-2", "ISBN 978 0 306 40615 7",
+                                                 "ISBN: 978-1-4028-9462-6")]
+    misplaced = []
+    for value in ("978-0306406157", "97-80-306-40615-7", "978-0-306-406157", "0-30640615-2",
+                  "978-0-306-4061-5-7", "978-123456-1-2-3"):
+        try:
+            identifiers.isbn(value)
+            misplaced.append("")
+        except ValueError as exc:
+            misplaced.append(str(exc))
     refused = []
     for check, value in ((identifiers.doi, "11.1000/x"), (identifiers.isbn, "978-1-234567-89-8"),
                          (identifiers.isbn, "0-306-40615-3"), (identifiers.isbn, "12345"),
@@ -1790,6 +1803,12 @@ def check_book_identifiers():
         ("an ISBN-13 and an ISBN-10, hyphens, spaces, and ISBN before them, as 13 digits",
          lambda: isbns == ["9781234567897", "9780306406157", "9780306406157", "9780804429573"]
          or fail(repr(isbns))),
+        ("an ISBN shown with its setting's hyphens, an ISBN-10's after 978 with its new "
+         "check digit, and one written without them as 13 digits",
+         lambda: shown == ["978-0-306-40615-7", "9780306406157", "978-0-306-40615-7",
+                           "978-0-306-40615-7", "978-1-4028-9462-6"] or fail(repr(shown))),
+        ("an ISBN hyphenated other than between its five parts, or an ISBN-10's four, refused",
+         lambda: all("hyphens" in m for m in misplaced) or fail(repr(misplaced))),
         ("a DOI not opening 10., a wrong check digit of either length, a short ISBN, and an "
          "address not http, with a space, or with no host refused",
          lambda: all(refused) and "check digit" in refused[1] and "check digit" in refused[2]
@@ -2627,7 +2646,9 @@ def check_colophon():
     DOI, the address, the contact, the funders, and the credit to give);
     CC0 dedicated and no credit asked, another license as given; the
     production statement, its commit short, with changes said, none left
-    out, in its own div; marked English in another language; the PDF's
+    out, its day as ISO 8601 writes it, in its own div; an ISBN shown as
+    its setting hyphenates it; the credit's title linked to the book's
+    own address before its DOI's; marked English in another language; the PDF's
     line, its Lua with no percent sign or tilde for TeX to take; and the
     generated entry typed colophon, back matter, and written back without
     its type; and util/compare-output.py counting its words apart."""
@@ -2681,6 +2702,7 @@ def check_colophon():
                                             latex=True)]
     plain = {"title": "Book", "authors": ["A"], "license": "CC0-1.0", "language": "es-MX"}
     cc0 = [text(b) for b in colophon.blocks(plain, dict(software, changed="yes"), (3, 14), 0)]
+    doi_only = [text(b) for b in colophon.credits(dict(project, url=""))][-1]
     other = [text(b) for b in colophon.blocks(
         {"title": "Book", "license": "MIT"}, dict(software, commit="none"), (), 0)]
     expected = [
@@ -2693,22 +2715,25 @@ def check_colophon():
         "Copyright 2024 Rice University. Except where otherwise noted, licensed under "
         "[Creative Commons Attribution 4.0 International]"
         "(https://creativecommons.org/licenses/by/4.0/).",
-        "ISBN 9781234567897 (EPUB) and ISBN 9780306406157 (PDF).",
+        "ISBN 9781234567897 (EPUB) and ISBN 978-0-306-40615-7 (PDF).",
         "DOI: [https://doi.org/10.5281/zenodo.1234567](https://doi.org/10.5281/zenodo.1234567)",
         "Online at [https://example.org/book](https://example.org/book).",
         "To report a mistake, write to [fix@example.edu](mailto:fix@example.edu).",
         "Funded by NSF (award 123 Open) and Arnold.",
         "To reuse this book, credit it as: [*Principles <b>& Co*]"
-        "(https://doi.org/10.5281/zenodo.1234567) by "
+        "(https://example.org/book) by "
         "[Ann Lee](https://orcid.org/0000-0002-1825-0097), Bo Chen, and Cy Dee, licensed "
         "under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).",
         "<oer-colophon|>Made with [TextbookImprover](https://github.com/OERforge/"
-        "textbookimprover) 0.11 (commit c9dff55) and Pandoc 3.14 on November 26, 2025.</>"]
+        "textbookimprover) 0.11 (commit c9dff55) and Pandoc 3.14 on 2025-11-26.</>"]
     entries = []
     tree = bookcontents.walk_contents(
         [{"generate": "colophon"}, {"generate": "colophon", "name": "made", "title": "How"},
          {"generate": "toc"}], set(), set(), entries)
     written = bookcontents.contents_from_tree(tree)
+    grouped = bookcontents.walk_contents(
+        [{"title": "Back", "role": "back", "items": [{"generate": "colophon"}]},
+         {"generate": "toc"}], set(), set(), [])
     spec = importlib.util.spec_from_file_location(
         "compare_output", os.path.join(ROOT, "util", "compare-output.py"))
     compare = importlib.util.module_from_spec(spec)
@@ -2734,16 +2759,20 @@ def check_colophon():
         ("the PDF's has its TeX and faces after its own words",
          lambda: pdf[:-1] == expected[:-1] and pdf[-1] == expected[-1][:-3]
          + "\n\\OERColophonSet</>" or fail(repr(pdf[-1]))),
+        ("the credit's title linked to the book's own address, or its DOI's without one",
+         lambda: doi_only.startswith("To reuse this book, credit it as: [*Principles <b>& Co*]"
+                                     "(https://doi.org/10.5281/zenodo.1234567) by ")
+         or fail(doi_only)),
         ("CC0 dedicated, no credit asked; with changes said; marked English in Spanish",
          lambda: cc0 == ["<|lang=en>*Book*\nBy A.\nDedicated to the public domain under "
                          "[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/"
                          "1.0/).\n<oer-colophon|>Made with [TextbookImprover](https://github"
                          ".com/OERforge/textbookimprover) 0.11 (commit c9dff55, with changes) "
-                         "and Pandoc 3.14 on January 1, 1970.</></>"] or fail(repr(cc0))),
+                         "and Pandoc 3.14 on 1970-01-01.</></>"] or fail(repr(cc0))),
         ("another license as given, no commit and no Pandoc left out",
          lambda: other == ["*Book*", "Under the license MIT.",
                            "<oer-colophon|>Made with [TextbookImprover](https://github.com/"
-                           "OERforge/textbookimprover) 0.11 on January 1, 1970.</>"]
+                           "OERforge/textbookimprover) 0.11 on 1970-01-01.</>"]
          or fail(repr(other))),
         ("the faces' Lua holds no percent sign or tilde, which TeX would take",
          lambda: len(luas) == 4 and all("%" not in lua and "~" not in lua for lua in luas)
@@ -2758,6 +2787,14 @@ def check_colophon():
          and bookcontents.generates([("group", "G", tree[:1])], "colophon")
          and not bookcontents.generates(tree[2:], "colophon")
          or fail(repr((entries, written)))),
+        ("a target's colophon left out of the tree, in a group too, the group's role kept",
+         lambda: [(e[0], e[1]) for e in bookcontents.leave_out(grouped, "colophon")]
+         == [("group", "Back"), ("page", "toc")]
+         and bookcontents.leave_out(grouped, "colophon")[0][2] == []
+         and bookcontents.leave_out(grouped, "colophon")[0].role == "back"
+         and not bookcontents.generates(bookcontents.leave_out(grouped, "colophon"),
+                                        "colophon")
+         or fail(repr(bookcontents.leave_out(grouped, "colophon")))),
         ("compare-output.py counts a colophon's words apart, the rest as before",
          lambda: signed["word_count"] == 4 and signed["colophon_word_count"] == 5
          and signed["table_count"] == 1 or fail(repr(signed))),

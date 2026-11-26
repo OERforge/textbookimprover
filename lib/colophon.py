@@ -6,11 +6,12 @@ statement, how this copy was made, from what the run knows of itself.
 The credits are what a copyright page would hold: the title and the
 subtitle, the people by their roles, each name linked to its ORCID iD,
 the publisher and the series, the copyright line and the license by name
-and deed, the ISBNs, the DOI, the book's address, where to write about
+and deed, the ISBNs (hyphenated as their settings give them), the DOI, the book's address, where to write about
 it, who paid for it, and the credit someone reusing it should give. The
 production statement names TextbookImprover's version and commit,
-Pandoc's version, and the day of the run's moment (SOURCE_DATE_EPOCH, so
-that a build made again under it says the same), in a div of class
+Pandoc's version, and the day of the run's moment in UTC, as ISO 8601
+writes it (SOURCE_DATE_EPOCH, so that a build made again under it says
+the same), in a div of class
 oer-colophon, which a comparison of two builds can set apart; a PDF's
 adds the TeX distribution and the faces its pages are set in, which
 LaTeX finds as it sets them (FACES) and names on its next run.
@@ -43,8 +44,6 @@ import people
 
 CLASS = "oer-colophon"
 HOME = "https://github.com/OERforge/textbookimprover"
-MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
-          "September", "October", "November", "December")
 # The formats an ISBN may be given for, as a reader would name them.
 ISBN_FORMATS = (("epub", "EPUB"), ("pdf", "PDF"), ("paperback", "paperback"),
                 ("hardcover", "hardcover"))
@@ -149,8 +148,8 @@ def license_runs(license_id, noted=False):
 
 
 def address_of(project):
-    """Where the book is found: its DOI's address, or its own."""
-    for key, check in (("doi", identifiers.doi), ("url", identifiers.url)):
+    """Where the book is found: its own address, or its DOI's."""
+    for key, check in (("url", identifiers.url), ("doi", identifiers.doi)):
         if str(project.get(key) or "").strip():
             try:
                 value = check(project[key])
@@ -226,7 +225,8 @@ def credits(project):
     given = []
     for key, label in ISBN_FORMATS:
         try:
-            value = identifiers.isbn(isbn[key]) if str(isbn.get(key) or "").strip() else ""
+            value = identifiers.isbn_shown(isbn[key]) if str(isbn.get(key) or "").strip() \
+                else ""
         except ValueError:
             value = ""
         if value:
@@ -277,9 +277,9 @@ def credits(project):
 # -- the production statement -------------------------------------------------
 
 def day(moment):
-    """The day of a moment in seconds, UTC, as "November 26, 2026"."""
-    when = time.gmtime(int(moment))
-    return f"{MONTHS[when.tm_mon - 1]} {when.tm_mday}, {when.tm_year}"
+    """The day of a moment in seconds, UTC, as ISO 8601 writes it:
+    "2026-11-26"."""
+    return time.strftime("%Y-%m-%d", time.gmtime(int(moment)))
 
 
 def moment_now(environ=None):
@@ -291,7 +291,7 @@ def moment_now(environ=None):
 
 def made_with(software, pandoc, moment):
     """"Made with TextbookImprover 0.11 (commit c9dff55) and Pandoc 3.14 on
-    November 26, 2026." software is tiversion's version, commit, and
+    2026-11-26." software is tiversion's version, commit, and
     changed; pandoc a version's numbers."""
     commit = software.get("commit") or "none"
     said = ""

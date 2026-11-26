@@ -47,10 +47,31 @@ def doi(value):
     return found.group(1)
 
 
+def isbn_parts(value):
+    """The parts an ISBN's hyphens or spaces set apart, as written, or None
+    where it's written without them."""
+    text = re.sub(r"^ISBN:?\s*", "", str(value).strip(), flags=re.I)
+    parts = [p for p in re.split(r"[\s-]+", text) if p]
+    return parts if len(parts) > 1 else None
+
+
 def isbn(value):
-    """An ISBN as its 13 digits, from an ISBN-13 or an ISBN-10, hyphens and
-    spaces allowed, or ValueError where it isn't one or its check digit is
-    wrong."""
+    """An ISBN as its 13 digits, from an ISBN-13 or an ISBN-10, or
+    ValueError where it isn't one or its check digit is wrong. It may be
+    written without hyphens, or with hyphens or spaces between its
+    parts: an ISBN-13's five (978-0-306-40615-7, the prefix of three
+    digits, the registration group, the registrant, the publication, and
+    the check digit) or an ISBN-10's four; other hyphens are refused,
+    since they'd be shown as given (isbn_shown)."""
+    parts = isbn_parts(value)
+    if parts is not None and not (
+            all(re.fullmatch(r"\d+", p) for p in parts[:-1])
+            and len(parts[-1]) == 1
+            and (len(parts) == 5 and len(parts[0]) == 3 and 1 <= len(parts[1]) <= 5
+                 or len(parts) == 4 and 1 <= len(parts[0]) <= 5)):
+        raise ValueError(f"{value!r} has its hyphens elsewhere than between an ISBN's "
+                         "parts: an ISBN-13's five (978-0-306-40615-7), as its agency "
+                         "gives them, or an ISBN-10's four; or write it without them")
     text = re.sub(r"[\s-]", "", str(value).strip()).upper()
     if text.startswith("ISBN"):
         text = text[4:].lstrip(":")
@@ -69,6 +90,19 @@ def isbn(value):
         raise ValueError(f"{value!r} isn't an ISBN: its check digit doesn't match the "
                          "others, so a digit is likely mistyped")
     return text
+
+
+def isbn_shown(value):
+    """An ISBN as a reader is shown it: its 13 digits, hyphenated where
+    the setting hyphenates it, an ISBN-10's parts after 978 and with its
+    ISBN-13's check digit; or ValueError, as isbn() gives."""
+    digits = isbn(value)
+    parts = isbn_parts(value)
+    if parts is None:
+        return digits
+    if len(parts) == 4:
+        parts = ["978"] + parts[:3] + [digits[-1]]
+    return "-".join(parts)
 
 
 def url(value):
@@ -151,4 +185,6 @@ def period(value):
     return text
 
 
-CHECKS = {"doi": doi, "isbn": isbn, "url": url, "contact": contact, "period": period}
+# A setting is kept as a reader is shown it: an ISBN hyphenated where it
+# was written so, which isbn() makes 13 digits for a record.
+CHECKS = {"doi": doi, "isbn": isbn_shown, "url": url, "contact": contact, "period": period}

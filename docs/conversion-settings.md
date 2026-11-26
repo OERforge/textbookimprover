@@ -32,6 +32,10 @@ For a format that produces one file for the whole book, such as epub3, the file 
 
 Whether every page of an HTML target carries the book's contents as a menu at its top (collapsed, the current page marked) and links to the previous and next page at its foot. For posting the pages as a site of their own. Off by default, since an LMS gives the pages its own navigation and the EPUB has its reading system's. A page from the pass-through directory is left as it stands.
 
+**`colophon`**—one of `on`, `off`; default `on`
+
+For a target with format html, epub3, pdf, or docx: whether the colophon that generate: colophon in the book's contents places is written in this target. off leaves it out of the target, its contents page, and its menu. A target with format latex, markdown, asciidoc, or source never writes one, since its files read back as the book.
+
 **`compatibility_mode`**—one of `keep`, `15`; default `keep`
 
 For a target with format source: whether a remediated Word file keeps the compatibility mode its author's file has, or is set to 15, which guides for Word say its Accessibility Checker needs. Kept by default, since the file is the author's.
