@@ -1061,6 +1061,84 @@ def case_identified_cartridge(work):
     ]
 
 
+def case_downloaded_sources(work):
+    """The part's files Windows marks as downloaded (name:Zone.Identifier)
+    listed in the part's downloaded-sources.csv, its upstream file's among
+    them, each with its zone and the address it came from cut to its
+    scheme, host, and path, a mark in UTF-16 read and one too big to read
+    listed without a zone; no output holding a mark; and the report taken
+    away once the marks are gone."""
+    import csv
+    import zipfile
+
+    def write(name, data):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data.encode("utf-8") if isinstance(data, str) else data)
+
+    def mark(zone, host=None, referrer=None):
+        lines = ["[ZoneTransfer]", f"ZoneId={zone}"]
+        if referrer:
+            lines.append(f"ReferrerUrl={referrer}")
+        if host:
+            lines.append(f"HostUrl={host}")
+        return "\r\n".join(lines) + "\r\n"
+    os.makedirs(os.path.join(work, "upstream"))
+    with zipfile.ZipFile(os.path.join(work, "upstream", "book.zip"), "w") as z:
+        z.writestr("book/one.md", "# One\n\n![A dot.](images/dot.png)\n")
+        z.writestr("book/images/dot.png", ONE_PIXEL)
+    write("upstream/book.zip:Zone.Identifier",
+          mark(3, "https://ana:secret@example.org/files/book.zip?token=abc#top",
+               "https://example.org/books/"))
+    write("project.yaml", "project:\n  title: A Book\n  parts:\n    book:\n      kind: book\n"
+          "      from:\n        file: upstream/book.zip\n        unpacker: archive\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n  md:\n    format: markdown\n")
+
+    def run():
+        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                        "--quick"], cwd=work, capture_output=True, text=True)
+    first = run()
+    sources = os.path.join(work, "src", "book")
+    write("src/book/images/dot.png:Zone.Identifier",
+          mark(3, "https://cdn.example.org/dot.png").encode("utf-16"))
+    write("src/book/one.md:Zone.Identifier", mark(2))
+    write("src/book/huge.md:Zone.Identifier", "[ZoneTransfer]\nZoneId=3\n" + "x" * 70000)
+    second = run()
+    report = os.path.join(work, "output", "reports", "book", "downloaded-sources.csv")
+    rows = []
+    if os.path.exists(report):
+        with open(report, encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+    held = [os.path.relpath(os.path.join(r, n), work) for r, _, names in
+            os.walk(os.path.join(work, "output")) for n in names if n.endswith(":Zone.Identifier")]
+    text = open(report, encoding="utf-8-sig").read() if os.path.exists(report) else ""
+    for name in ("upstream/book.zip:Zone.Identifier", "src/book/images/dot.png:Zone.Identifier",
+                 "src/book/one.md:Zone.Identifier", "src/book/huge.md:Zone.Identifier"):
+        os.remove(os.path.join(work, name))
+    third = run()
+    wanted = [["File", "Zone", "Address", "Referrer"],
+              ["src/book/huge.md", "not read", "", ""],
+              ["src/book/images/dot.png", "the internet", "https://cdn.example.org/dot.png", ""],
+              ["src/book/one.md", "trusted sites", "", ""],
+              ["upstream/book.zip", "the internet", "https://example.org/files/book.zip",
+               "https://example.org/books/"]]
+    return [
+        ("a run with only its upstream file marked lists it",
+         lambda: first.returncode == 0 and "1 of the part's files carry Windows' mark of a "
+         "download, 1 from the internet" in first.stdout + first.stderr),
+        ("each marked file listed with its zone and where it came from, the UTF-16 mark read "
+         "and one too big to read listed without a zone",
+         lambda: second.returncode == 0 and rows == wanted),
+        ("no user name, password, query, or fragment of an address kept",
+         lambda: bool(text) and not any(s in text for s in ("ana", "secret", "token", "#top"))),
+        ("no output holds a mark", lambda: os.path.isdir(sources) and held == []),
+        ("the report taken away once the marks are gone",
+         lambda: third.returncode == 0 and not os.path.exists(report)
+         and "mark of a download" not in third.stdout + third.stderr),
+    ]
+
+
 def case_metadata_strip(work):
     """A photograph's metadata taken out of every output, its source left
     alone (project.strip_metadata): the HTML target's copy, the EPUB's,
@@ -13554,6 +13632,7 @@ CASES = [
     ("the build record, of a program a limit stopped", case_build_record_stops),
     ("the book's people in the cartridge", case_people_cartridge),
     ("the book's identifiers in the cartridge", case_identified_cartridge),
+    ("the part's files Windows marks as downloaded, listed", case_downloaded_sources),
     ("a picture's metadata taken out of the outputs", case_metadata_strip),
     ("a license page by page", case_page_licenses),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),

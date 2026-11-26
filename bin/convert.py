@@ -1121,6 +1121,43 @@ TAR_ENDINGS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz"
 NOT_UPSTREAM = ("src", "output", "sidecars", "originals")
 
 
+def report_downloads(base, part):
+    """The part's files Windows marks as downloaded (name:Zone.Identifier,
+    lib/zonemarks.py), its upstream file's among them, listed in the
+    part's downloaded-sources.csv, and said in one line; the report taken
+    away when there are none. The marks themselves are no file of the
+    book's, and no output holds them."""
+    import csv
+    import zonemarks
+    top = P(base).top()
+    rows = zonemarks.marks(P(base).sources(part), top)
+    upstream = part_upstream(base, part)
+    if upstream is not None and os.path.isdir(upstream[1]):
+        rows += zonemarks.marks(upstream[1], os.path.realpath(top))
+    elif upstream is not None:
+        mark = upstream[1] + zonemarks.SUFFIX
+        if os.path.isfile(mark) and not os.path.islink(mark):
+            rows.append((upstream[0].replace(os.sep, "/"), zonemarks.read_mark(mark)
+                         or {"zone": None, "address": "", "referrer": ""}))
+    report = P(base).report("downloaded-sources.csv")
+    if not rows:
+        if os.path.isfile(report) and not os.path.islink(report):
+            os.remove(report)
+        return
+    os.makedirs(os.path.dirname(report), exist_ok=True)
+    with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["File", "Zone", "Address", "Referrer"])
+        for marked, mark in rows:
+            writer.writerow([marked, zonemarks.zone_name(mark["zone"]), mark["address"],
+                             mark["referrer"]])
+    internet = sum(1 for _, mark in rows if mark["zone"] == 3)
+    say(f"NOTE: {len(rows)} of the part's files carry Windows' mark of a download"
+        + (f", {internet} from the internet" if internet else "")
+        + f" ({os.path.relpath(report, top)}). The marks (name:Zone.Identifier) aren't "
+        "files of the book's: no output holds them.")
+
+
 def part_upstream(base, part):
     """A part's upstream file, as project.yaml's from names it: (path in
     the project, its real path, unpacker, options), or None when the part
@@ -8473,6 +8510,8 @@ def main():
             f"them, and a part reads only its own folders (src/{PART}/, sidecars/{PART}/). "
             "Put a copy of each file in the link's place. Nothing was converted.")
     check_kinds(base)
+    if not again:
+        report_downloads(base, PART)
     # What's left is read and built inside the sandbox: this run starts
     # itself again there, and waits.
     code = enter_sandbox(base, args)

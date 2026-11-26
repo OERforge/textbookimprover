@@ -123,6 +123,10 @@ python3 $T/util/import-files.py --from ../shared --fetch    # --part slides for 
 
 What it can't bring in is named and left, and it exits 1. A LaTeX book's names and a Word file's pictures aren't read.
 
+### A file downloaded on Windows
+
+A file saved from a browser on Windows and copied into WSL brings Windows' mark of a download with it: a small file beside it, named after it with `:Zone.Identifier` added, that says which of Windows' security zones the file came from and, for one from the internet, the address it was downloaded from and the page that linked to it. A run never reads a mark as a file of the book's, and no output holds one. Each run lists the part's marked files, and its upstream file when that's marked, in `output/reports/<part>/downloaded-sources.csv`: the file, its zone, the address, and the page that linked to it, each address cut to its scheme, host, port, and path, since a query or a user name in it can carry a token or a name. A note says how many there are, and the report is taken away once none is left. A mark over 64 KB, or one that doesn't read as one, is listed with its zone `not read`.
+
 ### The LaTeX a book supplies
 
 LaTeX opens whatever file it's told to, and LuaTeX's Lua whatever file you can. So the LaTeX that comes with a book is checked twice: read before LaTeX runs, and LaTeX's own list of the files it opened read after.

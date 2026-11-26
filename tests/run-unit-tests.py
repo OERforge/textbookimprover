@@ -929,6 +929,82 @@ def check_licenses():
     ]
 
 
+def check_zonemarks():
+    """lib/zonemarks.py, Windows' marks of a download read: the zone, the
+    address, and the page that linked to it, in UTF-8 or UTF-16; an
+    address cut to its scheme, host, port, and path, a user name, a
+    password, a query, and a fragment gone, a value that isn't one
+    dropped but about:internet; a mark too big, or with no ZoneTransfer
+    section, not read; a link and a dot folder never followed, and a link
+    or a pipe in a mark's place never read; and random bytes never a
+    traceback."""
+    import random
+    import tempfile
+    import zonemarks
+    folder = tempfile.mkdtemp()
+
+    def mark(name, data):
+        path = os.path.join(folder, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+    plain = mark("a.pdf:Zone.Identifier", b"[ZoneTransfer]\r\nZoneId=3\r\n"
+                 b"ReferrerUrl=https://example.org/page?id=7\r\n"
+                 b"HostUrl=https://u:p@[2001:db8::1]:8443/f.pdf?sig=x#frag\r\n")
+    wide = mark("b.png:Zone.Identifier",
+                "[ZoneTransfer]\nZoneId=4\nHostUrl=about:internet\n".encode("utf-16"))
+    mark("c.md:Zone.Identifier", b"[Other]\nZoneId=3\n")
+    mark("d.md:Zone.Identifier", b"[ZoneTransfer]\nZoneId=3\n" + b"x" * zonemarks.MARK_LIMIT)
+    mark(".git/e.md:Zone.Identifier", b"[ZoneTransfer]\nZoneId=3\n")
+    mark("sub/f.md:Zone.Identifier", b"[zonetransfer]\nzoneid = 1\n")
+    outside = tempfile.mkdtemp()
+    mark_out = os.path.join(outside, "g.md:Zone.Identifier")
+    with open(mark_out, "wb") as fh:
+        fh.write(b"[ZoneTransfer]\nZoneId=3\n")
+    os.symlink(outside, os.path.join(folder, "linked"))
+    os.symlink(mark_out, os.path.join(folder, "h.md:Zone.Identifier"))
+    os.mkfifo(os.path.join(folder, "i.md:Zone.Identifier"))
+    found = dict(zonemarks.marks(folder, folder))
+
+    def fuzzed():
+        rng = random.Random(7)
+        seed = open(plain, "rb").read()
+        for _ in range(3000):
+            data = bytearray(seed)
+            for _ in range(rng.randrange(1, 12)):
+                data[rng.randrange(len(data))] = rng.randrange(256)
+            path = mark("fuzz:Zone.Identifier", bytes(data))
+            zonemarks.read_mark(path)
+            zonemarks.address(bytes(data).decode("latin-1"))
+        return True
+    return [
+        ("a mark's zone, address, and referrer read, the address cut to its host and path",
+         lambda: found.get("a.pdf") == {"zone": 3, "address": "https://[2001:db8::1]:8443/f.pdf",
+                                        "referrer": "https://example.org/page"}),
+        ("a mark in UTF-16 read, about:internet kept", lambda: found.get("b.png") == {
+            "zone": 4, "address": "about:internet", "referrer": ""}),
+        ("the section's name and keys in any case", lambda: found.get("sub/f.md", {}).get("zone") == 1),
+        ("a mark with no ZoneTransfer section, or too big, not read",
+         lambda: found.get("c.md", {}).get("zone") is None and found.get("d.md", {}).get("zone") is None
+         and zonemarks.read_mark(os.path.join(folder, "d.md:Zone.Identifier")) is None),
+        ("a link and a dot folder never followed, and a link or a pipe in a mark's place "
+         "never read",
+         lambda: not any(k.startswith((".git", "linked")) or k in ("h.md", "i.md") for k in found)
+         and zonemarks.read_mark(os.path.join(folder, "h.md:Zone.Identifier")) is None
+         and zonemarks.read_mark(os.path.join(folder, "i.md:Zone.Identifier")) is None),
+        ("what isn't an address dropped, and its control characters",
+         lambda: [zonemarks.address(v) for v in ("javascript:alert(1)", "file:///C:/x",
+                                                 "not one", "https://a.org/\x1b[31mx",
+                                                 "https://a.org:99999/x")]
+         == ["", "", "", "https://a.org/[31mx", "https://a.org/x"]),
+        ("a zone's name, and one Windows doesn't name",
+         lambda: [zonemarks.zone_name(z) for z in (0, 3, 9, None)]
+         == ["this computer", "the internet", "zone 9", "not read"]),
+        ("random bytes in a mark never a traceback", fuzzed),
+    ]
+
+
 def check_metastrip():
     """lib/metastrip.py, what a picture's file says of its people taken out:
     a JPEG's EXIF filtered to the keep list (the orientation, resolution,
@@ -14015,6 +14091,7 @@ GROUPS = [
     ("a book's release: its date, copyright, type of work, and period", check_release),
     ("lib/licenses.py, a license page by page", check_page_licenses),
     ("lib/metastrip.py, a picture's metadata taken out", check_metastrip),
+    ("lib/zonemarks.py, Windows' marks of a download read", check_zonemarks),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
