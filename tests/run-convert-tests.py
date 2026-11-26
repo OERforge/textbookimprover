@@ -756,16 +756,21 @@ def case_one_moment(work):
     write("src/book/one.md", "# One\n\nA page.\n")
     began = time.time()
     first, first_built = build()
+    ended = time.time()
     stamped = dates()
     time.sleep(1.5)
     second, second_built = build()
-    moment = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(began)))
-    later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(began) + 1))
+    # The run takes its moment once it has started, which on a busy
+    # machine can be seconds after this case started it: any second from
+    # then to the run's end is the run's own, where both files must agree.
+    moments = {time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at))
+               for at in range(int(began), int(ended) + 1)}
+    moment = min(moments)
     return [
         ("the EPUB and the Word file are dated by one moment, the run's start",
          lambda: first.returncode == 0 and first_built == {"epub", "word"}
          and stamped.get("epub") and stamped.get("epub") == stamped.get("word")
-         and stamped["epub"] in (moment, later)
+         and stamped["epub"] in moments
          or fail(first.stderr[-600:] + repr((stamped, moment)))),
         ("and a second run, at another moment, builds nothing",
          lambda: second.returncode == 0 and second_built == set()
