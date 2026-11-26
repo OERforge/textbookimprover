@@ -3770,6 +3770,8 @@ def check_consistency():
          "with .dev after it, and the installation page downloads the newest",
          lambda: version_right() and named == {released}
          or fail(repr((version, released, unreleased, named)))),
+        ("no entry of the changelog's under a release twice",
+         lambda: not repeated_entries(changelog) or fail(repr(repeated_entries(changelog)))),
         ("the oldest Pandoc is the same everywhere it's checked, and every suite that runs "
          "convert.py checks it", lambda: len(pandoc_minimums) == 1
          and {"run-convert-tests.py", "run-latex-tests.py", "run-pdf-tests.py",
@@ -3798,6 +3800,27 @@ def check_consistency():
          lambda: filter_floor is not None
          and float(filter_floor.group(1)) == latexbuild.FIT_FLOOR),
     ]
+
+
+def repeated_entries(changelog):
+    """The changelog's entries that one heading of a release (Added,
+    Fixed, ...) holds twice, by their bold opening, each with its
+    release; a bold label ending in a colon isn't an entry's."""
+    found, seen, release = [], set(), ""
+    for line in changelog.splitlines():
+        heading = re.match(r"^##(#?) \[?(.+?)\]?(?: - .*)?$", line)
+        if heading:
+            if not heading.group(1):
+                release = heading.group(2)
+            seen = set()
+            continue
+        entry = re.match(r"^- \*\*(.+?)\*\*", line)
+        if entry and not entry.group(1).endswith(":"):
+            key = entry.group(1)
+            if key in seen:
+                found.append((release, key))
+            seen.add(key)
+    return found
 
 
 def undescribed():
