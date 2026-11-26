@@ -16,10 +16,14 @@ for, at one of three levels:
 - bare: only what the picture needs to be drawn as it is: the color
   profile, the orientation, and the markers a decoder reads.
 
-The strip is lossless and repeatable: a JPEG's segments and a PNG's
-chunks are dropped or rewritten, never the compressed picture, so the
-pixels decoded before and after are the same, and a second strip gives
-the same bytes. Everything is read as untrusted: offsets and counts are
+JPEG, PNG, GIF, and WebP pictures are stripped; a TIFF is named and left
+as it is. An Office or OpenDocument file loses its own properties about
+its editors, and a PDF its editors' data (strip_pdf_document).
+
+The strip is lossless and repeatable: a JPEG's segments, a PNG's chunks,
+a GIF's extensions, and a WebP's chunks are dropped or rewritten, never
+the compressed picture, so the pixels decoded before and after are the
+same, and a second strip gives the same bytes. Everything is read as untrusted: offsets and counts are
 checked against the file's length, an XMP packet with a document type
 is dropped whole, a compressed chunk is never inflated, and a structure
 that can't be read is taken out rather than kept, the orientation saved
@@ -101,6 +105,24 @@ XMP_CATEGORIES = {
                "http://ns.adobe.com/exif/1.0/aux/": None},
 }
 RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+PDF_NS = "http://ns.adobe.com/pdf/1.3/"
+PDFUA_ID = "http://www.aiim.org/pdfua/ns/id/"
+PDFA_ID = "http://www.aiim.org/pdfa/ns/id/"
+PDFA_EXTENSION = "http://www.aiim.org/pdfa/ns/extension/"
+# A PDF's document XMP keeps, beside a picture's, what says what the
+# document is and which standards it claims, so a PDF/UA or PDF/A file
+# stays one: its title and language, its keywords, its PDF/UA and PDF/A
+# identification, and the extension schemas PDF/A declares. At bare only
+# these.
+PDF_XMP_BARE = {
+    DC: {"title", "language", "format"},
+    PDFUA_ID: None,
+    PDFA_ID: None,
+    PDFA_EXTENSION: None,
+}
+PDF_XMP_KEPT = dict(XMP_KEPT, **{ns: names for ns, names in PDF_XMP_BARE.items() if ns != DC})
+PDF_XMP_KEPT[DC] = XMP_KEPT[DC] | PDF_XMP_BARE[DC]
+PDF_XMP_KEPT[PDF_NS] = {"Keywords"}
 XMP_ID = b"http://ns.adobe.com/xap/1.0/\x00"
 XMP_EXTENSION_ID = b"http://ns.adobe.com/xmp/extension/\x00"
 
@@ -274,12 +296,13 @@ def filter_exif(tiff, level, keep):
 
 # ---- XMP ----
 
-def filter_xmp(packet, level, keep):
+def filter_xmp(packet, level, keep, kept=None):
     """An XMP packet with only the kept properties, and what went; None
     where nothing's kept. A packet with a document type, or one that
-    isn't XML, goes whole."""
+    isn't XML, goes whole. kept: a PDF's own kept list (PDF_XMP_KEPT),
+    in place of a picture's, at bare too."""
     import xml.etree.ElementTree as ET
-    if level == "bare":
+    if level == "bare" and kept is None:
         return None, ["XMP"]
     if b"<!DOCTYPE" in packet or b"<!ENTITY" in packet:
         return None, ["XMP (with a document type, taken out whole)"]
@@ -288,8 +311,9 @@ def filter_xmp(packet, level, keep):
         root = ET.fromstring(text)
     except ET.ParseError:
         return None, ["XMP (unreadable, taken out whole)"]
-    kept_ns = {ns: (None if names is None else set(names)) for ns, names in XMP_KEPT.items()}
-    for word in keep or []:
+    base = XMP_KEPT if kept is None else kept
+    kept_ns = {ns: (None if names is None else set(names)) for ns, names in base.items()}
+    for word in (keep or []) if level != "bare" else []:
         for ns, names in XMP_CATEGORIES.get(str(word).lower(), {}).items():
             if names is None or (ns in kept_ns and kept_ns[ns] is None):
                 kept_ns[ns] = None
@@ -333,7 +357,11 @@ def filter_xmp(packet, level, keep):
                        ("tiff", "http://ns.adobe.com/tiff/1.0/"),
                        ("exif", "http://ns.adobe.com/exif/1.0/"),
                        ("xmp", "http://ns.adobe.com/xap/1.0/"),
-                       ("aux", "http://ns.adobe.com/exif/1.0/aux/")):
+                       ("aux", "http://ns.adobe.com/exif/1.0/aux/"),
+                       ("pdf", PDF_NS), ("pdfuaid", PDFUA_ID), ("pdfaid", PDFA_ID),
+                       ("pdfaExtension", PDFA_EXTENSION),
+                       ("pdfaSchema", "http://www.aiim.org/pdfa/ns/schema#"),
+                       ("pdfaProperty", "http://www.aiim.org/pdfa/ns/property#")):
         ET.register_namespace(prefix, ns)
     body = ET.tostring(root, encoding="utf-8").replace(b"<?xml version='1.0' encoding='utf-8'?>\n",
                                                        b"")
@@ -567,19 +595,189 @@ def strip_png(data, level="private", keep=()):
     return bytes(out), removed
 
 
+# ---- GIF ----
+
+GIF_KEPT_APPLICATIONS = (b"NETSCAPE2.0", b"ANIMEXTS1.0", b"ICCRGBG1012")
+GIF_XMP_ID = b"XMP DataXMP"
+# XMP in a GIF ends with a "magic trailer" that lets a decoder walk it as
+# sub-blocks: 0x01, then 0xFF down to 0x00 (XMP's specification, part 3).
+GIF_XMP_TRAILER = b"\x01" + bytes(range(255, -1, -1))
+
+
+def _gif_sub_blocks(data, at):
+    """Where the sub-blocks starting at at end, just past their terminator."""
+    while True:
+        if at >= len(data):
+            raise ValueError("a GIF cut short in its sub-blocks")
+        size = data[at]
+        at += 1 + size
+        if size == 0:
+            return at
+
+
+def strip_gif(data, level="private", keep=()):
+    """A GIF's bytes with its comments, XMP (filtered as a picture's),
+    and other applications' data taken out, the looping and the color
+    profile's kept, and nothing after its trailer; what went. Every
+    picture and its graphic control are copied as they are."""
+    if data[:6] not in (b"GIF87a", b"GIF89a") or len(data) < 13:
+        raise ValueError("not a GIF")
+    at = 13
+    flags = data[10]
+    if flags & 0x80:
+        at += 3 * (2 << (flags & 7))
+    if at > len(data):
+        raise ValueError("a GIF's color table longer than the file")
+    out, removed = bytearray(data[:at]), []
+    while True:
+        if at >= len(data):
+            raise ValueError("a GIF without its trailer")
+        block = data[at]
+        if block == 0x3B:
+            out += b"\x3b"
+            if at + 1 < len(data):
+                removed.append(f"{len(data) - at - 1} bytes after the picture's end")
+            break
+        if block == 0x2C:
+            if at + 10 > len(data):
+                raise ValueError("a GIF picture cut short")
+            local = data[at + 9]
+            start = at
+            at += 10 + (3 * (2 << (local & 7)) if local & 0x80 else 0) + 1
+            at = _gif_sub_blocks(data, at)
+            out += data[start:at]
+            continue
+        if block != 0x21 or at + 2 > len(data):
+            raise ValueError("a GIF block of an unknown kind")
+        label, start = data[at + 1], at
+        end = _gif_sub_blocks(data, at + 2)
+        if label in (0xF9, 0x01):
+            out += data[start:end]
+        elif label == 0xFE:
+            removed.append("GIF comment")
+        elif label == 0xFF and at + 3 < len(data) and data[at + 2] == 11:
+            name = data[at + 3:at + 14]
+            if name in GIF_KEPT_APPLICATIONS:
+                out += data[start:end]
+            elif name == GIF_XMP_ID:
+                raw = data[at + 14:end - 1]
+                packet = raw[:-len(GIF_XMP_TRAILER)] if raw.endswith(GIF_XMP_TRAILER) else None
+                if packet is None:
+                    removed.append("XMP (unreadable, taken out whole)")
+                else:
+                    packet, gone = filter_xmp(packet, level, keep)
+                    removed += gone
+                    if packet is not None and b"\x00" not in packet:
+                        out += (b"\x21\xff\x0b" + GIF_XMP_ID + packet + GIF_XMP_TRAILER
+                                + b"\x00")
+            else:
+                removed.append("GIF application data ("
+                               + name.decode("latin-1", "replace").strip() + ")")
+        else:
+            removed.append(f"GIF extension 0x{label:02X}")
+        at = end
+    return bytes(out), removed
+
+
+# ---- WebP ----
+
+WEBP_DRAWN = {b"VP8 ", b"VP8L", b"VP8X", b"ALPH", b"ANIM", b"ANMF", b"ICCP"}
+
+
+def strip_webp(data, level="private", keep=()):
+    """A WebP's bytes with its EXIF and XMP filtered as a picture's and
+    every chunk a decoder doesn't need taken out, VP8X's flags and the
+    file's size put right; what went."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WEBP" or len(data) < 20:
+        raise ValueError("not a WebP")
+    size = struct.unpack("<I", data[4:8])[0]
+    end_of_file = min(len(data), 8 + size)
+    chunks, removed, at = [], [], 12
+    while at + 8 <= end_of_file:
+        kind = data[at:at + 4]
+        length = struct.unpack("<I", data[at + 4:at + 8])[0]
+        body = data[at + 8:at + 8 + length]
+        if at + 8 + length > end_of_file:
+            raise ValueError("a WebP chunk longer than the file")
+        at += 8 + length + (length & 1)
+        if kind in WEBP_DRAWN:
+            chunks.append((kind, body))
+        elif kind == b"EXIF":
+            tiff = body[6:] if body.startswith(b"Exif\x00\x00") else body
+            tiff, gone = filter_exif(tiff, level, keep)
+            removed += gone
+            if tiff is not None:
+                chunks.append((kind, tiff))
+        elif kind == b"XMP ":
+            packet, gone = filter_xmp(body, level, keep)
+            removed += gone
+            if packet is not None:
+                chunks.append((kind, packet))
+        else:
+            removed.append("WebP " + kind.decode("latin-1", "replace").strip())
+    if len(data) > end_of_file + (end_of_file & 1):
+        removed.append(f"{len(data) - end_of_file} bytes after the picture's end")
+    kinds = {kind for kind, _ in chunks}
+    out = bytearray()
+    for kind, body in chunks:
+        if kind == b"VP8X" and len(body) >= 1:
+            flags = body[0] & ~0x0C
+            flags |= (0x08 if b"EXIF" in kinds else 0) | (0x04 if b"XMP " in kinds else 0)
+            body = bytes([flags]) + body[1:]
+        out += kind + struct.pack("<I", len(body)) + body + (b"\x00" if len(body) & 1 else b"")
+    return b"RIFF" + struct.pack("<I", len(out) + 4) + b"WEBP" + bytes(out), removed
+
+
+# ---- TIFF, reported ----
+
+def tiff_said(data):
+    """What a TIFF's first IFD says about its people, by EXIF_TAGS' names,
+    and its EXIF and GPS IFDs; a TIFF is reported, not stripped, since
+    its tags hold the picture's own layout."""
+    order = {b"II": "<", b"MM": ">"}.get(data[:2])
+    if order is None or struct.unpack(order + "H", data[2:4])[0] != 42:
+        raise ValueError("not a TIFF")
+    entries, _ = _read_ifd(data, struct.unpack(order + "I", data[4:8])[0], order, limit=4096)
+    said = []
+    for tag, _kind, _number, _raw in entries:
+        if tag == GPS_POINTER:
+            said.append("GPS position")
+        elif tag == EXIF_POINTER:
+            said.append("EXIF")
+        elif tag == 0x02BC:
+            said.append("XMP")
+        elif tag in (0x83BB, 0x8649):
+            said.append("IPTC" if tag == 0x83BB else "Photoshop data")
+        elif (tag, IFD0) in EXIF_TAGS and not EXIF_TAGS[(tag, IFD0)][2]:
+            said.append(f"EXIF {EXIF_TAGS[(tag, IFD0)][0]}")
+    return said
+
+
 # ---- by kind ----
 
 JPEG_EXTENSIONS = (".jpg", ".jpeg", ".jpe", ".jfif")
 PNG_EXTENSIONS = (".png",)
+GIF_EXTENSIONS = (".gif",)
+WEBP_EXTENSIONS = (".webp",)
+TIFF_EXTENSIONS = (".tif", ".tiff")
+PICTURE_EXTENSIONS = (JPEG_EXTENSIONS + PNG_EXTENSIONS + GIF_EXTENSIONS + WEBP_EXTENSIONS
+                      + TIFF_EXTENSIONS)
 
 
 def kind_of(name, data):
-    """jpeg, png, or None, by the file's first bytes, its name agreeing."""
+    """jpeg, png, gif, webp, tiff, or None, by the file's first bytes, its
+    name agreeing."""
     lower = name.lower()
     if data[:2] == b"\xff\xd8" and lower.endswith(JPEG_EXTENSIONS):
         return "jpeg"
     if data.startswith(PNG_SIGNATURE) and lower.endswith(PNG_EXTENSIONS):
         return "png"
+    if data[:6] in (b"GIF87a", b"GIF89a") and lower.endswith(GIF_EXTENSIONS):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and lower.endswith(WEBP_EXTENSIONS):
+        return "webp"
+    if data[:4] in (b"II*\x00", b"MM\x00*") and lower.endswith(TIFF_EXTENSIONS):
+        return "tiff"
     return None
 
 
@@ -593,7 +791,12 @@ def strip(name, data, level="private", keep=()):
         return data, []
     working = "private" if level == "report" else level
     try:
-        new, removed = (strip_jpeg if kind == "jpeg" else strip_png)(data, working, keep)
+        if kind == "tiff":
+            said = tiff_said(data)
+            return data, ([f"TIFF, not stripped: {', '.join(said)} left as it is"]
+                          if said else [])
+        new, removed = {"jpeg": strip_jpeg, "png": strip_png, "gif": strip_gif,
+                        "webp": strip_webp}[kind](data, working, keep)
     except (ValueError, struct.error, IndexError) as exc:
         return data, [f"not read ({exc}); left as it is"]
     return (data if level == "report" else new), removed
@@ -651,19 +854,89 @@ def strip_office_properties(name, data, level, keep):
     wanted = [entry for entry in OFFICE_REMOVED if not entry[2] or entry[2] not in words]
     if level == "bare":
         wanted = OFFICE_REMOVED + OFFICE_BARE
+    text, removed, changed = _cut_elements(text, wanted, "Office")
+    return (text.encode("utf-8") if changed else data), removed
+
+
+def _cut_elements(text, wanted, kind):
+    """text without the elements wanted names [(namespace, local name,
+    category)], under whatever prefix the document binds; (text, what
+    went, as "kind local", whether it changed). An element said to have
+    gone is one with text or, empty, with attributes (ODF's template)."""
     removed, changed = [], False
     for namespace, local, _ in wanted:
         for prefix in _prefixes(text, namespace):
             tag = f"{prefix}:{local}" if prefix else local
             pattern = re.compile(r"<%s(?:\s[^<>]*)?(?:/>|>[^<]*</%s\s*>)" % (
                 re.escape(tag), re.escape(tag)))
-            said = [m for m in pattern.findall(text) if not m.endswith("/>")
-                    and re.sub(r"<[^>]*>", "", m).strip()]
+            said = [m for m in pattern.findall(text)
+                    if (re.sub(r"<[^>]*>", "", m).strip() if not m.endswith("/>")
+                        else re.search(r"\s[\w.:-]+\s*=", m))]
             text, count = pattern.subn("", text)
             changed = changed or bool(count)
             if said:
-                removed.append(f"Office {local}")
+                removed.append(f"{kind} {local}")
+    return text, removed, changed
+
+
+# ---- an OpenDocument file's own properties ----
+
+ODF_META = "urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
+ODF_CONFIG = "urn:oasis:names:tc:opendocument:xmlns:config:1.0"
+# What private takes out of an OpenDocument file's meta.xml: dc:creator is
+# its last editor there, meta:initial-creator its author, who's kept.
+ODF_REMOVED = [
+    (DC, "creator", ""),
+    (ODF_META, "printed-by", ""),
+    (ODF_META, "editing-cycles", ""),
+    (ODF_META, "editing-duration", ""),
+    (ODF_META, "template", ""),
+    (ODF_META, "creation-date", "timestamps"),
+    (DC, "date", "timestamps"),
+    (ODF_META, "print-date", "timestamps"),
+    (ODF_META, "generator", "software"),
+]
+ODF_BARE = [(ODF_META, "initial-creator", ""), (DC, "description", ""),
+            (DC, "subject", ""), (ODF_META, "keyword", "")]
+# settings.xml's printer, by its name and its driver's settings.
+ODF_PRINTER_ITEMS = ("PrinterName", "PrinterSetup")
+
+
+def strip_odf_properties(name, data, level, keep):
+    """An OpenDocument file's meta.xml with its last editor, printer,
+    editing count and time, template, dates, and generator taken out at
+    private (ODF_REMOVED), its author and description too at bare, or
+    its settings.xml with the printer's name and setup emptied; what went.
+    The rest is left byte for byte, its user-defined properties among it."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data, ["OpenDocument properties (not UTF-8); left as it is"]
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        return data, ["OpenDocument properties (with a document type); left as it is"]
+    if name == "settings.xml":
+        removed, changed = [], False
+        for prefix in _prefixes(text, ODF_CONFIG):
+            item = f"{prefix}:config-item" if prefix else "config-item"
+            attr = f"{prefix}:name" if prefix else "name"
+            for which in ODF_PRINTER_ITEMS:
+                pattern = re.compile(r'(<%s\s[^<>]*%s="%s"[^<>]*>)([^<]+)(</%s\s*>)' % (
+                    re.escape(item), re.escape(attr), which, re.escape(item)))
+                text, count = pattern.subn(r"\1\3", text)
+                if count:
+                    changed = True
+                    removed.append(f"OpenDocument {which}")
+        return (text.encode("utf-8") if changed else data), removed
+    words = [str(k).lower() for k in keep or []]
+    wanted = [entry for entry in ODF_REMOVED if not entry[2] or entry[2] not in words]
+    if level == "bare":
+        wanted = ODF_REMOVED + ODF_BARE
+    text, removed, changed = _cut_elements(text, wanted, "OpenDocument")
     return (text.encode("utf-8") if changed else data), removed
+
+
+ODF_EXTENSIONS = (".odt", ".odp", ".ods", ".odg", ".ott", ".otp", ".ots")
+ODF_PARTS = ("meta.xml", "settings.xml")
 
 
 OFFICE_EXTENSIONS = (".docx", ".pptx", ".xlsx", ".docm", ".pptm", ".xlsm")
@@ -674,7 +947,8 @@ OFFICE_PARTS = ("docProps/core.xml", "docProps/app.xml")
 
 # Containers whose pictures are stripped where they are: an EPUB, Office's
 # and OpenDocument's files, a cartridge, and a zip the run writes.
-ZIP_EXTENSIONS = (".epub", ".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods", ".imscc", ".zip")
+ZIP_EXTENSIONS = (".epub", ".docx", ".pptx", ".xlsx", ".docm", ".pptm", ".xlsm", ".odt",
+                  ".odp", ".ods", ".odg", ".ott", ".otp", ".ots", ".imscc", ".zip")
 
 
 def strip_zip(path, level, keep, own_dates=False):
@@ -686,15 +960,28 @@ def strip_zip(path, level, keep, own_dates=False):
     import zipfile
     rows, changed = [], {}
     office = path.lower().endswith(OFFICE_EXTENSIONS)
+    odf = path.lower().endswith(ODF_EXTENSIONS)
     with zipfile.ZipFile(path) as archive:
         for info in archive.infolist():
-            properties = office and info.filename in OFFICE_PARTS
-            if info.is_dir() or not (properties or info.filename.lower().endswith(
-                    JPEG_EXTENSIONS + PNG_EXTENSIONS)):
+            properties = (office and info.filename in OFFICE_PARTS) or (
+                odf and info.filename in ODF_PARTS)
+            pdf = info.filename.lower().endswith(".pdf")
+            if info.is_dir() or not (properties or pdf or info.filename.lower().endswith(
+                    PICTURE_EXTENSIONS)):
                 continue
             data = archive.read(info)
+            if pdf:
+                try:
+                    new, found = strip_pdf_bytes(data, level, keep)
+                except Exception as exc:  # a PDF that can't be read is left, and said
+                    new, found = data, [("", [f"not read ({type(exc).__name__}); left as it is"])]
+                rows += [(info.filename + (f", {where}" if where else ""), removed)
+                         for where, removed in found]
+                if new != data:
+                    changed[info.filename] = new
+                continue
             if properties:
-                new, removed = strip_office_properties(
+                new, removed = (strip_odf_properties if odf else strip_office_properties)(
                     info.filename, data, "private" if level == "report" else level,
                     tuple(keep) + (("timestamps",) if own_dates else ()))
                 new = data if level == "report" else new
@@ -715,40 +1002,192 @@ def strip_zip(path, level, keep, own_dates=False):
     return rows
 
 
-def strip_pdf(path, level, keep):
-    """A PDF's JPEG pictures (a DCTDecode stream is a JPEG file) stripped
-    in place, the document's own metadata left as the run wrote it;
-    [(the picture's object, what went)]. Without pikepdf, nothing, and
-    one row saying so."""
+# A PDF's document information: what private keeps, and what a category
+# keeps besides; bare keeps the title alone.
+PDF_INFO_KEPT = {"/Title", "/Subject", "/Keywords", "/Author", "/Trapped"}
+PDF_INFO_CATEGORIES = {"software": {"/Creator", "/Producer"},
+                       "timestamps": {"/CreationDate", "/ModDate"}}
+# What pdfTeX and LuaTeX copy from a PDF they include, beside its page:
+# its document information and its file's name (/PTEX.*), and its page's
+# editor's data and dates; all of it goes from a PDF the run made.
+PTEX_KEYS = ("/PTEX.InfoDict", "/PTEX.FileName")
+
+
+def _pdf_info_drops(info, level, keep):
+    """The document information's keys the level takes out."""
+    words = [str(k).lower() for k in keep or []] if level != "bare" else []
+    kept = {"/Title"} if level == "bare" else set(PDF_INFO_KEPT)
+    for word in words:
+        kept |= PDF_INFO_CATEGORIES.get(word, set())
+    return [key for key in info.keys() if key not in kept]
+
+
+def _filtered_metadata(holder, level, keep, kept, where, rows):
+    """holder's /Metadata stream given only what the level keeps (filter_xmp
+    with kept), or taken out where nothing is; True if it changed."""
+    import pikepdf
+    stream = holder.get("/Metadata")
+    if not isinstance(stream, pikepdf.Stream):
+        return False
+    try:
+        data = stream.read_bytes()
+    except Exception:  # a stream that can't be decoded goes
+        del holder["/Metadata"]
+        rows.append((where, ["XMP (unreadable, taken out whole)"]))
+        return True
+    packet, removed = filter_xmp(data, level, keep, kept=kept)
+    if removed:
+        rows.append((where, removed))
+    if packet is None:
+        del holder["/Metadata"]
+        return True
+    if packet != data:
+        stream.write(packet)
+        return True
+    return False
+
+
+def strip_pdf_document(pdf, level, keep, own=False):
+    """An open PDF's metadata about its people taken out in place, at
+    private or bare; ([(where in it, what went)], whether it changed).
+
+    Every PDF: a JPEG picture's own metadata (a DCTDecode stream is a JPEG
+    file), a picture's and a page's XMP, a page's /PieceInfo (an editor's
+    private data, sometimes the whole working file) and /LastModified,
+    and what pdfTeX and LuaTeX copy from a PDF they include as a figure:
+    its document information and file name (PTEX_KEYS), its page's XMP,
+    /PieceInfo, and /LastModified. A PDF the run didn't make (own False),
+    a copy of an author's file, also loses its document information but
+    PDF_INFO_KEPT and its document XMP but PDF_XMP_KEPT, so a PDF/UA or
+    PDF/A file keeps its claim; one the run made keeps those as written."""
+    import pikepdf
+    rows, changed = [], False
+    xmp_kept = PDF_XMP_BARE if level == "bare" else PDF_XMP_KEPT
+    timestamps = "timestamps" in [str(k).lower() for k in keep or []] and level != "bare"
+
+    def editors_data(holder, where):
+        nonlocal changed
+        gone = []
+        if "/PieceInfo" in holder:
+            del holder["/PieceInfo"]
+            gone.append("PDF PieceInfo (an editor's data)")
+        if "/LastModified" in holder and not timestamps:
+            del holder["/LastModified"]
+            gone.append("PDF LastModified")
+        for key in PTEX_KEYS:
+            if key in holder:
+                value = holder[key]
+                said = ", ".join(str(k)[1:] for k in value.keys()) \
+                    if isinstance(value, pikepdf.Dictionary) else ""
+                del holder[key]
+                gone.append("an included PDF's " + ("information" + (f" ({said})" if said else "")
+                                                    if key == "/PTEX.InfoDict" else "file name"))
+        if gone:
+            rows.append((where, gone))
+            changed = True
+        if _filtered_metadata(holder, level, keep, xmp_kept, where, rows):
+            changed = True
+
+    for number, page in enumerate(pdf.pages, 1):
+        editors_data(page.obj, f"page {number}")
+    for obj in pdf.objects:
+        if not isinstance(obj, pikepdf.Stream):
+            continue
+        subtype = obj.get("/Subtype")
+        if subtype == "/Form":
+            editors_data(obj, f"object {obj.objgen[0]}")
+        elif subtype == "/Image":
+            editors_data(obj, f"object {obj.objgen[0]}")
+            if obj.get("/Filter") == "/DCTDecode":
+                data = obj.read_raw_bytes()
+                new, removed = strip("picture.jpg", data, level, keep)
+                if removed:
+                    rows.append((f"object {obj.objgen[0]}", removed))
+                if new != data:
+                    obj.write(new, filter=pikepdf.Name.DCTDecode,
+                              decode_parms=obj.get("/DecodeParms"))
+                    changed = True
+    if not own:
+        if "/PieceInfo" in pdf.Root:
+            del pdf.Root["/PieceInfo"]
+            rows.append(("document", ["PDF PieceInfo (an editor's data)"]))
+            changed = True
+        if _filtered_metadata(pdf.Root, level, keep, xmp_kept, "document", rows):
+            changed = True
+        info = pdf.trailer.get("/Info")
+        if isinstance(info, pikepdf.Dictionary):
+            drops = _pdf_info_drops(info, level, keep)
+            if drops:
+                for key in drops:
+                    del info[key]
+                rows.append(("document", [f"PDF {str(key)[1:]}" for key in drops]))
+                changed = True
+    return rows, changed
+
+
+def _pdf_left(pdf):
+    """Why a PDF is left as it is, or None: one that's encrypted, or
+    signed, whose signature a rewrite would break."""
+    if pdf.is_encrypted:
+        return "encrypted; left as it is"
+    acroform = pdf.Root.get("/AcroForm")
+    try:
+        if acroform is not None and int(acroform.get("/SigFlags", 0)) & 1:
+            return "signed; left as it is"
+    except (TypeError, ValueError):
+        pass
+    if "/Perms" in pdf.Root:
+        return "signed; left as it is"
+    return None
+
+
+def strip_pdf_bytes(data, level, keep, own=False):
+    """A PDF's bytes stripped (strip_pdf_document), and [(where in it,
+    what went)]; at report the bytes are data. Without pikepdf, or for a
+    PDF that's encrypted or signed, data and one row saying why."""
+    import io
     try:
         import pikepdf
     except ImportError:
-        return [("", ["not read (pikepdf isn't installed); left as it is"])]
-    rows, changed = [], False
-    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
-        for obj in pdf.objects:
-            if not isinstance(obj, pikepdf.Stream) or obj.get("/Subtype") != "/Image" \
-                    or obj.get("/Filter") != "/DCTDecode":
-                continue
-            data = obj.read_raw_bytes()
-            new, removed = strip("picture.jpg", data, level, keep)
-            if removed:
-                rows.append((f"object {obj.objgen[0]}", removed))
-            if new != data:
-                obj.write(new, filter=pikepdf.Name.DCTDecode,
-                          decode_parms=obj.get("/DecodeParms"))
-                changed = True
-        if changed:
-            pdf.save(path, deterministic_id=True)
+        return data, [("", ["not read (pikepdf isn't installed); left as it is"])]
+    working = "private" if level == "report" else level
+    with pikepdf.open(io.BytesIO(data)) as pdf:
+        left = _pdf_left(pdf)
+        if left:
+            return data, [("", [left])]
+        rows, changed = strip_pdf_document(pdf, working, keep, own)
+        if level == "report" or not changed:
+            return data, rows
+        out = io.BytesIO()
+        pdf.save(out, deterministic_id=True)
+    return out.getvalue(), rows
+
+
+def strip_pdf(path, level, keep, own=False):
+    """A PDF file stripped in place (strip_pdf_bytes), written again only
+    where something changed; [(where in it, what went)]. own: the run made
+    it, and its document information and XMP are left as written."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    new, rows = strip_pdf_bytes(data, level, keep, own)
+    if new != data:
+        import os
+        tmp = path + ".strip"
+        with open(tmp, "wb") as fh:
+            fh.write(new)
+        os.replace(tmp, path)
     return rows
 
 
-def strip_folder(folder, level="private", keep=(), own_dates=False):
+def strip_folder(folder, level="private", keep=(), own_dates=False, own_pdfs=False):
     """Every picture an output's folder holds, as a file or inside a
-    container (ZIP_EXTENSIONS, a PDF), stripped in place at the level, no
-    link followed; [(the file's path from folder, the member or "", what
+    container (ZIP_EXTENSIONS, a PDF), and every PDF's and Office file's
+    metadata about its people, stripped in place at the level, no link
+    followed; [(the file's path from folder, the member or "", what
     went)], at report what private would take out. own_dates: an Office
-    file's dates are the run's (strip_zip)."""
+    file's dates are the run's (strip_zip); own_pdfs: the folder's PDFs
+    are the run's, their document information and XMP left as written
+    (strip_pdf_document)."""
     import os
     rows = []
     for root, dirs, files in os.walk(folder):
@@ -760,7 +1199,7 @@ def strip_folder(folder, level="private", keep=(), own_dates=False):
             where = os.path.relpath(path, folder).replace(os.sep, "/")
             lower = name.lower()
             try:
-                if lower.endswith(JPEG_EXTENSIONS + PNG_EXTENSIONS):
+                if lower.endswith(PICTURE_EXTENSIONS):
                     with open(path, "rb") as fh:
                         data = fh.read()
                     new, removed = strip(name, data, level, keep)
@@ -774,7 +1213,7 @@ def strip_folder(folder, level="private", keep=(), own_dates=False):
                              for member, removed in strip_zip(path, level, keep, own_dates)]
                 elif lower.endswith(".pdf"):
                     rows += [(where, member, removed)
-                             for member, removed in strip_pdf(path, level, keep)]
+                             for member, removed in strip_pdf(path, level, keep, own_pdfs)]
             except Exception as exc:  # a file that can't be read is left, and said
                 rows.append((where, "", [f"not read ({type(exc).__name__}); left as it is"]))
     return rows

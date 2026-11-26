@@ -937,13 +937,19 @@ def check_metastrip():
     IPTC to the by-line, Photoshop's thumbnail, a comment, and the bytes
     after the picture's end; the pixels the same, a second strip the same
     bytes; bare keeping only the orientation; a category and a field
-    kept by name; a PNG's text and EXIF chunks alike; report changing
-    nothing; and broken files left as they are, never a traceback."""
+    kept by name; a PNG's text and EXIF chunks alike; a GIF's comment,
+    XMP, and trailing bytes, its looping kept; a WebP's EXIF and XMP, its
+    flags put right; a TIFF reported, not changed; an OpenDocument file's
+    last editor, printer, template, and generator, its author kept; a
+    copied PDF's document information and XMP, its title and PDF/UA
+    claim kept, and an included figure's information and editor's data
+    in a PDF the run made, its own left; report changing nothing; and
+    broken files left as they are, never a traceback."""
     import io
     import random
     import metastrip
     try:
-        from PIL import Image, PngImagePlugin
+        from PIL import Image, PngImagePlugin, TiffImagePlugin
     except ImportError:
         return [("the strip, on pictures made for it",
                  lambda: print("  skip  no Pillow (python3-pil) to make the pictures")
@@ -1024,15 +1030,115 @@ def check_metastrip():
     office_rows = metastrip.strip_zip(office, "private", [])
     with zipfile.ZipFile(office) as archive:
         stripped = {n: archive.read(n) for n in archive.namelist()}
+    gif_xmp = (b"\x21\xff\x0bXMP DataXMP" + xmp + metastrip.GIF_XMP_TRAILER + b"\x00")
+    frames = [Image.new("P", (20, 20), shade) for shade in (10, 90, 170)]
+    held = io.BytesIO()
+    frames[0].save(held, "GIF", save_all=True, append_images=frames[1:], loop=0,
+                   duration=100, comment=b"Ana's home camera")
+    gif = held.getvalue()[:-1] + gif_xmp + b"\x3bAFTER"
+    gif_private, gif_removed = metastrip.strip("loop.gif", gif, "private")
+    held = io.BytesIO()
+    picture.save(held, "WEBP", lossless=True, exif=exif.tobytes(), xmp=xmp)
+    webp = held.getvalue()
+    webp_private, webp_removed = metastrip.strip("photo.webp", webp, "private")
+
+    def riff_kinds(data):
+        kinds, at = [], 12
+        while at + 8 <= len(data):
+            length = struct.unpack("<I", data[at + 4:at + 8])[0]
+            kinds.append(data[at:at + 4])
+            at += 8 + length + (length & 1)
+        return kinds
+    held = io.BytesIO()
+    tiff_info = TiffImagePlugin.ImageFileDirectory_v2()
+    tiff_info[0x0110], tiff_info[0x0131] = "EOS", "Editor 25"
+    picture.save(held, "TIFF", tiffinfo=tiff_info)
+    tiff = held.getvalue()
+    tiff_kept, tiff_said = metastrip.strip("scan.tif", tiff, "private")
+    odf = os.path.join(scratch("strip-odf-"), "slides.odp")
+    meta = ('<?xml version="1.0" encoding="UTF-8"?>\n<office:document-meta xmlns:office='
+            '"urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:'
+            'tc:opendocument:xmlns:meta:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink"><office:meta><meta:generator>'
+            'LibreOffice/24.2</meta:generator><meta:initial-creator>Ana Writer</meta:initial-'
+            'creator><dc:creator>Bo Editor</dc:creator><meta:printed-by>Bo Editor</meta:printed-'
+            'by><meta:editing-cycles>41</meta:editing-cycles><meta:template xlink:href="file:///'
+            'home/bo/plain.otp"/><dc:title>Trade</dc:title><meta:user-defined meta:name="Course">'
+            'ECON 101</meta:user-defined></office:meta></office:document-meta>')
+    settings = ('<office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:'
+                'xmlns:office:1.0" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:'
+                '1.0"><config:config-item config:name="PrinterName" config:type="string">'
+                'Bo-Office-HP</config:config-item><config:config-item config:name='
+                '"PrinterPaperFromSetup" config:type="boolean">false</config:config-item>'
+                '</office:document-settings>')
+    with zipfile.ZipFile(odf, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.presentation")
+        archive.writestr("meta.xml", meta)
+        archive.writestr("settings.xml", settings)
+    odf_rows = metastrip.strip_zip(odf, "private", [])
+    with zipfile.ZipFile(odf) as archive:
+        odf_stripped = {n: archive.read(n) for n in archive.namelist()}
+    pdf_rows, own_rows, pdf_after, own_after, pdf_again = [], [], {}, {}, None
+    try:
+        import pikepdf
+    except ImportError:
+        pikepdf = None
+    if pikepdf:
+        figure = pikepdf.new()
+        figure.add_blank_page(page_size=(100, 50))
+        figure.docinfo["/Title"] = "Figure 1"
+        figure.docinfo["/Author"] = "Ana Writer"
+        figure.docinfo["/Creator"] = "Illustrator on BO-LAPTOP"
+        figure.docinfo["/ModDate"] = "D:20260102030405Z"
+        page = figure.pages[0].obj
+        page["/PieceInfo"] = pikepdf.Dictionary(
+            {"/Illustrator": pikepdf.Dictionary({"/Private": figure.make_stream(b"AIDATA")})})
+        page["/LastModified"] = "D:20260102030405Z"
+        packet = ('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/'
+                  '1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:xmp="http://'
+                  'ns.adobe.com/xap/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:'
+                  'pdfuaid="http://www.aiim.org/pdfua/ns/id/" xmp:CreatorTool="BO-LAPTOP" '
+                  'pdfuaid:part="2"><dc:title><rdf:Alt><rdf:li xml:lang="x-default">Figure 1'
+                  '</rdf:li></rdf:Alt></dc:title></rdf:Description></rdf:RDF></x:xmpmeta>')
+        figure.Root["/Metadata"] = figure.make_stream(packet.encode(), Type=pikepdf.Name.Metadata,
+                                                      Subtype=pikepdf.Name.XML)
+        held = io.BytesIO()
+        figure.save(held)
+        copied = held.getvalue()
+        made = pikepdf.new()
+        made.add_blank_page()
+        made.docinfo["/Creator"] = "LaTeX via pandoc"
+        form = made.make_stream(b"", Type=pikepdf.Name.XObject, Subtype=pikepdf.Name.Form,
+                                BBox=[0, 0, 100, 50])
+        form["/PTEX.InfoDict"] = made.make_indirect(pikepdf.Dictionary(
+            {"/Creator": "Illustrator on BO-LAPTOP"}))
+        form["/PTEX.FileName"] = "/home/bo/figures/figure.pdf"
+        form["/PieceInfo"] = pikepdf.Dictionary({"/Illustrator": made.make_stream(b"AIDATA")})
+        made.pages[0].obj["/Resources"] = pikepdf.Dictionary(
+            {"/XObject": pikepdf.Dictionary({"/Fm1": form})})
+        held = io.BytesIO()
+        made.save(held)
+        ours = held.getvalue()
+        stripped_pdf, pdf_rows = metastrip.strip_pdf_bytes(copied, "private", [])
+        stripped_own, own_rows = metastrip.strip_pdf_bytes(ours, "private", [], own=True)
+        pdf_again = metastrip.strip_pdf_bytes(stripped_pdf, "private", [])
+        with pikepdf.open(io.BytesIO(stripped_pdf)) as opened_pdf:
+            pdf_after = {"info": {str(k): str(v) for k, v in opened_pdf.docinfo.items()},
+                         "xmp": opened_pdf.Root.Metadata.read_bytes(),
+                         "page": sorted(str(k) for k in opened_pdf.pages[0].obj.keys())}
+        with pikepdf.open(io.BytesIO(stripped_own)) as opened_pdf:
+            fm = opened_pdf.pages[0].Resources.XObject.Fm1
+            own_after = {"info": {str(k): str(v) for k, v in opened_pdf.docinfo.items()},
+                         "form": sorted(str(k) for k in fm.keys())}
     random.seed(7)
     broken = 0
     for _ in range(400):
-        damaged = bytearray(random.choice((jpeg, png)))
+        damaged = bytearray(random.choice((jpeg, png, gif, webp, tiff)))
         for _ in range(random.randint(1, 8)):
             damaged[random.randrange(len(damaged))] = random.randrange(256)
         damaged = bytes(damaged[:random.randrange(16, len(damaged) + 1)])
         try:
-            for name in ("a.jpg", "a.png"):
+            for name in ("a.jpg", "a.png", "a.gif", "a.webp", "a.tif"):
                 metastrip.strip(name, damaged, "private")
         except Exception:
             broken += 1
@@ -1080,6 +1186,57 @@ def check_metastrip():
          and sorted(m for m, _ in office_rows) == ["docProps/app.xml", "docProps/core.xml",
                                                    "word/media/image1.jpeg"]
          or fail(repr(office_rows))),
+        ("a GIF's comment, its XMP's creator tool, and the bytes after its trailer taken out, "
+         "its XMP's rights, its looping, and its frames kept, a second strip the same bytes",
+         lambda: "GIF comment" in gif_removed and "XMP CreatorTool" in gif_removed
+         and b"Ana's home" not in gif_private and b"AFTER" not in gif_private
+         and b"CC BY 4.0</rdf:li>" in gif_private and gif_private.endswith(
+             metastrip.GIF_XMP_TRAILER + b"\x00\x3b")
+         and opened(gif_private).info.get("loop") == 0
+         and opened(gif_private).n_frames == opened(gif).n_frames
+         and metastrip.strip("loop.gif", gif_private)[0] == gif_private
+         or fail(repr(gif_removed))),
+        ("a WebP's camera, position, and XMP's creator tool taken out, its artist, rights, "
+         "and pixels kept, and VP8X saying what it holds, at bare its orientation's EXIF alone",
+         lambda: "GPS position" in webp_removed and "XMP CreatorTool" in webp_removed
+         and b"Canon" not in webp_private and b"Ana Photographer" in webp_private
+         and b"CC BY 4.0</rdf:li>" in webp_private
+         and opened(webp_private).tobytes() == opened(webp).tobytes()
+         and webp_private[20] & 0x0C == 0x0C
+         and metastrip.strip("photo.webp", webp, "bare")[0][20] & 0x0C == 0x08
+         and riff_kinds(metastrip.strip("photo.webp", webp, "bare")[0]) == [b"VP8X", b"VP8L",
+                                                                            b"EXIF"]
+         and metastrip.strip("photo.webp", webp_private)[0] == webp_private
+         or fail(repr(webp_removed))),
+        ("a TIFF left as it is, what it says of its camera and software named",
+         lambda: tiff_kept == tiff and tiff_said == [
+             "TIFF, not stripped: EXIF Model, EXIF Software left as it is"]
+         or fail(repr(tiff_said))),
+        ("an OpenDocument file's last editor, printer, editing count, template, and generator "
+         "taken out, its author, title, and own properties kept",
+         lambda: all(word not in odf_stripped["meta.xml"] + odf_stripped["settings.xml"]
+                     for word in (b"Bo Editor", b"Bo-Office", b"41", b"plain.otp",
+                                  b"LibreOffice"))
+         and b"<meta:initial-creator>Ana Writer</meta:initial-creator>" in odf_stripped["meta.xml"]
+         and b"<dc:title>Trade</dc:title>" in odf_stripped["meta.xml"]
+         and b"ECON 101" in odf_stripped["meta.xml"]
+         and b">false</config:config-item>" in odf_stripped["settings.xml"]
+         and [m for m, _ in odf_rows] == ["meta.xml", "settings.xml"]
+         or fail(repr(odf_rows))),
+        ("a copied PDF's creator, date, page's editor's data and date, and XMP's creator tool "
+         "taken out, its title, author, and PDF/UA claim kept; in a PDF the run made, an "
+         "included figure's information, file name, and editor's data taken out, its own "
+         "document information left",
+         lambda: pikepdf is None and print("  skip  no pikepdf; a PDF's metadata isn't checked")
+         or pdf_after.get("info") == {"/Title": "Figure 1", "/Author": "Ana Writer"}
+         and b"BO-LAPTOP" not in pdf_after["xmp"] and b'pdfuaid:part="2"' in pdf_after["xmp"]
+         and b"Figure 1</rdf:li>" in pdf_after["xmp"]
+         and "/PieceInfo" not in pdf_after["page"] and "/LastModified" not in pdf_after["page"]
+         and pdf_again[1] == [] and pdf_again[0] == metastrip.strip_pdf_bytes(
+             pdf_again[0], "private", [])[0]
+         and own_after.get("info") == {"/Creator": "LaTeX via pandoc"}
+         and not {"/PTEX.InfoDict", "/PTEX.FileName", "/PieceInfo"} & set(own_after["form"])
+         or fail(repr((pdf_after, own_after, pdf_rows, own_rows)))),
         ("a picture damaged at random never stops the strip, and a field to keep that isn't "
          "known is named",
          lambda: broken == 0 and metastrip.check_keep(["gps", "LensModel", "Location"])

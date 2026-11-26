@@ -576,9 +576,12 @@ def strip_target(target, folder):
     level, keep = STRIP
     # A Word file or a deck's PowerPoint file a writer made here is dated
     # by the run's moment, which isn't about a person, and is kept; a
-    # copy's (format: source) dates are its editors'.
+    # copy's (format: source) dates are its editors'. A pdf target's PDFs
+    # are the run's, their metadata as the run wrote it; a PDF in any
+    # other target is a copy of an author's file.
     rows = metastrip.strip_folder(folder, level, keep,
-                                  own_dates=target.format in ("docx", "pptx"))
+                                  own_dates=target.format in ("docx", "pptx"),
+                                  own_pdfs=target.format == "pdf")
     STRIPPED[:] = [row for row in STRIPPED if row[0] != target.name]
     STRIPPED.extend((target.name, where, member, level, "; ".join(removed))
                     for where, member, removed in rows)
@@ -590,7 +593,8 @@ def strip_target(target, folder):
         writer.writerows(STRIPPED)
     if rows:
         verb = "would be taken out at private" if level == "report" else "taken out"
-        say(f"{target.name}: {len(rows)} picture(s) with metadata {verb} "
+        files = len({where for where, _member, _removed in rows})
+        say(f"{target.name}: metadata {verb} of {files} file(s) "
             f"({os.path.relpath(report, target.base)}).")
 
 

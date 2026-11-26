@@ -1062,9 +1062,12 @@ def case_metadata_strip(work):
     the Word file's, and the PDF's picture without the camera's serial
     number or the position, the orientation kept and the pixels the same;
     the part's metadata-stripped.csv naming each picture and what went,
-    and the Word file's own properties;
-    and at report every output's picture the source's bytes, the report
-    listing what private would take out."""
+    and the Word file's own properties; a PDF figure's copy in the HTML
+    target without its creator and editor's data, its title kept, and in
+    the PDF target's PDF, which keeps its own document information, the
+    figure's information and editor's data taken out of the form that
+    holds it; and at report every output's picture the source's bytes,
+    the report listing what private would take out."""
     def fail(message):
         raise AssertionError(message)
     try:
@@ -1091,7 +1094,16 @@ def case_metadata_strip(work):
     os.makedirs(os.path.join(work, "src", "book"), exist_ok=True)
     with open(os.path.join(work, "src", "book", "photo.jpg"), "wb") as fh:
         fh.write(source)
-    write("src/book/one.md", "# One\n\n![A blue field.](photo.jpg)\n")
+    figure = pikepdf.new()
+    figure.add_blank_page(page_size=(120, 60))
+    figure.pages[0].Contents = figure.make_stream(b"0 0 1 rg 10 10 100 40 re f")
+    figure.docinfo["/Title"] = "A box"
+    figure.docinfo["/Creator"] = "Drawer on ANA-LAPTOP"
+    figure.pages[0].obj["/PieceInfo"] = pikepdf.Dictionary(
+        {"/Drawer": pikepdf.Dictionary({"/Private": figure.make_stream(b"DRAWERDATA")})})
+    figure.save(os.path.join(work, "src", "book", "box.pdf"))
+    write("src/book/one.md", "# One\n\n![A blue field.](photo.jpg)\n\n"
+          "::: {targets=\"html pdf\"}\n![A blue box.](box.pdf)\n:::\n")
     write("conversion.yaml", "targets:\n  html:\n    format: html\n  epub:\n    format: epub3\n"
           "  docx:\n    format: docx\n  pdf:\n    format: pdf\n")
 
@@ -1119,6 +1131,18 @@ def case_metadata_strip(work):
                 pictures["pdf"] = next((o.read_raw_bytes() for o in pdf.objects
                                         if isinstance(o, pikepdf.Stream)
                                         and o.get("/Subtype") == "/Image"), b"")
+        figures = {}
+        for target, name in (("html", "box.pdf"), ("pdf", "org.example.strip.pdf")):
+            path = os.path.join(out, target, name)
+            if os.path.isfile(path):
+                with pikepdf.open(path) as pdf:
+                    forms = [o for o in pdf.objects if isinstance(o, pikepdf.Stream)
+                             and o.get("/Subtype") == "/Form"]
+                    figures[target] = {
+                        "info": {str(k): str(v) for k, v in pdf.docinfo.items()},
+                        "page": sorted(str(k) for k in pdf.pages[0].obj.keys()),
+                        "forms": [sorted(str(k) for k in o.keys()) for o in forms]}
+        pictures["figures"] = figures
         report = os.path.join(out, "reports", "book", "metadata-stripped.csv")
         rows = []
         if os.path.isfile(report):
@@ -1126,8 +1150,10 @@ def case_metadata_strip(work):
                 rows = list(csv.reader(fh))[1:]
         return done, pictures, rows
     def pictures_of(found):
-        return [row for row in found if not row[2].startswith("docProps/")]
+        return [row for row in found if "EXIF" in row[4]]
+    figures = {}
     done, pictures, rows = build("private")
+    figures = pictures.pop("figures", {})
     _, reported, report_rows = build("report")
     with open(os.path.join(work, "src", "book", "photo.jpg"), "rb") as fh:
         untouched = fh.read() == source
@@ -1152,6 +1178,17 @@ def case_metadata_strip(work):
                  for row in rows)
          and not any(row[0] == "docx" and "Office modified" in row[4] for row in rows)
          and all(row[3] == "private" for row in rows) or fail(repr(rows))),
+        ("a PDF figure's copy in the HTML target without its creator and editor's data, its "
+         "title kept; in the PDF target's PDF the figure's form without the information and "
+         "editor's data LuaTeX copies from it, the PDF's own information kept",
+         lambda: figures.get("html", {}).get("info") == {"/Title": "A box"}
+         and "/PieceInfo" not in figures["html"]["page"]
+         and figures.get("pdf", {}).get("forms")
+         and not any({"/PTEX.InfoDict", "/PieceInfo"} & set(form)
+                     for form in figures["pdf"]["forms"])
+         and "/Creator" in figures["pdf"]["info"]
+         and any(row[0] == "html" and row[1] == "box.pdf" for row in rows)
+         or fail(repr((figures, rows)))),
         ("the source left as it was", lambda: untouched or fail("the source changed")),
         ("at report the HTML's picture the source's bytes, and the report listing what "
          "private would take out",
