@@ -127,6 +127,18 @@ What it can't bring in is named and left, and it exits 1. A LaTeX book's names a
 
 A file saved from a browser on Windows and copied into WSL brings Windows' mark of a download with it: a small file beside it, named after it with `:Zone.Identifier` added, that says which of Windows' security zones the file came from and, for one from the internet, the address it was downloaded from and the page that linked to it. A run never reads a mark as a file of the book's, and no output holds one. Each run lists the part's marked files, and its upstream file when that's marked, in `output/reports/<part>/downloaded-sources.csv`: the file, its zone, the address, and the page that linked to it, each address cut to its scheme, host, port, and path, since a query or a user name in it can carry a token or a name. A note says how many there are, and the report is taken away once none is left; `convert.py --strip-sources` moves the marks to `originals/<part>/`. A mark over 64 KB, or one that doesn't read as one, is listed with its zone `not read`.
 
+### A file that can do more than be read
+
+Each run lists what the part's files can do besides be read in `output/reports/<part>/active-content.csv`, a row for each kind of thing in each file: what it is, how many, an example, and, for a file Windows marks as downloaded, where it came from. A note says how many files there are. The check is TextbookImprover's own, made in the sandbox; it reads each file's structure and runs nothing in it. It isn't a virus scan and doesn't say a file is malicious: it names what a published book has no need of, so you can look at it before the book goes out.
+
+- **A Word, PowerPoint, or Excel file:** macros, Excel 4 macro sheets, embedded objects and controls, a relationship to a file or an address outside it other than a plain link (a template fetched as it opens, a frame, a subdocument), and a field that fetches or runs something (DDE, `INCLUDETEXT`, `INCLUDEPICTURE`). A chart's own workbook, which Word and PowerPoint keep among a file's embedded objects, isn't listed.
+- **An OpenDocument file:** macros, event listeners, embedded objects other than a chart, and applets, plug-ins, and frames.
+- **A PDF:** an action on opening other than going to a page, actions on the document, a page, a field, or an annotation, JavaScript, attached files, a form, and launch, submit, import, and remote actions, rich media, movies, sounds, and 3D.
+- **An HTML page or an SVG picture:** scripts, event handlers, `javascript:` and other script addresses, frames, objects, and applets, forms, a refresh to another page, an SVG animation that sets a link, an SVG's `foreignObject`, and an SVG that declares entities, which can hold markup no tag shows.
+- **An old binary Office file** (`.doc`, `.ppt`, `.xls`) is named as one the check can't read.
+
+Nothing is taken out: an output that copies such a file, a linked PDF or an SVG in an `html` target say, holds what it holds.
+
 ### The LaTeX a book supplies
 
 LaTeX opens whatever file it's told to, and LuaTeX's Lua whatever file you can. So the LaTeX that comes with a book is checked twice: read before LaTeX runs, and LaTeX's own list of the files it opened read after.

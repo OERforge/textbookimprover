@@ -1300,6 +1300,76 @@ def case_strip_sources(work):
     ]
 
 
+def case_active_content(work):
+    """What the part's files can do besides be read, listed in the part's
+    active-content.csv (lib/activecontent.py): a linked PDF's script on
+    opening, a picture's script, and a Word file's macros among the
+    sources, each a row with what was found, a file downloaded from the
+    internet named so, a plain page not listed, and the run saying how
+    many; the report taken away once the files are plain."""
+    import csv
+    import zipfile
+    import pikepdf
+    sources = os.path.join(work, "src", "book")
+    os.makedirs(sources)
+    handout = pikepdf.new()
+    handout.add_blank_page()
+    handout.Root.OpenAction = pikepdf.Dictionary({"/S": pikepdf.Name("/JavaScript"),
+                                                  "/JS": pikepdf.String("app.alert(1)")})
+    handout.save(os.path.join(sources, "handout.pdf"))
+    with open(os.path.join(sources, "drawing.svg"), "w", encoding="utf-8") as fh:
+        fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+                 '<script>alert(1)</script><rect width="10" height="10"/></svg>')
+    with zipfile.ZipFile(os.path.join(sources, "extra.docm"), "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/vbaProject.bin", "x")
+        z.writestr("word/document.xml", "<w:document/>")
+    with open(os.path.join(sources, "handout.pdf:Zone.Identifier"), "w") as fh:
+        fh.write("[ZoneTransfer]\nZoneId=3\nHostUrl=https://example.org/handout.pdf?k=1\n")
+    with open(os.path.join(sources, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# One\n\n![A square.](drawing.svg)\n\nThe [handout](handout.pdf).\n")
+    with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("project:\n  title: A Book\n  language: en\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+
+    def run():
+        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                        "--quick"], cwd=work, capture_output=True, text=True)
+    first = run()
+    report = os.path.join(work, "output", "reports", "book", "active-content.csv")
+    rows = []
+    if os.path.exists(report):
+        with open(report, encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+    # The files made plain.
+    plain = pikepdf.new()
+    plain.add_blank_page()
+    plain.save(os.path.join(sources, "handout.pdf"))
+    with open(os.path.join(sources, "drawing.svg"), "w", encoding="utf-8") as fh:
+        fh.write('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+                 '<rect width="10" height="10"/></svg>')
+    os.remove(os.path.join(sources, "extra.docm"))
+    second = run()
+    internet = "the internet, https://example.org/handout.pdf"
+    return [
+        ("each file's active parts a row of the report, a download from the internet named so",
+         lambda: first.returncode == 0 and rows == [
+             ["File", "Inside", "What", "Count", "Example", "Downloaded"],
+             ["src/book/drawing.svg", "", "scripts", "1", "written inline", ""],
+             ["src/book/extra.docm", "", "macros", "1", "word/vbaProject.bin", ""],
+             ["src/book/handout.pdf", "", "an action on opening", "1", "/JavaScript", internet],
+             ["src/book/handout.pdf", "", "JavaScript actions", "1", "", internet]]),
+        ("the run saying how many, and that the check isn't a virus scan",
+         lambda: "3 of the part's files hold what a document can do besides be read" in
+         first.stdout + first.stderr and "1 of them downloaded from the internet" in
+         first.stdout + first.stderr and "isn't a virus scan" in first.stdout + first.stderr),
+        ("the report taken away once the files are plain",
+         lambda: second.returncode == 0 and not os.path.exists(report)
+         and "besides be read" not in second.stdout + second.stderr),
+    ]
+
+
 def case_metadata_strip(work):
     """A photograph's metadata taken out of every output, its source left
     alone (project.strip_metadata): the HTML target's copy, the EPUB's,
@@ -13796,6 +13866,7 @@ CASES = [
     ("the part's files Windows marks as downloaded, listed", case_downloaded_sources),
     ("a picture's metadata taken out of the outputs", case_metadata_strip),
     ("a part's own files stripped with --strip-sources", case_strip_sources),
+    ("what the part's files can do besides be read, listed", case_active_content),
     ("a license page by page", case_page_licenses),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),

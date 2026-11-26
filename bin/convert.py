@@ -1184,6 +1184,59 @@ def strip_sources(base, part, level, run=None):
         say(f"NOTE: --strip-sources: src/{part}/{below}: {why}.")
 
 
+def report_active_content(base, part):
+    """What the part's files can do besides be read (lib/activecontent.py):
+    macros, scripts, actions, embedded objects, and the like, each file's
+    a row of the part's active-content.csv, with where a file marked as
+    downloaded came from, and said in one line; the report taken away
+    when there's nothing. Read in the sandbox, where the run is; nothing
+    in a file is run or taken out."""
+    import activecontent
+    import stamps
+    import zonemarks
+    sources = P(base).sources(part)
+    top = P(base).top()
+    rows = []
+    for root, dirs, names in os.walk(sources):
+        dirs[:] = sorted(d for d in dirs if not stamps.skipped(d, True)
+                         and not os.path.islink(os.path.join(root, d)))
+        for name in sorted(names):
+            path = os.path.join(root, name)
+            if stamps.skipped(name) or not activecontent.checked(name) \
+                    or os.path.islink(path) or not os.path.isfile(path):
+                continue
+            found = activecontent.check(path)
+            if not found:
+                continue
+            mark = zonemarks.read_mark(path + zonemarks.SUFFIX) \
+                if os.path.isfile(path + zonemarks.SUFFIX) \
+                and not os.path.islink(path + zonemarks.SUFFIX) else None
+            came = ""
+            if mark is not None:
+                came = zonemarks.zone_name(mark["zone"]) \
+                    + (f", {mark['address']}" if mark["address"] else "")
+            where = os.path.relpath(path, top).replace(os.sep, "/")
+            rows += [(where, inside, what, count, example, came)
+                     for inside, what, count, example in found]
+    report = P(base).report("active-content.csv")
+    if not rows:
+        if os.path.isfile(report) and not os.path.islink(report):
+            os.remove(report)
+        return
+    with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
+        writer = sidecars.csv_writer(fh)
+        writer.writerow(["File", "Inside", "What", "Count", "Example", "Downloaded"])
+        writer.writerows(rows)
+    files = len({row[0] for row in rows})
+    internet = len({row[0] for row in rows if row[5].startswith("the internet")})
+    say(f"NOTE: {files} of the part's files hold what a document can do besides be read: "
+        "macros, scripts, actions, or embedded objects"
+        + (f", {internet} of them downloaded from the internet" if internet else "")
+        + f" ({os.path.relpath(report, top)}). The check reads their structure and runs "
+        "nothing in them, and it isn't a virus scan: look at each before you publish the "
+        "book.")
+
+
 def report_downloads(base, part):
     """The part's files Windows marks as downloaded (name:Zone.Identifier,
     lib/zonemarks.py), its upstream file's among them, listed in the
@@ -8615,6 +8668,7 @@ def main():
     global STRIP
     if not args.check_only:
         STRIP = (project.get("strip_metadata") or "private", project.get("keep_metadata") or [])
+    report_active_content(base, PART)
     # A folder is a book or a set of slides: slides when project.kind says
     # so, or when it says nothing and the folder holds decks alone.
     slides = KIND_DECLARED == "slides" or (KIND_DECLARED is None and bool(decks or others)
