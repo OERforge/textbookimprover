@@ -60,6 +60,30 @@ PAGE_TYPES = ("application/xhtml+xml", "text/html")
 # error page under an image's name and declare it text/html.
 
 
+def people(meta):
+    """Each dc:creator and dc:contributor, in the package's order, as
+    (element, name, role): element "creator" or "contributor", the name
+    with its whitespace collapsed, and the role as the package gives it,
+    or None. EPUB 3 gives a role in a meta that refines the element's id
+    (the first such, where there are several); EPUB 2 in an opf:role
+    attribute. Nothing here says what the role means (lib/unpacking.py)."""
+    roles = {}
+    for item in meta.findall("opf:meta", NS):
+        target = item.get("refines") or ""
+        text = " ".join((item.text or "").split())
+        if target.startswith("#") and item.get("property") == "role" and text:
+            roles.setdefault(target[1:], text)
+    found = []
+    for item in meta:
+        element = {"{%s}creator" % NS["dc"]: "creator",
+                   "{%s}contributor" % NS["dc"]: "contributor"}.get(item.tag)
+        name = " ".join((item.text or "").split())
+        if element and name:
+            role = item.get("{%s}role" % NS["opf"]) or roles.get(item.get("id") or "")
+            found.append((element, name, " ".join(role.split()) if role else None))
+    return found
+
+
 class Package:
     """What the package document says: metadata, manifest, spine, and
     where the navigation is. Paths are as the archive names them."""
@@ -84,6 +108,7 @@ class Package:
         self.metadata = {key: every(key) for key in
                          ("title", "language", "creator", "identifier",
                           "publisher", "description", "rights", "date")}
+        self.people = people(meta)
 
         self.manifest = {}                 # id -> (archive path, type, props)
         for item in opf.find("opf:manifest", NS):

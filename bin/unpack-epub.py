@@ -50,7 +50,7 @@ P = projectpaths.of
 try:
     import epubsource
     from unpacking import (Placed, add_part_option, contents_tree, project_yaml,
-                           write_report, summarize)
+                           sort_people, write_report, summarize)
     from names import safe_stem
 except ImportError:
     sys.exit("Cannot find the library. It should be in a lib/ directory "
@@ -159,6 +159,7 @@ def main():
                       "at the end of contents"))
 
     meta = dict(package.metadata)
+    meta["people"] = sort_people(package.people, notes)
     title = (meta["title"] or [os.path.basename(out)])[0]
     placed.write_project(project_yaml("unpack-epub.py from "
                                       + os.path.basename(args.epub), meta, tree,

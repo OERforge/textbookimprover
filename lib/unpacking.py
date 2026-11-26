@@ -28,6 +28,7 @@ import shutil
 import sys
 
 import licenses
+import people as people_module
 import sidecars
 import projectpaths
 
@@ -451,10 +452,47 @@ def write_contents(nodes, lines, indent, flagged, top=True):
             lines += extra
 
 
+# Where a role puts a person in the settings (lib/schema-project.yaml).
+# Any other relator makes a contributor in that role.
+ROLE_SETTINGS = {"aut": "authors", "adp": "adapters", "edt": "editors", "fnd": "funding"}
+
+
+def sort_people(found, notes):
+    """The settings a package's people go under, {setting: [entry]}, from
+    (element, name, role) as lib/epubsource.py reads them: a role that
+    is a MARC relator, by its code or its term, puts its person where
+    ROLE_SETTINGS says, or among the contributors in that role. A creator
+    with no role is an author and a contributor with none is a
+    contributor (ctb), as EPUB has it; a role that is no relator is
+    reported and taken as no role. A name holding a control character,
+    which a setting refuses, is reported and left out."""
+    sorted_people = {}
+    for element, name, role in found:
+        if people_module.CONTROL.search(name):
+            notes.append(("package", "name-not-kept",
+                          f"a {element}'s name holds a control character: "
+                          + repr(name[:60])))
+            continue
+        code = people_module.relator(role)
+        if role and code is None:
+            notes.append(("package", "role-not-a-relator",
+                          f"{name}, a {element}, has the role {role[:40]!r}, which isn't a "
+                          "MARC relator; taken as "
+                          + ("an author" if element == "creator" else "a contributor (ctb)")))
+        code = code or ("aut" if element == "creator" else "ctb")
+        setting = ROLE_SETTINGS.get(code, "contributors")
+        entry = {"name": name, "role": code} if setting == "contributors" else name
+        if entry not in sorted_people.setdefault(setting, []):
+            sorted_people[setting].append(entry)
+    return sorted_people
+
+
 def project_yaml(source, meta, tree, flagged, unnamed, title):
     """project.yaml's text. meta holds lists under title, language,
-    creator, identifier, publisher, description, and rights, whose first
-    Creative Commons deed's address is the license's (lib/licenses.py)."""
+    identifier, publisher, description, and rights, whose first Creative
+    Commons deed's address is the license's (lib/licenses.py); the
+    authors' names under creator; or, in place of creator, people: the
+    settings sort_people gives."""
     lines = ["# Written by " + source + "; yours to edit.", "project:",
              "  identifier: " + xml_name((meta.get("identifier") or [title])[0]),
              "  title: " + yaml_string(title),
@@ -465,9 +503,17 @@ def project_yaml(source, meta, tree, flagged, unnamed, title):
     spdx = next((s for s in map(licenses.from_address, meta.get("rights") or []) if s), None)
     if spdx:
         lines.append(f"  license: {spdx}")
-    if meta.get("creator"):
-        lines.append("  authors:")
-        lines += ["    - " + yaml_string(a) for a in meta["creator"]]
+    found = meta["people"] if "people" in meta else {"authors": meta.get("creator") or []}
+    for setting in ("authors", "adapters", "editors", "contributors", "funding"):
+        if not found.get(setting):
+            continue
+        lines.append(f"  {setting}:")
+        for entry in found[setting]:
+            if isinstance(entry, dict):
+                lines += ["    - name: " + yaml_string(entry["name"]),
+                          "      role: " + entry["role"]]
+            else:
+                lines.append("    - " + yaml_string(entry))
     lines += ["  contents:"]
     write_contents(tree, lines, 4, flagged)
     for page in unnamed:

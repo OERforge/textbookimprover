@@ -25,15 +25,14 @@ Each unpacker writes the metadata it finds as settings in `project.yaml`, with t
 
 | Unpacker | From | Settings it writes |
 |---|---|---|
-| `unpack-epub.py` ([An EPUB as the source](epub-input.md)) | The package document's Dublin Core elements | `identifier`, `title`, `language`, `description`, `publisher`, `authors` (every `dc:creator`), and `license`, from the first Creative Commons deed's address in `dc:rights` |
+| `unpack-epub.py` ([An EPUB as the source](epub-input.md)) | The package document's Dublin Core elements | `identifier`, `title`, `language`, `description`, `publisher`, `authors`, `adapters`, `editors`, `contributors`, and `funding` (each `dc:creator` and `dc:contributor` by its role), and `license`, from the first Creative Commons deed's address in `dc:rights` |
 | `unpack-cnx.py` ([OpenStax's CNXML sources](cnx-input.md)) | The collection's file, and the repository's `META-INF/books.xml` | `identifier` (`book-` and the collection's UUID, which OpenStax keeps across a book's versions), `title`, `language` (`en` where the collection names none), and `license` from the deed's address the collection names, a license that isn't Creative Commons' said in `description` instead; and, for an OpenStax book (one `books.xml` gives a style), `publisher` and `authors`, both "OpenStax", which the collection doesn't name |
 | `unpack-site.py` ([A saved website](site-input.md)) | The pages, by the site's profile | `identifier` (the site's host and path, where the site names none), `title`, `language`, `authors`, and `description` where the site gives one |
 | `unpack-cartridge.py` ([A course cartridge](cartridge-input.md)) | The manifest | `title` and `language` |
 | `unpack-jekyll.py` | The site's `_config.yml` | `identifier`, `title`, and `language` |
 
-Review three things in a `project.yaml` that an unpacker generated, because its values come from a file you didn't write:
+Review two things in a `project.yaml` that an unpacker generated, because its values come from a file you didn't write:
 
-- **Every creator in an EPUB is written as an author.** The test book's EPUB named two authors, an adapter, and an editor, each in its role; unpacked again, all four were `authors`. Move the others to `adapters`, `editors`, or `contributors`.
 - **Only the license is taken from the rights statement.** The copyright line isn't read, and neither are the identifiers after the first, the subjects, the date, or the series. Add them as settings if the book's outputs should include them.
 - **The values are copied unchanged from the upstream file.** A title or a description is written exactly as the publisher gave it. Check each value before publishing the book.
 

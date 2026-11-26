@@ -111,7 +111,7 @@ PAGES = {
 }
 
 
-def build_epub(path):
+def build_epub(path, opf=OPF):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip", zipfile.ZIP_STORED)
         z.writestr("META-INF/container.xml",
@@ -119,7 +119,7 @@ def build_epub(path):
                    'oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
                    '<rootfile full-path="OEBPS/book.opf" media-type="applic'
                    'ation/oebps-package+xml"/></rootfiles></container>')
-        z.writestr("OEBPS/book.opf", OPF)
+        z.writestr("OEBPS/book.opf", opf)
         z.writestr("OEBPS/nav.xhtml", NAV)
         for name, text in PAGES.items():
             z.writestr(name, text)
@@ -195,6 +195,79 @@ def case_unpack(work):
          lambda: ("navigation", "entries-inside-pages") in report),
         ("a directory that already holds a book is refused",
          lambda: again.returncode != 0 and "not empty" in again.stderr),
+    ]
+
+
+# The people as Pandoc's EPUB writer gives them, each role in a meta
+# refining its element; one as EPUB 2 gives it, in opf:role; a role that's
+# a relator's term, one that's no relator, and none; and a name with a
+# control character in it.
+PEOPLE = """<dc:creator id="a1">First Author</dc:creator>
+<meta refines="#a1" property="role" scheme="marc:relators">aut</meta>
+<meta refines="#a1" property="file-as">Author, First</meta>
+<dc:creator id="a2">The Adapter</dc:creator>
+<meta refines="#a2" property="role" scheme="marc:relators">adp</meta>
+<dc:creator xmlns:opf="http://www.idpf.org/2007/opf" opf:role="edt">An Editor</dc:creator>
+<dc:creator>Second Author</dc:creator>
+<dc:contributor id="c1">A Drawer</dc:contributor>
+<meta refines="#c1" property="role" scheme="marc:relators">illustrator</meta>
+<dc:contributor id="c2">The Foundation</dc:contributor>
+<meta refines="#c2" property="role" scheme="marc:relators">fnd</meta>
+<dc:contributor id="c3">Someone</dc:contributor>
+<meta refines="#c3" property="role">helper</meta>
+<dc:contributor>A Helper</dc:contributor>
+<dc:creator>Odd&#x9b;Name</dc:creator>
+"""
+
+
+def case_people(work):
+    os.makedirs(work)
+    epub = os.path.join(work, "people.epub")
+    build_epub(epub, OPF.replace(
+        "<dc:creator>First Author</dc:creator><dc:creator>Second Author</dc:creator>\n",
+        PEOPLE))
+    out = os.path.join(work, "people")
+    result = subprocess.run(["python3", os.path.join(BIN, "unpack-epub.py"), epub, "-o", out],
+                            capture_output=True, text=True)
+    import yaml
+    import people
+    project = yaml.safe_load(read(P(out).project_file()))["project"]
+    lone = os.path.join(work, "alone.epub")
+    build_epub(lone, OPF.replace(
+        "<dc:creator>First Author</dc:creator><dc:creator>Second Author</dc:creator>",
+        "<dc:creator>Odd&#x9b;Name</dc:creator>"))
+    subprocess.run(["python3", os.path.join(BIN, "unpack-epub.py"), lone, "-o",
+                    os.path.join(work, "alone")], capture_output=True, text=True)
+    alone = yaml.safe_load(read(P(os.path.join(work, "alone")).project_file()))["project"]
+    with open(P(out).report("unpack-report.csv"), encoding="utf-8-sig") as fh:
+        report = [(r["Check"], r["Detail"]) for r in csv.DictReader(fh)]
+    problems = [p for key, kind in (("authors", "person"), ("adapters", "person"),
+                                    ("editors", "person"), ("contributors", "contributor"),
+                                    ("funding", "funding"))
+                for i, entry in enumerate(project.get(key) or [])
+                for p in people.check(entry, f"{key} {i}", kind)[1]]
+    return [
+        ("each creator and contributor is where its role puts it, in the package's order",
+         lambda: result.returncode == 0
+         and project["authors"] == ["First Author", "Second Author"]
+         and project["adapters"] == ["The Adapter"]
+         and project["editors"] == ["An Editor"]
+         and project["funding"] == ["The Foundation"]),
+        ("another role makes a contributor in it, by its code; a contributor with "
+         "no role, or one that's no relator, a contributor (ctb)",
+         lambda: project["contributors"] == [
+             {"name": "A Drawer", "role": "ill"}, {"name": "Someone", "role": "ctb"},
+             {"name": "A Helper", "role": "ctb"}]),
+        ("a role that's no relator is reported",
+         lambda: any(c == "role-not-a-relator" and "Someone" in d and "helper" in d
+                     for c, d in report)),
+        ("a name with a control character is left out and reported",
+         lambda: "Odd" not in read(P(out).project_file())
+         and any(c == "name-not-kept" for c, _ in report)),
+        ("every entry is one the settings take",
+         lambda: problems == []),
+        ("a package whose only creator's name can't be kept names no authors",
+         lambda: "authors" not in alone),
     ]
 
 
@@ -750,6 +823,7 @@ def case_from(work):
 
 CASES = [
     ("unpacking", case_unpack),
+    ("an EPUB's people, by their roles", case_people),
     ("a declared page that was split", case_split_source),
     ("converting what was unpacked", case_convert),
     ("a Jekyll site's Markdown", case_jekyll),
