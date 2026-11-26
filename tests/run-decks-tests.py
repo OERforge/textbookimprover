@@ -4754,6 +4754,8 @@ def case_pptx(work):
          "reference's",
          lambda: 'lang="en-US"' not in every and 'lang="de-DE"' in hp["ppt/presentation.xml"]
          and 'lang="de-DE"' in hp["ppt/slideMasters/slideMaster1.xml"] and hd.language == "de-DE"),
+        ("and in the file's properties, as dc:language",
+         lambda: "<dc:language>de-DE</dc:language>" in hp["docProps/core.xml"]),
         ("the file's title is the deck's, a list of one in its YAML, or its file's name",
          lambda: fd.core_title == "Demand: A Short Deck"
          and pptx_deck(untitled).core_title == "untitled"),

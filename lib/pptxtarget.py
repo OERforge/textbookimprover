@@ -72,9 +72,9 @@ writer's output:
   a paragraph's own, or its level's in the master; at the top of a
   shape's text, which PowerPoint gives no space before, the text body is
   told to respect it (spcFirstLastPara), and less than none is none;
-- the deck's language is on every run and on the text styles every run
-  inherits from, in place of the reference document's, since the writer
-  writes no language;
+- the deck's language is on every run, on the text styles every run
+  inherits from, in place of the reference document's, and in the file's
+  properties (dc:language), since the writer writes no language;
 - the file's title is the deck's (its title-meta, else its title, else its
   file's name), and its creator the authors alone, where an institute was
   put under them;
@@ -2130,12 +2130,15 @@ def _drop_properties(xml):
     return re.sub(r"<property" + ATTRS + r">.*?</property>", one, xml, flags=re.S), count
 
 
-def _core(xml, title, creator):
+def _core(xml, title, creator, language=None):
     """core.xml with title as its title when given (else kept, or the
-    fallback when empty) and creator as its creator when given."""
+    fallback when empty), creator as its creator when given, and language
+    as its dc:language when given, where Pandoc's writer, given no lang,
+    leaves it empty though every run carries the deck's language."""
     def element(name, value):
         return "<%s>%s</%s>" % (name, pptxremediate._text(value), name)
-    for name, value in (("dc:title", title), ("dc:creator", creator)):
+    for name, value in (("dc:title", title), ("dc:creator", creator),
+                        ("dc:language", language or None)):
         if value is None:
             continue
         pattern = re.compile(r"<%s\s*/>|<%s>.*?</%s>" % (name, name, name), re.S)
@@ -2347,7 +2350,8 @@ def finish(path, record, *, language, title, svgs=None, notes=None):
         if own is None and not re.search(r"<dc:title>\s*[^\s<]", core):
             own = title
         texts["docProps/core.xml"] = _core(core, own, record.get("creator")
-                                           if record.get("institute") else None)
+                                           if record.get("institute") else None,
+                                           language=language)
     if "docProps/custom.xml" in parts:
         texts["docProps/custom.xml"], counts["properties"] = _drop_properties(
             text("docProps/custom.xml"))
