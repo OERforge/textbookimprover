@@ -46,6 +46,8 @@ Two have no useful default: `project.identifier` and `project.title`. With neith
 
 ### The book's people
 
+This section and the four after it are the book's facts, said once in `project.yaml` for every output. [Metadata](metadata.md) follows each of them into the outputs, format by format, with what a page's own source adds and what's taken out.
+
 `project.authors`, `adapters`, and `editors` each list people, and `contributors` lists the others who had a hand in the book, each in a role. A person is a name, as a reader should see it, or a mapping that says more; the publisher is a name, or a mapping with its [ROR ID](https://ror.org/). A list of names stays valid as it is.
 
 ```yaml

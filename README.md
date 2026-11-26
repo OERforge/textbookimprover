@@ -75,6 +75,7 @@ A project is one folder: the settings at its top, the sources in `src/book/`, th
 | [Conversion settings](docs/conversion-settings.md) | Reference, generated from the schema |
 | [Packaging settings](docs/packaging-settings.md) | Reference, generated from the schema |
 | [Sidecars and reports](docs/sidecars.md) | Each report, each sidecar, and what goes in them |
+| [Metadata](docs/metadata.md) | Where a book's metadata comes from, what each output records of it, what a page's own source adds, what's taken out, the dates, and each field with what it's for and what fills it |
 | [Bare links](docs/bare-links.md) | Links whose text is their own address: the sidecar that replaces them with a shortDOI or text or gives them a title, the shortDOI helper, and why a screen-reader description can't do what it seems it should |
 | [Building the cartridge](docs/packaging.md) | The packager, ordering from a PDF, validating the manifest |
 | [Building an EPUB](docs/epub.md) | One EPUB per book from the same pages and the same contents, and what it claims about itself |
