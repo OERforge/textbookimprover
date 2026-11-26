@@ -356,6 +356,26 @@ def java_options():
     return [f"-Xmx{max(256, (soft // 2) >> 20)}m"]
 
 
+def java_environment(environ=None):
+    """The environment for a JVM a run starts (epubcheck, the Nu checker,
+    veraPDF): JAVA_TOOL_OPTIONS given -Djava.io.tmpdir, the run's own
+    temporary folder (TMPDIR, output/work/tmp/), after whatever it held.
+    Java takes /tmp whatever TMPDIR says, and the Landlock sandbox doesn't
+    let a run write /tmp: epubcheck then calls a picture it can't copy
+    there corrupt. Nothing changes where the folder is /tmp, or a name a
+    JVM's options can't quote, or where TMPDIR isn't set. A copy; the
+    run's own environment is left."""
+    environment = dict(os.environ if environ is None else environ)
+    folder = os.environ.get("TMPDIR", "")
+    if not folder or not os.path.isabs(folder) or os.path.realpath(folder) == "/tmp" \
+            or '"' in folder or "\\" in folder or not folder.isprintable():
+        return environment
+    said = environment.get("JAVA_TOOL_OPTIONS", "").strip()
+    environment["JAVA_TOOL_OPTIONS"] = (said + " " if said else "") \
+        + f'"-Djava.io.tmpdir={folder}"'
+    return environment
+
+
 def _lower(resource, which, soft, hard):
     """Set a limit no higher than it is."""
     now_soft, now_hard = resource.getrlimit(which)

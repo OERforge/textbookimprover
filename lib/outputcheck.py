@@ -889,7 +889,8 @@ def run_epubcheck(command, path):
         report = os.path.join(work, "epubcheck.json")
         try:
             subprocess.run(command + ["--json", report, path],
-                           capture_output=True, text=True, timeout=600)
+                           capture_output=True, text=True, timeout=600,
+                           env=limits.java_environment())
             with open(report, encoding="utf-8") as fh:
                 result = json.load(fh)
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
@@ -925,7 +926,8 @@ def run_vnu(command, paths):
         # too. The report is the first { onward, whatever precedes it.
         result = subprocess.run(
             command + ["--format", "json", "--stdout", "--exit-zero-always"]
-            + paths, capture_output=True, text=True, timeout=600)
+            + paths, capture_output=True, text=True, timeout=600,
+            env=limits.java_environment())
         text = result.stdout if "{" in result.stdout else result.stderr
         parsed = json.loads(text[text.index("{"):])
     except (OSError, subprocess.SubprocessError, ValueError) as exc:

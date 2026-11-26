@@ -2071,6 +2071,102 @@ def check_people():
     ]
 
 
+def check_java_temp():
+    """A JVM a run starts is given the run's temporary folder: Java takes
+    /tmp whatever TMPDIR says, and the Landlock sandbox doesn't let a run
+    write there, where epubcheck then calls a picture corrupt. The option
+    added after what JAVA_TOOL_OPTIONS held, quoted so a space is kept;
+    nothing added for /tmp or a name with a quote; Java itself taking the
+    folder; and the output check's epubcheck, Nu checker, and veraPDF runs
+    given it (stand-ins that say what they were given)."""
+    import json as json_
+    import limits
+    import outputcheck
+    import pdfcheck
+    work = scratch("java-temp-")
+    folder = os.path.join(work, "run tmp")
+    os.makedirs(folder)
+    saved = os.environ.get("TMPDIR")
+
+    def with_tmp(value, environ):
+        os.environ["TMPDIR"] = value
+        tempfile.tempdir = None
+        try:
+            return limits.java_environment(environ)
+        finally:
+            if saved is None:
+                os.environ.pop("TMPDIR", None)
+            else:
+                os.environ["TMPDIR"] = saved
+            tempfile.tempdir = None
+    given = with_tmp(folder, {"JAVA_TOOL_OPTIONS": "-Dx=1", "PATH": os.environ.get("PATH", "")})
+    plain = with_tmp("/tmp", {"PATH": os.environ.get("PATH", "")})
+    quoted_folder = os.path.join(work, 'a"b')
+    os.makedirs(quoted_folder)
+    quoted = with_tmp(quoted_folder, {})
+
+    def java_takes():
+        if not shutil.which("java"):
+            print("  skip  no java here; Java's own reading of the option isn't checked")
+            return True
+        done = subprocess.run(["java", "-XshowSettings:properties", "-version"],
+                              capture_output=True, text=True, env=given, timeout=120)
+        return f"java.io.tmpdir = {folder}" in done.stderr
+    # Stand-ins for the three checkers, each saying what it was given.
+    stub = os.path.join(work, "stub.py")
+    with open(stub, "w", encoding="utf-8") as fh:
+        fh.write(textwrap.dedent("""\
+            import json, os, sys
+            said = os.environ.get("JAVA_TOOL_OPTIONS", "")
+            args = sys.argv[1:]
+            if "--json" in args:
+                with open(args[args.index("--json") + 1], "w") as fh:
+                    json.dump({"messages": [{"severity": "ERROR", "ID": "X", "message": said,
+                                             "locations": [{"path": "p"}]}]}, fh)
+            elif "--stdout" in args:
+                print(json.dumps({"messages": [{"type": "error", "url": "file:p",
+                                                "message": said}]}))
+            else:
+                print(json.dumps({"report": {"jobs": [{"said": said}]}}))
+            """))
+    command = [sys.executable, stub]
+    os.environ["TMPDIR"] = folder
+    tempfile.tempdir = None
+    try:
+        epub = " ".join(f.detail for f in outputcheck.run_epubcheck(command, "book.epub"))
+        vnu = json_.dumps([f.detail for f in outputcheck.run_vnu(command, ["page.html"])[0]])
+        captured = []
+        real = subprocess.run
+
+        def spy(*args, **kwargs):
+            captured.append((kwargs.get("env") or {}).get("JAVA_TOOL_OPTIONS", ""))
+            return real(*args, **kwargs)
+        subprocess.run = spy
+        try:
+            pdfcheck.run_verapdf(command, "book.pdf")
+        except Exception:
+            pass
+        finally:
+            subprocess.run = real
+    finally:
+        if saved is None:
+            os.environ.pop("TMPDIR", None)
+        else:
+            os.environ["TMPDIR"] = saved
+        tempfile.tempdir = None
+    option = f'"-Djava.io.tmpdir={folder}"'
+    return [
+        ("the run's folder added after what JAVA_TOOL_OPTIONS held, quoted",
+         lambda: given["JAVA_TOOL_OPTIONS"] == "-Dx=1 " + option),
+        ("nothing added for /tmp, or for a folder whose name has a quote",
+         lambda: "JAVA_TOOL_OPTIONS" not in plain and "JAVA_TOOL_OPTIONS" not in quoted),
+        ("Java takes the folder, its space and all", java_takes),
+        ("epubcheck, the Nu checker, and veraPDF given it",
+         lambda: option in epub and "java.io.tmpdir" in vnu and folder in vnu
+         and any(option in c for c in captured)),
+    ]
+
+
 def check_limits():
     """lib/limits.py: sizes and times as given; how many of a kind run side
     by side, from the machine's memory or --jobs; what a run warns of; and
@@ -14404,6 +14500,7 @@ GROUPS = [
     ("lib/sourcestrip.py, a part's own files stripped", check_sourcestrip),
     ("lib/activecontent.py, what a file can do besides be read", check_activecontent),
     ("lib/limits.py, what each program a run starts may use", check_limits),
+    ("a JVM a run starts given the run's temporary folder", check_java_temp),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),
     ("what a page names by URL", check_named_by_url),

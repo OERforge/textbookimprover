@@ -38,6 +38,7 @@ from xml.etree import ElementTree
 
 import alttext
 import findings as findings_lib
+import limits
 import wcag
 from findings import Finding, describe_input, digest, from_row, md_code, md_text, now, rows_of
 import projectpaths
@@ -613,7 +614,7 @@ def run_verapdf(command, path):
                                            "--maxfailuresdisplayed", "1",
                                            path],
                                 capture_output=True, encoding="utf-8", errors="replace",
-                                timeout=1800)
+                                timeout=1800, env=limits.java_environment())
         report = json.loads(result.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         return [Finding(name, "verapdf:failed", str(exc)[:200], file=name,
@@ -1060,7 +1061,7 @@ def run_verapdf_wcag(command, paths, folder=None, timeout=3600, verbose=False,
         return [], warnings + unfitting
     findings, rules, ran, left_out = [], [], [], []
     if groups:
-        environment = dict(os.environ)
+        environment = limits.java_environment()
         environment["CLASSPATH_PREFIX"] = os.pathsep.join(
             [os.path.join(os.path.abspath(folder), "*")]
             + ([environment["CLASSPATH_PREFIX"]] if environment.get("CLASSPATH_PREFIX")
