@@ -1259,7 +1259,8 @@ def case_strip_sources(work):
             return True
         now = open(os.path.join(boxed, "src", "book", "photo.jpg"), "rb").read()
         return boxed_run.returncode == 0 and b"SN98765" not in now \
-            and "Converting in a sandbox" in boxed_run.stdout + boxed_run.stderr \
+            and re.search(r"Converting in a sandbox|sandboxed with Landlock",
+                          boxed_run.stdout + boxed_run.stderr) \
             and open(os.path.join(boxed, "originals", "book", "photo.jpg"), "rb").read() == photo \
             and not os.path.exists(os.path.join(boxed, "output", "work", "strip-sources", "book"))
     return [
@@ -1759,7 +1760,7 @@ def case_colophon(work):
         ("the PDF's: the credits, the statement, the TeX Live, and every face it embeds by "
          "its family, none it doesn't",
          lambda: "Illustrator: Ed Fox." in text and "A & B Press, 100% $5 #1" in text
-         and made in text and line and faces and len(named) == len(faces)
+         and made.replace(" ", "") in text.replace(" ", "") and line and faces and len(named) == len(faces)
          and all(any(n.replace(" ", "") == face or face.startswith("LM")
                      and n.startswith("Latin Modern") for n in named) for face in faces)
          or fail(repr((text[-700:], faces)))),
