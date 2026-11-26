@@ -2800,24 +2800,16 @@ def case_limits(work):
     ]
 
 
-def case_sandbox(work):
-    """A run converts in a sandbox (lib/sandbox.py): a page's Lua reading a
-    file outside the project with io.lines, which LaTeX's list of what it
-    opened doesn't hold, reads it with --no-sandbox and can't inside; --sandbox-env keeps a variable inside and
-    --sandbox-read shows a folder; the sidecars are made UTF-8 before it,
-    where they're read-only; and a run that says it's inside when it isn't
-    is refused. Skips without a sandbox here, LuaLaTeX, or pdftotext."""
+def sandbox_book(work):
+    """The book the sandbox's cases build: a page whose Lua reads a file
+    outside the project with io.lines and says what a variable holds;
+    (kind, folder, secret, alt, build), or a reason to skip."""
     import sandbox
-
-    def fail(message):
-        raise AssertionError(message)
     kind, why = sandbox.available()
     if kind is None:
-        print(f"  skip  no sandbox here ({why}); a run's sandbox isn't checked")
-        return []
+        return f"no sandbox here ({why}); a run's sandbox isn't checked"
     if shutil.which("lualatex") is None or shutil.which("pdftotext") is None:
-        print("  skip  lualatex or pdftotext not installed; the sandbox isn't checked")
-        return []
+        return "lualatex or pdftotext not installed; the sandbox isn't checked"
     secret = os.path.join(os.path.dirname(work), os.path.basename(work) + "-kept")
     os.makedirs(secret)
     with open(os.path.join(secret, "words.txt"), "w", encoding="utf-8") as fh:
@@ -2850,13 +2842,27 @@ def case_sandbox(work):
         text = subprocess.run(["pdftotext", pdf, "-"], capture_output=True,
                               text=True).stdout if os.path.exists(pdf) else ""
         return done, done.stdout + done.stderr, text.replace("\n", " ")
+    return kind, folder, secret, alt, build
 
+
+def case_sandbox(work):
+    """A run converts in a sandbox (lib/sandbox.py): a page's Lua reading a
+    file outside the project with io.lines, which LaTeX's list of what it
+    opened doesn't hold, reads it with --no-sandbox and can't inside; the
+    sidecars are made UTF-8 before it, where they're read-only; and the
+    home folder shown, and a run that says it's inside when it isn't, are
+    refused. Skips without a sandbox here, LuaLaTeX, or pdftotext."""
+    def fail(message):
+        raise AssertionError(message)
+    made = sandbox_book(work)
+    if isinstance(made, str):
+        print("  skip  " + made)
+        return []
+    kind, folder, secret, alt, build = made
     open_run, open_said, open_text = build("--no-sandbox")
     run, said, text = build()
     with open(alt, "rb") as fh:
         alt_bom = fh.read(3) == b"\xef\xbb\xbf"
-    env_run, env_said, env_text = build("--sandbox-env", "TI_SANDBOX_PROBE")
-    shown_run, shown_said, shown_text = build("--sandbox-read", secret)
     claimed = subprocess.run(
         ["python3", os.path.join(BIN, "convert.py"), "--quiet"], cwd=folder,
         capture_output=True, text=True, stdin=subprocess.DEVNULL,
@@ -2880,6 +2886,28 @@ def case_sandbox(work):
         ("the sidecars are made UTF-8 with the byte-order mark before the sandbox, which "
          "shows them read-only",
          lambda: alt_bom or fail(said[-400:])),
+        ("but not the home folder, nor a run that says it's in the sandbox when it isn't",
+         lambda: home.returncode != 0 and "your home folder" in home.stderr
+         and claimed.returncode != 0
+         and f"TEXTBOOKIMPROVER_SANDBOX says the run is inside {kind}, and it isn't"
+         in claimed.stderr or fail(home.stderr[-300:] + claimed.stderr[-300:])),
+    ]
+
+
+def case_sandbox_shown(work):
+    """What a run shows inside its sandbox: --sandbox-env keeps a variable
+    inside and --sandbox-read shows a folder, each warned of. Skips
+    without a sandbox here, LuaLaTeX, or pdftotext."""
+    def fail(message):
+        raise AssertionError(message)
+    made = sandbox_book(work)
+    if isinstance(made, str):
+        print("  skip  " + made)
+        return []
+    kind, folder, secret, alt, build = made
+    env_run, env_said, env_text = build("--sandbox-env", "TI_SANDBOX_PROBE")
+    shown_run, shown_said, shown_text = build("--sandbox-read", secret)
+    return [
         ("--sandbox-env keeps a variable inside, warned of",
          lambda: env_run.returncode == 0 and "ENVprobe-value" in env_text
          and "WARNING: --sandbox-env TI_SANDBOX_PROBE: kept inside the sandbox." in env_said
@@ -2888,11 +2916,6 @@ def case_sandbox(work):
          lambda: shown_run.returncode == 0 and "LEAKSECRETWORDS" in shown_text
          and f"WARNING: --sandbox-read {os.path.realpath(secret)}: shown inside the sandbox, "
          "read-only." in shown_said or fail(shown_said[-600:] + shown_text)),
-        ("but not the home folder, nor a run that says it's in the sandbox when it isn't",
-         lambda: home.returncode != 0 and "your home folder" in home.stderr
-         and claimed.returncode != 0
-         and f"TEXTBOOKIMPROVER_SANDBOX says the run is inside {kind}, and it isn't"
-         in claimed.stderr or fail(home.stderr[-300:] + claimed.stderr[-300:])),
     ]
 
 
@@ -13873,6 +13896,7 @@ CASES = [
     ("a part reads only its own sources", case_reads),
     ("the LaTeX a book supplies reads only what its part may", case_latex_reads),
     ("a run converts in a sandbox", case_sandbox),
+    ("what a run shows inside its sandbox", case_sandbox_shown),
     ("a run's programs are held to its limits", case_limits),
     ("a file that isn't what its name says stops the run", case_kinds),
     ("a picture named by URL stops the run", case_remote_pictures),
@@ -13979,7 +14003,11 @@ CASES = [
 # The longest cases, started first when they run side by side.
 SLOW = {"where the book is named", "an HTML source", "two files, one page",
         "a page's title heading, and the title page", "a Common Cartridge",
-        "roles, numbering, and a contents page"}
+        "roles, numbering, and a contents page", "a run converts in a sandbox",
+        "what a run shows inside its sandbox",
+        "the LaTeX a book supplies reads only what its part may",
+        "the book's facts in the PDF's XMP", "a picture's metadata taken out of the outputs",
+        "a target built again only when what it's built from changed"}
 
 
 def run_cases(cases):

@@ -442,7 +442,7 @@ def fail(message):
 
 def tool(name, *arguments):
     # The suites run convert.py outside the sandbox, whose own cases are
-    # convert's case_sandbox and the unit suite's check_sandbox.
+    # convert's case_sandbox and case_sandbox_shown, and the unit suite's check_sandbox.
     extra = ["--no-sandbox"] if name == "convert.py" else []
     return subprocess.run(["python3", os.path.join(BIN, name), *extra, *arguments],
                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
