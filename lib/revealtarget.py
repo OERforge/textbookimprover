@@ -393,13 +393,25 @@ def with_footer(html_text, text):
     return html_text[:at] + element + html_text[at:]
 
 
+def with_head(html_text, elements):
+    """The presentation with elements, markup the run made (the deck's
+    <link rel="license"> elements), at the end of its head, as a page has
+    them; unchanged with none, or with no </head>."""
+    elements = str(elements or "").strip()
+    at = html_text.find("</head>")
+    if not elements or at < 0:
+        return html_text
+    return html_text[:at] + elements + "\n" + html_text[at:]
+
+
 def build(intermediate, base, out, *, filters, level, language, shape, notes="collapsed",
-          footer="", env=None):
+          footer="", head="", env=None):
     """One deck's presentation, out, from its filtered intermediate: Pandoc's
     reveal.js writer with filters, at the deck's slide level, its slides
     shape, then finish(). notes is slides.notes; footer, the text of the
     presentation's footer (with_footer), the deck's license with
-    slides.license_footer. Returns a dict: ok; log,
+    slides.license_footer; head, elements for the end of its head, the
+    deck's license links, as its page has them (with_head). Returns a dict: ok; log,
     Pandoc's errors; refused, why a presentation Pandoc wrote was refused
     and removed, its start of reveal.js holding more than settings
     (start_problem), which would run as code; warnings, Pandoc's others;
@@ -444,7 +456,7 @@ def build(intermediate, base, out, *, filters, level, language, shape, notes="co
         result["warnings"] = sorted({" ".join(line.split())[:160]
                                      for line in done.stderr.splitlines() if line.strip()})
         with open(out, encoding="utf-8") as fh:
-            html = with_footer(finish(fh.read()), footer)
+            html = with_head(with_footer(finish(fh.read()), footer), head)
         refused = start_problem(html)
         if refused:
             os.remove(out)

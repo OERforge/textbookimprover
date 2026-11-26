@@ -1951,6 +1951,9 @@ STRIPPED = []
 # Each deck's license by its short name, as its page has it, for its
 # slides' footer where a target's slides.license_footer asks for it.
 DECK_LICENSES = {}
+# Each deck's <link rel="license"> elements, as its page has them
+# (license_links), for its reveal.js presentation's head.
+DECK_LICENSE_LINKS = {}
 DEFAULT_PART = None
 PART_KIND = None
 PART_ARGS = []
@@ -7121,7 +7124,7 @@ def deck_presentations(target, stems, base, language):
             filters=[DECK_HTML_FILTER, DECK_REVEALJS_FILTER, TARGET_FILTER, SAFE_MEDIA_FILTER,
                      HEADER_FILTER],
             level=level, language=language, shape=shape, notes=notes,
-            footer=footers.get(stem, ""), env=env)
+            footer=footers.get(stem, ""), head=DECK_LICENSE_LINKS.get(stem, ""), env=env)
 
     workers = LIMITS.pandoc_jobs(len(jobs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -9096,8 +9099,10 @@ def main():
             say(f"{len(credited)} page(s) given the sentence their licenses entry "
                 "asks for: " + ", ".join(sorted(credited)))
         DECK_LICENSES.clear()
+        DECK_LICENSE_LINKS.clear()
         if DECK_RUN:
             DECK_LICENSES.update({stem: deck_license(project, stem) for stem in stems})
+            DECK_LICENSE_LINKS.update({stem: license_links(project, stem) for stem in stems})
         if credited & hand_stems:
             say("WARNING: " + ", ".join(sorted(credited & hand_stems)) + ": a "
                 "hand-written page's HTML is copied as it is, so it doesn't get the "

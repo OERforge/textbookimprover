@@ -1545,7 +1545,8 @@ def case_license_footer(work):
     """slides.license_footer: each deck's license by its short name in
     every slide's footer, the one a licenses entry naming the deck gives
     it or the part's, in its PowerPoint file (each slide's footer
-    placeholder), its presentation (one footer after the slides), and
+    placeholder), its presentation (one footer after the slides, and the
+    deed linked from its head, as the deck's page links it), and
     its PDF (each page's foot, an artifact); none on a target that turns
     it off; a reference document whose layouts have no footer
     placeholder warned of; and a deck with no license noted, with none."""
@@ -1591,6 +1592,9 @@ def case_license_footer(work):
         if os.path.exists(place(work_on, "present", "Flat-Deck.html")) else ""
     page = read(place(work_on, "pages", "Flat-Deck.html")) \
         if os.path.exists(place(work_on, "pages", "Flat-Deck.html")) else ""
+    def license_links(text):
+        """The deeds a page's head links to as its license."""
+        return re.findall(r'<link rel="license" href="([^"]+)"', text.split("</head>")[0])
     pdf = place(work_on, "print", "Flat-Deck.pdf")
     pages, artifact = [], None
     if not no_pdf and os.path.exists(pdf):
@@ -1642,6 +1646,9 @@ def case_license_footer(work):
          lambda: shown.count('class="oer-deck-footer"') == 1
          and re.search(r'<footer class="oer-deck-footer"><p>CC BY-SA 4\.0</p></footer>\s*</body>',
                        shown) or fail(shown[-900:])),
+        ("and the presentation's head, as the page's, the deck's license's deed linked",
+         lambda: license_links(shown) == ["https://creativecommons.org/licenses/by-sa/4.0/"]
+         and license_links(shown) == license_links(page) or fail(shown[:900])),
         ("the deck's page without it", lambda: page and "oer-deck-footer" not in page
          and "CC BY-SA 4.0" in " ".join(page.split()) or fail(page[-600:])),
         ("a reference document's layouts without a footer placeholder warned of, and their "
