@@ -571,7 +571,6 @@ def strip_target(target, folder):
     holds, a Word or PowerPoint target's own dates kept; what went is the
     part's metadata-stripped.csv, written again with each target, and said
     in one line."""
-    import csv
     import metastrip
     level, keep = STRIP
     # A Word file or a deck's PowerPoint file a writer made here is dated
@@ -588,7 +587,7 @@ def strip_target(target, folder):
     report = P(target.base).report("metadata-stripped.csv")
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        writer = csv.writer(fh)
+        writer = sidecars.csv_writer(fh)
         writer.writerow(["Target", "File", "Inside", "Level", "Taken out"])
         writer.writerows(STRIPPED)
     if rows:
@@ -1121,13 +1120,76 @@ TAR_ENDINGS = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz"
 NOT_UPSTREAM = ("src", "output", "sidecars", "originals")
 
 
+def strip_sources(base, part, level, run=None):
+    """--strip-sources: the part's own files stripped of their metadata at
+    the level, project.keep_metadata kept, each original kept in
+    originals/<part>/ and each mark of a download moved there
+    (lib/sourcestrip.py), a deck's sidecar keys moved to its stripped
+    pictures, and said; outside the sandbox, where the sources are
+    read-only, the files parsed inside it by run (None: here, with
+    --no-sandbox). A part with a from is refused: its sources are what
+    its upstream file unpacks to."""
+    import sourcestrip
+    import metastrip
+    import yaml
+    if part_upstream(base, part) is not None:
+        die(f"--strip-sources changes a part's own files, and project.parts.{part}.from "
+            f"names the upstream file src/{part}/ is unpacked from, which would no longer "
+            "match it. Nothing was stripped or converted.")
+    try:
+        with open(P(base).project_file(), encoding="utf-8") as fh:
+            data = oerconfig.safe_load(fh) or {}
+    except FileNotFoundError:
+        data = {}
+    except (OSError, yaml.YAMLError) as exc:
+        die(f"{PROJECT_NAME} can't be read ({exc}). Nothing was stripped or converted.")
+    block = data.get("project") if isinstance(data, dict) else None
+    keep = (block or {}).get("keep_metadata") if isinstance(block, dict) else None
+    keep = keep if isinstance(keep, list) else [] if keep in (None, "") else [keep]
+    keep = [str(k).strip() for k in keep if str(k).strip()]
+    problems = metastrip.check_keep(keep)
+    if problems:
+        die(f"{PROJECT_NAME}: project.keep_metadata: {problems[0]}. Nothing was stripped or "
+            "converted.")
+    # A deck's keys are given its stripped pictures' in sidecars made
+    # UTF-8 first, as the run makes them anyway.
+    make_sidecars_utf8(base)
+    top = P(base).top()
+    originals = os.path.join(top, "originals", part)
+    work = os.path.join(top, "output", "work", "strip-sources", part)
+    try:
+        done = sourcestrip.strip_sources(P(base).sources(part), originals,
+                                         os.path.join(top, "sidecars", part), work, level, keep,
+                                         run)
+    except (sourcestrip.Stop, OSError) as exc:
+        die(f"--strip-sources: {exc}. What was stripped before it stopped is in "
+            f"originals/{part}/{sourcestrip.RECORD}. Nothing was converted.")
+    record = f"originals/{part}/{sourcestrip.RECORD}"
+    if done["files"]:
+        say(f"--strip-sources: metadata taken out of {len(done['files'])} of the part's files at "
+            f"{level}, each original kept in originals/{part}/ and what went in {record}.")
+    else:
+        say(f"--strip-sources: nothing to take out of the part's files at {level}.")
+    if done["marks"]:
+        say(f"--strip-sources: {len(done['marks'])} mark(s) of a download "
+            f"(name:Zone.Identifier) moved to originals/{part}/, each in {record}.")
+    if done["keys"]:
+        say(f"--strip-sources: {len(done['keys'])} key(s) of a deck's picture in the part's "
+            f"sidecars given the stripped picture's, each in {record}.")
+    for name in done["unkeyed"]:
+        say(f"WARNING: --strip-sources: sidecars/{part}/{name} isn't UTF-8, so its keys of a "
+            f"deck's picture weren't given the stripped picture's; {record} doesn't list them. "
+            "Make it UTF-8 and key its rows by the new pictures, as the run's report names them.")
+    for below, why in done["left"]:
+        say(f"NOTE: --strip-sources: src/{part}/{below}: {why}.")
+
+
 def report_downloads(base, part):
     """The part's files Windows marks as downloaded (name:Zone.Identifier,
     lib/zonemarks.py), its upstream file's among them, listed in the
     part's downloaded-sources.csv, and said in one line; the report taken
     away when there are none. The marks themselves are no file of the
     book's, and no output holds them."""
-    import csv
     import zonemarks
     top = P(base).top()
     rows = zonemarks.marks(P(base).sources(part), top)
@@ -1146,7 +1208,7 @@ def report_downloads(base, part):
         return
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding=sidecars.CSV_ENCODING, newline="") as fh:
-        writer = csv.writer(fh)
+        writer = sidecars.csv_writer(fh)
         writer.writerow(["File", "Zone", "Address", "Referrer"])
         for marked, mark in rows:
             writer.writerow([marked, zonemarks.zone_name(mark["zone"]), mark["address"],
@@ -4105,7 +4167,7 @@ def make_sidecars_utf8(base):
                 say(line)
 
 
-def enter_sandbox(base, args):
+def enter_sandbox(base, args, before=None):
     """Start this run again inside the sandbox, and wait: its exit code; or
     None to go on here, inside it already or with --no-sandbox. bubblewrap
     where it works, else Landlock, with a warning of what's weaker; with
@@ -4120,6 +4182,8 @@ def enter_sandbox(base, args):
         say("WARNING: --no-sandbox: this run isn't sandboxed, so a book's LaTeX, Lua, and "
             "pictures can make the programs it starts read any file you can, and fetch from "
             "the network. Use it only for a book you trust.")
+        if before:
+            before(None)
         return None
     kind, why = sandbox.available()
     if kind is None:
@@ -4163,6 +4227,8 @@ def enter_sandbox(base, args):
     except OSError:
         saves = False
     sockets = sandbox.LIBREOFFICE_SOCKETS if kind == "landlock" and saves else ()
+    if before:
+        before(lambda program: sandbox.run(kind, program, base, inside, paths))
     return sandbox.run(kind, command, base, inside, paths, sockets)
 
 
@@ -8248,6 +8314,12 @@ def main():
                         help="say how each part's sources differ from what its upstream "
                              "file (project.parts.<part>.from) unpacks to, the files added, "
                              "changed, and removed, and stop")
+    parser.add_argument("--strip-sources", nargs="?", const="private",
+                        choices=("private", "bare"), metavar="LEVEL",
+                        help="take the metadata about its people out of the part's own "
+                             "files in src/<part>/ (private, or bare), each original kept "
+                             "in originals/<part>/, and move Windows' marks of a download "
+                             "there: once, on a part with no from, before remediating")
     parser.add_argument("--check-only", action="store_true",
                         help="read, gate, pre-pass, filter, and write the "
                              "reports, then stop: no output directory is "
@@ -8510,11 +8582,16 @@ def main():
             f"them, and a part reads only its own folders (src/{PART}/, sidecars/{PART}/). "
             "Put a copy of each file in the link's place. Nothing was converted.")
     check_kinds(base)
-    if not again:
+
+    def before(run):
+        # Outside the sandbox, where the sources can be written, once the
+        # sandbox is known: --strip-sources parses the files in it (run).
+        if args.strip_sources:
+            strip_sources(base, PART, args.strip_sources, run)
         report_downloads(base, PART)
     # What's left is read and built inside the sandbox: this run starts
     # itself again there, and waits.
-    code = enter_sandbox(base, args)
+    code = enter_sandbox(base, args, before)
     if code is not None:
         return code
     import deckrun

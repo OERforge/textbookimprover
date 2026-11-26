@@ -1005,6 +1005,150 @@ def check_zonemarks():
     ]
 
 
+def check_sourcestrip():
+    """lib/sourcestrip.py, a part's own files stripped (--strip-sources):
+    a photograph's position and serial number taken out, its pixels the
+    same, the original kept in originals/<part>/ under its path and the
+    change a row of strip-record.csv; a deck's picture stripped inside it
+    and the sidecar's keys of it, the deck's own and any deck's, given the
+    new picture's, a key of another picture left; a mark of a download
+    moved there; a file with nothing to take out left alone, a link and a
+    dot folder not followed; a second strip changing nothing and keeping
+    no second original; a copy the sandboxed part made a link never read
+    back; and an original already kept, the same, kept once, and a
+    different one beside it."""
+    import io
+    import tempfile
+    import zipfile
+    import hashlib
+    import sourcestrip
+    try:
+        from PIL import Image
+    except ImportError:
+        return [("the strip of a part's own files",
+                 lambda: print("  skip  no Pillow (python3-pil) to make the pictures") or True)]
+    top = tempfile.mkdtemp()
+    sources = os.path.join(top, "src", "book")
+    originals = os.path.join(top, "originals", "book")
+    sidecar_folder = os.path.join(top, "sidecars", "book")
+    work = os.path.join(top, "output", "work", "strip-sources", "book")
+    for folder in (os.path.join(sources, "img"), os.path.join(sources, ".hidden"), sidecar_folder):
+        os.makedirs(folder)
+
+    def photo(rgb):
+        exif = Image.Exif()
+        exif[0x0112], exif[0x8298] = 1, "CC BY 4.0 Ana"
+        exif.get_ifd(0x8769)[0xA431] = "SN98765"
+        exif.get_ifd(0x8825)[1] = "N"
+        held = io.BytesIO()
+        Image.new("RGB", (16, 12), rgb).save(held, "JPEG", exif=exif.tobytes(), quality=95)
+        return held.getvalue()
+    first, second = photo((10, 120, 200)), photo((200, 10, 10))
+    plain = io.BytesIO()
+    Image.new("RGB", (8, 8), (0, 0, 0)).save(plain, "PNG")
+    for name, data in (("img/photo.jpg", first), ("img/plain.png", plain.getvalue()),
+                       (".hidden/secret.jpg", first), ("=1+1.jpg", second)):
+        with open(os.path.join(sources, *name.split("/")), "wb") as fh:
+            fh.write(data)
+    os.symlink(os.path.join(sources, "img", "photo.jpg"), os.path.join(sources, "linked.jpg"))
+    with zipfile.ZipFile(os.path.join(sources, "Week 1.pptx"), "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("ppt/media/image1.jpg", second)
+        z.writestr("ppt/media/image2.png", plain.getvalue())
+    with open(os.path.join(sources, "img", "photo.jpg:Zone.Identifier"), "w") as fh:
+        fh.write("[ZoneTransfer]\nZoneId=3\nHostUrl=https://example.org/photo.jpg?k=1\n")
+    short = lambda data: hashlib.sha256(data).hexdigest()[:16]
+    other = short(plain.getvalue())
+    with open(os.path.join(sidecar_folder, "image-alt.csv"), "w", encoding="utf-8-sig",
+              newline="") as fh:
+        fh.write(f"Image,Alt text\nmedia/{short(second)},A red field.\n"
+                 f"Week 1/media/{short(second)},The red field.\nmedia/{other},Black.\n")
+    pixels = lambda data: Image.open(io.BytesIO(data)).convert("RGB").tobytes()
+    done = sourcestrip.strip_sources(sources, originals, sidecar_folder, work, "private", [])
+    read = lambda *names: open(os.path.join(*names), "rb").read()
+    stripped = read(sources, "img", "photo.jpg")
+    with zipfile.ZipFile(os.path.join(sources, "Week 1.pptx")) as z:
+        inner = z.read("ppt/media/image1.jpg")
+    alt = open(os.path.join(sidecar_folder, "image-alt.csv"), encoding="utf-8").read()
+    with open(os.path.join(originals, sourcestrip.RECORD), encoding="utf-8") as fh:
+        record_text = fh.read()
+        record = list(csv.DictReader(io.StringIO(record_text)))
+    again = sourcestrip.strip_sources(sources, originals, sidecar_folder, work, "private", [])
+    kept = sorted(os.path.relpath(os.path.join(r, n), originals)
+                  for r, _, names in os.walk(originals) for n in names)
+    # A file kept before, the same and a different one.
+    os.makedirs(os.path.join(top, "other"))
+    with open(os.path.join(top, "other", "a.jpg"), "wb") as fh:
+        fh.write(first)
+    same = sourcestrip.keep(os.path.join(top, "other", "a.jpg"), "img/photo.jpg", originals)
+    with open(os.path.join(top, "other", "a.jpg"), "wb") as fh:
+        fh.write(second)
+    beside = sourcestrip.keep(os.path.join(top, "other", "a.jpg"), "img/photo.jpg", originals)
+    # What the sandboxed part leaves is read back only as regular files
+    # named by the run: a copy made a link to a file of the person's, and
+    # a result naming a key that isn't a hash, change nothing.
+    planted = os.path.join(top, "planted")
+    os.makedirs(os.path.join(planted, "src"))
+    with open(os.path.join(planted, "src", "photo.jpg"), "wb") as fh:
+        fh.write(first)
+    with open(os.path.join(top, "secret.txt"), "wb") as fh:
+        fh.write(b"PRIVATE KEY")
+    planted_work = os.path.join(planted, "work")
+    listed, marks = sourcestrip.prepare(os.path.join(planted, "src"), planted_work, "private", [])
+    copy = os.path.join(planted_work, sourcestrip.COPIES, listed[0][2])
+    os.remove(copy)
+    os.symlink(os.path.join(top, "secret.txt"), copy)
+    with open(os.path.join(planted_work, sourcestrip.RESULT), "w") as fh:
+        json.dump({listed[0][2]: {"said": [["", ["EXIF SerialNumber"]]],
+                                  "changes": {"../x": "y", "a" * 64: "b" * 64}}}, fh)
+    planted_done = sourcestrip.apply(listed, marks, planted_work, os.path.join(planted, "orig"),
+                                     os.path.join(planted, "sidecars"))
+    return [
+        ("a photograph's serial number and position taken out, its pixels and rights kept",
+         lambda: b"SN98765" not in stripped and b"CC BY 4.0 Ana" in stripped
+         and pixels(stripped) == pixels(first)),
+        ("the original kept under its path, the same bytes",
+         lambda: read(originals, "img", "photo.jpg") == first),
+        ("a deck's picture stripped inside it, the deck kept",
+         lambda: b"SN98765" not in inner and read(originals, "Week 1.pptx") != b""),
+        ("the sidecar's keys of the deck's picture, the deck's own and any deck's, given the "
+         "new picture's, another picture's left, the byte-order mark kept",
+         lambda: alt.startswith("﻿") and f"﻿Image,Alt text\nmedia/{short(inner)},A red "
+         f"field.\nWeek 1/media/{short(inner)},The red field.\nmedia/{other},Black.\n" == alt
+         and len(done["keys"]) == 1),
+        ("the mark of a download moved to the originals and recorded without its query",
+         lambda: done["marks"] == ["img/photo.jpg:Zone.Identifier"]
+         and not os.path.exists(os.path.join(sources, "img", "photo.jpg:Zone.Identifier"))
+         and os.path.exists(os.path.join(originals, "img", "photo.jpg:Zone.Identifier"))
+         and any("https://example.org/photo.jpg" in r["what"] and "k=1" not in r["what"]
+                 for r in record)),
+        ("a file with nothing to take out left, a link and a dot folder not followed",
+         lambda: [f for f, _ in done["files"]] == ["=1+1.jpg", "Week 1.pptx", "img/photo.jpg"]
+         and read(sources, "img", "plain.png") == plain.getvalue()
+         and read(sources, ".hidden", "secret.jpg") == first
+         and os.path.islink(os.path.join(sources, "linked.jpg"))),
+        ("each change a row of the record, with the hashes before and after",
+         lambda: any(r["file"] == "img/photo.jpg" and r["sha256 before"]
+                     == hashlib.sha256(first).hexdigest()
+                     and r["sha256 after"] == hashlib.sha256(stripped).hexdigest() for r in record)
+         and any(r["file"] == "sidecars/image-alt.csv" for r in record)),
+        ("a name a spreadsheet would take for a formula guarded in the record",
+         lambda: "\n2" in record_text and ",'=1+1.jpg," in record_text
+         and ",=1+1.jpg," not in record_text),
+        ("a second strip changing nothing, keeping no second original",
+         lambda: again == {"files": [], "left": [], "marks": [], "keys": [], "unkeyed": []}
+         and kept == sorted(["=1+1.jpg", "Week 1.pptx", os.path.join("img", "photo.jpg"),
+                             os.path.join("img", "photo.jpg:Zone.Identifier"),
+                             sourcestrip.RECORD])),
+        ("a copy the sandboxed part made a link never read back, the source left",
+         lambda: read(planted, "src", "photo.jpg") == first and planted_done["files"] == []
+         and planted_done["left"] and not os.path.exists(os.path.join(planted, "orig"))),
+        ("an original kept already, the same, kept once, and a different one beside it",
+         lambda: same == os.path.join(originals, "img", "photo.jpg")
+         and beside == os.path.join(originals, "img", "photo.jpg") + ".2"),
+    ]
+
+
 def check_metastrip():
     """lib/metastrip.py, what a picture's file says of its people taken out:
     a JPEG's EXIF filtered to the keep list (the orientation, resolution,
@@ -14092,6 +14236,7 @@ GROUPS = [
     ("lib/licenses.py, a license page by page", check_page_licenses),
     ("lib/metastrip.py, a picture's metadata taken out", check_metastrip),
     ("lib/zonemarks.py, Windows' marks of a download read", check_zonemarks),
+    ("lib/sourcestrip.py, a part's own files stripped", check_sourcestrip),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

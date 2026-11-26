@@ -1065,8 +1065,8 @@ def case_downloaded_sources(work):
     """The part's files Windows marks as downloaded (name:Zone.Identifier)
     listed in the part's downloaded-sources.csv, its upstream file's among
     them, each with its zone and the address it came from cut to its
-    scheme, host, and path, a mark in UTF-16 read and one too big to read
-    listed without a zone; no output holding a mark; and the report taken
+    scheme, host, and path, a mark in UTF-16 read, one too big to read
+    listed without a zone, and one whose file is gone listed too; no output holding a mark; and the report taken
     away once the marks are gone."""
     import csv
     import zipfile
@@ -1104,6 +1104,8 @@ def case_downloaded_sources(work):
           mark(3, "https://cdn.example.org/dot.png").encode("utf-16"))
     write("src/book/one.md:Zone.Identifier", mark(2))
     write("src/book/huge.md:Zone.Identifier", "[ZoneTransfer]\nZoneId=3\n" + "x" * 70000)
+    # A mark of a file that's gone.
+    write("src/book/=1+1.png:Zone.Identifier", mark(3))
     second = run()
     report = os.path.join(work, "output", "reports", "book", "downloaded-sources.csv")
     rows = []
@@ -1114,10 +1116,12 @@ def case_downloaded_sources(work):
             os.walk(os.path.join(work, "output")) for n in names if n.endswith(":Zone.Identifier")]
     text = open(report, encoding="utf-8-sig").read() if os.path.exists(report) else ""
     for name in ("upstream/book.zip:Zone.Identifier", "src/book/images/dot.png:Zone.Identifier",
+                 "src/book/=1+1.png:Zone.Identifier",
                  "src/book/one.md:Zone.Identifier", "src/book/huge.md:Zone.Identifier"):
         os.remove(os.path.join(work, name))
     third = run()
     wanted = [["File", "Zone", "Address", "Referrer"],
+              ["src/book/=1+1.png", "the internet", "", ""],
               ["src/book/huge.md", "not read", "", ""],
               ["src/book/images/dot.png", "the internet", "https://cdn.example.org/dot.png", ""],
               ["src/book/one.md", "trusted sites", "", ""],
@@ -1136,6 +1140,163 @@ def case_downloaded_sources(work):
         ("the report taken away once the marks are gone",
          lambda: third.returncode == 0 and not os.path.exists(report)
          and "mark of a download" not in third.stdout + third.stderr),
+    ]
+
+
+def case_strip_sources(work):
+    """--strip-sources: a part's own photograph and Word file stripped of
+    their people's metadata in src/<part>/, the photograph's pixels the
+    same, project.keep_metadata kept, each original in originals/<part>/
+    and each change in its strip-record.csv, a mark of a download moved
+    there, the run saying how many and building from the stripped files;
+    a second run finding nothing to take out; in a sandbox, where one is
+    here, the same; and a part with a from, and a keep_metadata entry the
+    strip doesn't know, refused before anything is changed."""
+    import csv
+    import io
+    import zipfile
+    try:
+        from PIL import Image
+    except ImportError:
+        return [("--strip-sources", lambda: print("  skip  no Pillow (python3-pil)") or True)]
+    sources = os.path.join(work, "src", "book")
+    os.makedirs(sources)
+    exif = Image.Exif()
+    exif[0x0112], exif[0x010F] = 1, "Canon"
+    exif.get_ifd(0x8769)[0xA431] = "SN98765"
+    gps = exif.get_ifd(0x8825)
+    gps[1], gps[2] = "N", (40.0, 26.0, 46.0)
+    held = io.BytesIO()
+    Image.new("RGB", (24, 16), (10, 120, 200)).save(held, "JPEG", exif=exif.tobytes(), quality=92)
+    photo = held.getvalue()
+    with open(os.path.join(sources, "photo.jpg"), "wb") as fh:
+        fh.write(photo)
+    with open(os.path.join(sources, "one.md"), "w", encoding="utf-8") as fh:
+        fh.write("# One\n\n![A blue field.](photo.jpg)\n")
+    with open(os.path.join(work, "two.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Two\n\nText.\n")
+    subprocess.run(["pandoc", "two.md", "-o", os.path.join(sources, "two.docx")], cwd=work,
+                   check=True)
+    os.remove(os.path.join(work, "two.md"))
+    with zipfile.ZipFile(os.path.join(sources, "two.docx")) as z:
+        parts = {i: z.read(i.filename) for i in z.infolist()}
+    with zipfile.ZipFile(os.path.join(sources, "two.docx"), "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in parts.items():
+            if info.filename == "docProps/core.xml":
+                data = data.replace(b"</cp:coreProperties>",
+                                    b"<cp:lastModifiedBy>Ana on ANA-LAPTOP</cp:lastModifiedBy>"
+                                    b"</cp:coreProperties>")
+            z.writestr(info, data)
+    docx = open(os.path.join(sources, "two.docx"), "rb").read()
+    with open(os.path.join(sources, "photo.jpg:Zone.Identifier"), "w") as fh:
+        fh.write("[ZoneTransfer]\nZoneId=3\nHostUrl=https://example.org/photo.jpg\n")
+
+    def settings(extra=""):
+        with open(os.path.join(work, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  title: A Book\n  language: en\n" + extra)
+    settings("  keep_metadata: [Unknown]\n")
+    with open(os.path.join(work, "conversion.yaml"), "w", encoding="utf-8") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+
+    def run(*more):
+        return started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                        "--quick", *more], cwd=work, capture_output=True, text=True)
+    unknown = run("--strip-sources")
+    unknown_left = open(os.path.join(sources, "photo.jpg"), "rb").read() == photo \
+        and not os.path.exists(os.path.join(work, "originals"))
+    settings("  keep_metadata: [gps]\n")
+    first = run("--strip-sources")
+    said = first.stdout + first.stderr
+    now = open(os.path.join(sources, "photo.jpg"), "rb").read()
+    built = os.path.join(work, "output", "html", "photo.jpg")
+    out = open(built, "rb").read() if os.path.exists(built) else b""
+    with zipfile.ZipFile(os.path.join(sources, "two.docx")) as z:
+        core = z.read("docProps/core.xml")
+    originals = os.path.join(work, "originals", "book")
+    record = []
+    if os.path.exists(os.path.join(originals, "strip-record.csv")):
+        with open(os.path.join(originals, "strip-record.csv"), encoding="utf-8") as fh:
+            record = list(csv.DictReader(fh))
+    second = run("--strip-sources")
+    bad_level = run("--strip-sources=report")
+    # A part with a from: its sources are what its upstream file unpacks to.
+    upstream = work + "-from"
+    os.makedirs(os.path.join(upstream, "upstream"))
+    with zipfile.ZipFile(os.path.join(upstream, "upstream", "book.zip"), "w") as z:
+        z.writestr("book/one.md", "# One\n\n![A dot.](photo.jpg)\n")
+        z.writestr("book/photo.jpg", photo)
+    with open(os.path.join(upstream, "project.yaml"), "w") as fh:
+        fh.write("project:\n  title: A Book\n  parts:\n    book:\n      kind: book\n"
+                 "      from:\n        file: upstream/book.zip\n        unpacker: archive\n")
+    with open(os.path.join(upstream, "conversion.yaml"), "w") as fh:
+        fh.write("targets:\n  html:\n    format: html\n")
+    run_from = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                        "--quick"], cwd=upstream, capture_output=True, text=True)
+    from_photo = os.path.join(upstream, "src", "book", "photo.jpg")
+    refused = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                       "--quick", "--strip-sources"], cwd=upstream, capture_output=True, text=True)
+    # In a sandbox, where the files are parsed by a program of their own.
+    import sandbox
+    boxed = work + "-boxed"
+    boxed_run = None
+    if sandbox.available()[0] is not None:
+        os.makedirs(os.path.join(boxed, "src", "book"))
+        with open(os.path.join(boxed, "src", "book", "photo.jpg"), "wb") as fh:
+            fh.write(photo)
+        with open(os.path.join(boxed, "src", "book", "one.md"), "w", encoding="utf-8") as fh:
+            fh.write("# One\n\n![A blue field.](photo.jpg)\n")
+        with open(os.path.join(boxed, "project.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("project:\n  title: A Book\n  language: en\n")
+        with open(os.path.join(boxed, "conversion.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("targets:\n  html:\n    format: html\n")
+        boxed_run = started([sys.executable, "-B", os.path.join(BIN, "convert.py"), "--quick",
+                             "--strip-sources"], cwd=boxed, capture_output=True, text=True)
+    pixels = lambda data: Image.open(io.BytesIO(data)).convert("RGB").tobytes()
+
+    def in_sandbox():
+        if boxed_run is None:
+            print("  skip  no sandbox here; --strip-sources in one isn't checked")
+            return True
+        now = open(os.path.join(boxed, "src", "book", "photo.jpg"), "rb").read()
+        return boxed_run.returncode == 0 and b"SN98765" not in now \
+            and "Converting in a sandbox" in boxed_run.stdout + boxed_run.stderr \
+            and open(os.path.join(boxed, "originals", "book", "photo.jpg"), "rb").read() == photo \
+            and not os.path.exists(os.path.join(boxed, "output", "work", "strip-sources", "book"))
+    return [
+        ("a keep_metadata entry the strip doesn't know refused before anything is changed",
+         lambda: unknown.returncode != 0 and "keep_metadata" in unknown.stdout + unknown.stderr
+         and unknown_left),
+        ("the photograph's serial number and make taken out, its position kept "
+         "(keep_metadata: [gps]), its pixels the same",
+         lambda: first.returncode == 0 and b"SN98765" not in now and b"Canon" not in now
+         and Image.open(io.BytesIO(now)).getexif().get_ifd(0x8825).get(1) == "N"
+         and pixels(now) == pixels(photo)),
+        ("the Word file's last editor taken out", lambda: b"ANA-LAPTOP" not in core),
+        ("each original kept in originals/<part>/",
+         lambda: open(os.path.join(originals, "photo.jpg"), "rb").read() == photo
+         and open(os.path.join(originals, "two.docx"), "rb").read() == docx),
+        ("the mark of a download moved there",
+         lambda: not os.path.exists(os.path.join(sources, "photo.jpg:Zone.Identifier"))
+         and os.path.exists(os.path.join(originals, "photo.jpg:Zone.Identifier"))
+         and not os.path.exists(os.path.join(work, "output", "reports", "book",
+                                             "downloaded-sources.csv"))),
+        ("each change a row of strip-record.csv",
+         lambda: {r["file"] for r in record} == {"photo.jpg", "two.docx",
+                                                 "photo.jpg:Zone.Identifier"}),
+        ("the run saying how many, and building from the stripped files",
+         lambda: "metadata taken out of 2 of the part's files at private" in said
+         and "1 mark(s) of a download" in said and out == now),
+        ("a second run finding nothing to take out",
+         lambda: second.returncode == 0 and "nothing to take out of the part's files at "
+         "private" in second.stdout + second.stderr
+         and open(os.path.join(sources, "photo.jpg"), "rb").read() == now),
+        ("a level other than private or bare refused", lambda: bad_level.returncode != 0),
+        ("in a sandbox, the files parsed inside it and put in place outside", in_sandbox),
+        ("a part with a from refused, its sources left as they are",
+         lambda: run_from.returncode == 0 and refused.returncode != 0
+         and "names the upstream file" in refused.stdout + refused.stderr
+         and open(from_photo, "rb").read() == photo
+         and not os.path.exists(os.path.join(upstream, "originals"))),
     ]
 
 
@@ -13634,6 +13795,7 @@ CASES = [
     ("the book's identifiers in the cartridge", case_identified_cartridge),
     ("the part's files Windows marks as downloaded, listed", case_downloaded_sources),
     ("a picture's metadata taken out of the outputs", case_metadata_strip),
+    ("a part's own files stripped with --strip-sources", case_strip_sources),
     ("a license page by page", case_page_licenses),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),

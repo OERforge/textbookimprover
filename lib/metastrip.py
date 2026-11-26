@@ -1179,6 +1179,35 @@ def strip_pdf(path, level, keep, own=False):
     return rows
 
 
+def strip_file(path, level="private", keep=(), own_dates=False, own_pdfs=False):
+    """One file stripped in place, as strip_folder strips each:
+    [(the member or "", what went)], a file that can't be read left as
+    it is and said."""
+    import os
+    lower = os.path.basename(path).lower()
+    try:
+        if lower.endswith(PICTURE_EXTENSIONS):
+            with open(path, "rb") as fh:
+                data = fh.read()
+            new, removed = strip(os.path.basename(path), data, level, keep)
+            if new != data:
+                with open(path, "wb") as fh:
+                    fh.write(new)
+            return [("", removed)] if removed else []
+        if lower.endswith(ZIP_EXTENSIONS):
+            return strip_zip(path, level, keep, own_dates)
+        if lower.endswith(".pdf"):
+            return strip_pdf(path, level, keep, own_pdfs)
+    except Exception as exc:  # a file that can't be read is left, and said
+        return [("", [f"not read ({type(exc).__name__}); left as it is"])]
+    return []
+
+
+def strippable(name):
+    """Whether strip_file reads a file of this name."""
+    return name.lower().endswith(PICTURE_EXTENSIONS + ZIP_EXTENSIONS + (".pdf",))
+
+
 def strip_folder(folder, level="private", keep=(), own_dates=False, own_pdfs=False):
     """Every picture an output's folder holds, as a file or inside a
     container (ZIP_EXTENSIONS, a PDF), and every PDF's and Office file's
@@ -1194,26 +1223,9 @@ def strip_folder(folder, level="private", keep=(), own_dates=False, own_pdfs=Fal
         dirs[:] = sorted(d for d in dirs if not os.path.islink(os.path.join(root, d)))
         for name in sorted(files):
             path = os.path.join(root, name)
-            if os.path.islink(path) or not os.path.isfile(path):
+            if os.path.islink(path) or not os.path.isfile(path) or not strippable(name):
                 continue
             where = os.path.relpath(path, folder).replace(os.sep, "/")
-            lower = name.lower()
-            try:
-                if lower.endswith(PICTURE_EXTENSIONS):
-                    with open(path, "rb") as fh:
-                        data = fh.read()
-                    new, removed = strip(name, data, level, keep)
-                    if removed:
-                        rows.append((where, "", removed))
-                    if new != data:
-                        with open(path, "wb") as fh:
-                            fh.write(new)
-                elif lower.endswith(ZIP_EXTENSIONS):
-                    rows += [(where, member, removed)
-                             for member, removed in strip_zip(path, level, keep, own_dates)]
-                elif lower.endswith(".pdf"):
-                    rows += [(where, member, removed)
-                             for member, removed in strip_pdf(path, level, keep, own_pdfs)]
-            except Exception as exc:  # a file that can't be read is left, and said
-                rows.append((where, "", [f"not read ({type(exc).__name__}); left as it is"]))
+            rows += [(where, member, removed) for member, removed in
+                     strip_file(path, level, keep, own_dates, own_pdfs)]
     return rows

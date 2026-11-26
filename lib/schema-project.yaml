@@ -437,7 +437,8 @@ keys:
       the sources loses its creator, producer, dates, XMP's history, and
       an editor's private data, its title, author, and PDF/UA claim kept;
       and a PDF the run makes, what LuaTeX copied from a PDF figure in it.
-      The source files aren't touched.
+      The source files aren't touched, unless convert.py --strip-sources
+      is given.
 
   keep_metadata:
     type: list
