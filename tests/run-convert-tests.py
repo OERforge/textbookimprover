@@ -1816,6 +1816,67 @@ def case_colophon(work):
     return checks
 
 
+def case_author_byline(work):
+    """A page's author at each author_byline: at meta, the default, in
+    every target's metadata and shown in none, an HTML page's head naming
+    each author, a Word file's creator the names a semicolon apart and no
+    Author paragraph, and a Markdown and an AsciiDoc file's own metadata;
+    with drop, in none; and with visible, the Word file's Author
+    paragraphs too."""
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def read(*parts):
+        path = os.path.join(work, "output", *parts)
+        if not os.path.isfile(path):
+            return ""
+        if path.endswith(".docx"):
+            with zipfile.ZipFile(path) as archive:
+                return (archive.read("docProps/core.xml").decode("utf-8")
+                        + archive.read("word/document.xml").decode("utf-8"))
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    write("project.yaml", "project:\n  identifier: org.example.byline\n  title: Bylines\n")
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n  word:\n    format: docx\n"
+          "  md:\n    format: markdown\n  adoc:\n    format: asciidoc\n"
+          "  dropped:\n    format: docx\n    author_byline: drop\n"
+          "  dropped-md:\n    format: markdown\n    author_byline: drop\n"
+          "  shown:\n    format: docx\n    author_byline: visible\n")
+    write("src/book/one.md", "---\ntitle: One\nauthor:\n  - Ann *Lee*\n  - Bo & Chen\n---\n\n"
+          "# One\n\nText.\n")
+    done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox", "--quick",
+                           "--quiet"], cwd=work, capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    page, word, md, adoc = (read("html", "one.html"), read("word", "one.docx"),
+                            read("md", "one.md"), read("adoc", "one.adoc"))
+    dropped, dropped_md, shown = (read("dropped", "one.docx"), read("dropped-md", "one.md"),
+                                  read("shown", "one.docx"))
+    return [
+        ("the run succeeds", lambda: done.returncode == 0 or fail(done.stderr[-1500:])),
+        ("at meta, an HTML page's head names each author, and the page shows no byline",
+         lambda: '<meta name="author" content="Ann Lee" />' in page
+         and '<meta name="author" content="Bo &amp; Chen" />' in page
+         and 'class="author"' not in page or fail(page[:1500])),
+        ("a Word file's creator the names a semicolon apart, and no Author paragraph",
+         lambda: "<dc:creator>Ann Lee; Bo &amp; Chen</dc:creator>" in word
+         and 'w:val="Author"' not in word or fail(word[:1500])),
+        ("a Markdown file's own metadata, as the page wrote it",
+         lambda: "author:\n- Ann *Lee*\n- Bo & Chen\n" in md or fail(md[:400])),
+        ("an AsciiDoc file's author line, under its title",
+         lambda: adoc.startswith("= One\nAnn _Lee_; Bo & Chen\n") or fail(adoc[:400])),
+        ("with drop, in no target",
+         lambda: dropped and "<dc:creator></dc:creator>" in dropped
+         and "Lee" not in dropped and "Lee" not in dropped_md and "author" not in dropped_md
+         or fail(dropped[:1500] + dropped_md[:400])),
+        ("with visible, the Word file's Author paragraphs and its creator",
+         lambda: shown.count('w:val="Author"') == 2
+         and "<dc:creator>Ann Lee; Bo &amp; Chen</dc:creator>" in shown or fail(shown[:2500])),
+    ]
+
+
 def case_isbn_hyphens(work):
     """An ISBN's hyphens checked against the ISBN agency's ranges before
     anything is converted, by the suites' own range message: hyphens
@@ -14112,6 +14173,7 @@ CASES = [
     ("a license page by page", case_page_licenses),
     ("a colophon, the book's credits and how a copy was made", case_colophon),
     ("an ISBN's hyphens checked against its agency's ranges", case_isbn_hyphens),
+    ("a page's author in each target's metadata, its byline shown or not", case_author_byline),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),

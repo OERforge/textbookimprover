@@ -94,7 +94,7 @@ What a heading that skips a level, more than one below the heading before it, be
 
 **`author_byline`**—one of `meta`, `visible`, `drop`; default `meta`
 
-What to do with author metadata from the source. Reading .docx this comes from a paragraph styled Author, which Pandoc consumes out of the body the same way it consumes a Title-styled one. meta keeps it in the page head and suppresses the visible byline Pandoc's template would otherwise print under every title; visible keeps both; drop removes it. Not read for a deck, whose authors are on its page as on its title slide.
+What is done with a page's author, as its source gives it; in a Word file, a paragraph styled Author, which Pandoc's reader takes out of the body as it takes a paragraph styled Title. meta writes the author to each target's metadata (an HTML page's head, a Word file's creator, a Markdown file's author field, an AsciiDoc file's author line) and suppresses the byline that Pandoc's templates would otherwise display under the title of an HTML page and at the start of a Word file; visible keeps both; drop removes the author from every target. Not read for a deck, whose authors are on its page as on its title slide.
 
 ## math
 

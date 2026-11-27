@@ -656,6 +656,16 @@ local function title_heading(doc)
   if language ~= '' and not SOURCE_WRITERS[FORMAT] then
     meta.lang = pandoc.MetaString(language)
   end
+  -- The page's author, which the filter keeps apart where only its byline
+  -- is hidden (author_byline: meta, figures-and-tables.lua): a Markdown
+  -- or an AsciiDoc file's own metadata, which a run reading the file back
+  -- takes for the page's author; a Word file's properties have it from
+  -- docxtarget.py; and an HTML page has it in its head already.
+  local author = meta['byline-author']
+  meta['byline-author'] = nil
+  if author ~= nil and SOURCE_WRITERS[FORMAT] and meta.author == nil then
+    meta.author = author
+  end
   -- A declared title with a formula, which Pandoc's writers give the
   -- formula's TeX where they make the title text ("The x^2 law"): its
   -- formulas as text in <title>, where the HTML writer shows the title in

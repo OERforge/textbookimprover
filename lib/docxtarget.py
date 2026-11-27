@@ -1845,29 +1845,45 @@ def holds_formula(node):
     return False
 
 
+def _meta_text(node, texts):
+    """A metadata value as plain text, a formula as the text
+    title-formulas.lua noted for it (texts), else its TeX."""
+    if isinstance(node, list):
+        return "".join(_meta_text(n, texts) for n in node)
+    if isinstance(node, dict):
+        kind = node.get("t")
+        if kind == "Str":
+            return node["c"]
+        if kind in ("Space", "SoftBreak", "LineBreak"):
+            return " "
+        if kind == "MetaString":
+            return node["c"]
+        if kind == "Math":
+            return texts.get(node["c"][1], node["c"][1])
+        return _meta_text(node.get("c"), texts)
+    return ""
+
+
 def page_title_text(doc):
     """The page's title as plain text, from its metadata, a formula as the
     text title-formulas.lua noted for it, x² + y₁, a/b, else its TeX, where
     a formula had been left out ("The  law")."""
     meta = doc.get("meta") or {}
-    texts = formula_texts(meta)
+    return " ".join(_meta_text(meta.get("title"), formula_texts(meta)).split())
 
-    def text(node):
-        if isinstance(node, list):
-            return "".join(text(n) for n in node)
-        if isinstance(node, dict):
-            kind = node.get("t")
-            if kind == "Str":
-                return node["c"]
-            if kind in ("Space", "SoftBreak", "LineBreak"):
-                return " "
-            if kind == "MetaString":
-                return node["c"]
-            if kind == "Math":
-                return texts.get(node["c"][1], node["c"][1])
-            return text(node.get("c"))
-        return ""
-    return " ".join(text(meta.get("title")).split())
+
+def byline_authors(doc):
+    """The page's authors as plain text, where the filter kept them apart
+    from the byline it hid (byline-author, author_byline: meta), else
+    none."""
+    meta = doc.get("meta") or {}
+    value = meta.get("byline-author")
+    if not isinstance(value, dict):
+        return []
+    entries = value.get("c") if value.get("t") == "MetaList" else [value]
+    texts = formula_texts(meta)
+    names = [" ".join(_meta_text(entry, texts).split()) for entry in entries or []]
+    return [name for name in names if name]
 
 
 def finish(path, doc, keep=None, footer=()):
@@ -1965,6 +1981,17 @@ def finish(path, doc, keep=None, footer=()):
                 or holds_formula((doc.get("meta") or {}).get("title")):
             entry = "<dc:title>%s</dc:title>" % html.escape(title, quote=False)
             core = re.sub(r"<dc:title\s*/>|<dc:title>.*?</dc:title>", "", core, flags=re.S)
+            core = core.replace("</cp:coreProperties>", entry + "</cp:coreProperties>")
+            parts["docProps/core.xml"] = core.encode("utf-8")
+    # The page's authors where only their byline is hidden (author_byline:
+    # meta): Pandoc wrote no Author paragraph and no creator, and the
+    # creator is written as Pandoc writes it, the names a semicolon apart.
+    authors = byline_authors(doc)
+    if authors and "docProps/core.xml" in parts:
+        core = parts["docProps/core.xml"].decode("utf-8")
+        if not re.search(r"<dc:creator>[^<]", core):
+            entry = "<dc:creator>%s</dc:creator>" % html.escape("; ".join(authors), quote=False)
+            core = re.sub(r"<dc:creator\s*/>|<dc:creator>\s*</dc:creator>", "", core)
             core = core.replace("</cp:coreProperties>", entry + "</cp:coreProperties>")
             parts["docProps/core.xml"] = core.encode("utf-8")
     if counts["code_lines"] and "word/styles.xml" in parts \

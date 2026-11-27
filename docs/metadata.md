@@ -105,12 +105,12 @@ The table shows how each target recorded a Markdown page whose YAML block set `t
 |---|---|---|---|---|---|
 | `html` | `<title>` and the page's heading | `<meta name="author">` | `<meta name="dcterms.date">`, and under the title | `<meta name="keywords">` | `lang` on `<html>` |
 | `epub3` | the content document's `<title>` and heading | — | — | — | `lang` on `<html>` |
-| `docx` | `dc:title` | — (`dc:creator` was empty) | a custom property, `date` | `cp:keywords` | `dc:language` |
-| `markdown` | `title` | — | `date` | `keywords` | `lang` |
-| `asciidoc` | the `=` line | — | `:revdate:` | `:keywords:` | `:lang:` |
+| `docx` | `dc:title` | `dc:creator` | a custom property, `date` | `cp:keywords` | `dc:language` |
+| `markdown` | `title` | `author` | `date` | `keywords` | `lang` |
+| `asciidoc` | the `=` line | the author line, after the `=` line | the revision line after it, or `:revdate:` where there is no author | `:keywords:` | `:lang:` |
 | `source` | the file's own block, as written | as written | as written | as written | as written |
 
-The Author column is determined by the `author_byline` setting. At its default value, `meta`, a page's author is written only to an HTML page's `<meta name="author">` element, and the other targets record no author. With `author_byline: visible`, the same page's author was also displayed under the title on the HTML page and written to the `docx` target's `dc:creator`, the `markdown` target's `author` field, and the author line under the title in the `asciidoc` target's file.
+The Author column is determined by the `author_byline` setting. At its default value, `meta`, a page's author is written to each target's metadata, and the targets that Pandoc's templates would display it in do not display it: an HTML page has a `<meta name="author">` element for each author and no byline under its title, and a `docx` target's `dc:creator` holds the authors' names, separated by semicolons, with no paragraph styled Author in the document. A `markdown` target's `author` field and an `asciidoc` target's author line are those formats' own metadata, so a run that reads the file back takes them for the page's author. An AsciiDoc processor such as Asciidoctor displays the author line in the document's header. With `author_byline: visible`, the author is also displayed under the title on the HTML page, and in a paragraph styled Author for each author at the start of the `docx` target's document. With `author_byline: drop`, no target records the author. These results were measured with Pandoc 3.14.
 
 Four settings change the results in this table, each defined in [Conversion settings](conversion-settings.md): `author_byline`, `title_block` (whether a page's own subtitle and date show on it), `promote_h1_to_title` (which title a page has when its heading says something else), and `title_page`. A page's language is taken from its row in `languages.csv` where it has one, and otherwise from its own file ([A page's language](sidecars.md#a-pages-language)).
 

@@ -2766,22 +2766,42 @@ end
 -- Nested headings are ignored: a heading inside a Div or a list item is
 -- not a page title, and pulling one out would move it across a structure
 -- it was written inside.
+-- A block added to the page's header-includes, after those it has. One
+-- include arrives as MetaBlocks, several as a List, which has no t field.
+local function add_header_include(doc, block)
+  local existing = doc.meta['header-includes']
+  local list = pandoc.MetaList({})
+  if existing ~= nil then
+    if pandoc.utils.type(existing) == 'List' then
+      for _, item in ipairs(existing) do list:insert(item) end
+    else
+      list:insert(existing)
+    end
+  end
+  list:insert(block)
+  doc.meta['header-includes'] = list
+end
+
 -- Move the author out of the template's title block, keeping the head
 -- metadata by writing it as a header include. The two are the same
 -- template variable, so there is no way to keep one and drop the other
 -- except to take the variable away and put the wanted half back.
+--
+-- The intermediate is written once for the targets that share its
+-- settings, an HTML page's and a Word file's or a Markdown file's alike,
+-- so at meta the author is kept as byline-author too: target-blocks.lua
+-- gives it back to a Markdown or an AsciiDoc file, as its metadata, and
+-- docxtarget.py writes it into a Word file's properties, neither of which
+-- shows a byline. drop takes it out of every target.
 local function settle_author(doc)
   if AUTHOR_BYLINE == 'visible' or doc.meta.author == nil then return end
 
-  -- convert.py runs this filter with the JSON writer, and everything that
-  -- reads the result -- the html5 writer for the pages, the epub3 writer
-  -- for the book -- is an HTML writer with the same title block. So the
-  -- intermediate is treated as HTML-bound here.
   if AUTHOR_BYLINE == 'meta' and (FORMAT:match('html') or FORMAT == 'json') then
     local names = {}
     local author = doc.meta.author
-    -- One author arrives as MetaInlines, several as a MetaList.
-    local list = (author.t == 'MetaList') and author or { author }
+    -- One author arrives as Inlines, several as a List, which has no t
+    -- field.
+    local list = pandoc.utils.type(author) == 'List' and author or { author }
     for _, entry in ipairs(list) do
       local text = pandoc.utils.stringify(entry)
       if text ~= '' then names[#names + 1] = text end
@@ -2793,19 +2813,9 @@ local function settle_author(doc)
           :format(name:gsub('&', '&amp;'):gsub('"', '&quot;')
                       :gsub('<', '&lt;'):gsub('>', '&gt;'))
       end
-      local include = pandoc.MetaList({
-        pandoc.MetaBlocks({ pandoc.RawBlock('html',
-          table.concat(tags, '\n')) })
-      })
-      local existing = doc.meta['header-includes']
-      if existing ~= nil then
-        if existing.t == 'MetaList' then
-          for _, item in ipairs(existing) do include:insert(1, item) end
-        else
-          include:insert(1, existing)
-        end
-      end
-      doc.meta['header-includes'] = include
+      add_header_include(doc, pandoc.MetaBlocks({ pandoc.RawBlock('html',
+        table.concat(tags, '\n')) }))
+      doc.meta['byline-author'] = author
     end
   end
 
@@ -2816,19 +2826,8 @@ end
 -- the packager read it.
 local function set_page_role(doc, role)
   doc.meta['page-role'] = pandoc.MetaString(role)
-  local include = pandoc.MetaBlocks({ pandoc.RawBlock('html',
-    '<meta name="page-role" content="' .. role .. '" />') })
-  local existing = doc.meta['header-includes']
-  local list = pandoc.MetaList({})
-  if existing ~= nil then
-    if existing.t == 'MetaList' then
-      for _, item in ipairs(existing) do list:insert(item) end
-    else
-      list:insert(existing)
-    end
-  end
-  list:insert(include)
-  doc.meta['header-includes'] = list
+  add_header_include(doc, pandoc.MetaBlocks({ pandoc.RawBlock('html',
+    '<meta name="page-role" content="' .. role .. '" />') }))
 end
 
 -- The page's one H1, its title. A bibliography's heading, which a LaTeX
