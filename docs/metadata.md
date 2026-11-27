@@ -120,8 +120,8 @@ Every HTML page also records the version of Pandoc that wrote it (`<meta name="g
 
 A deck's outputs record the metadata in the deck's own source file, not the project's settings ([Decks written in Markdown](slides.md#decks-written-in-markdown)). The following was observed for a Markdown deck that set `title`, `subtitle`, `author` (two names), and `date`, in a project whose settings named a different author and a keyword:
 
-- **Its PowerPoint file**: `dc:title` contained the deck's title and `dc:creator` its two authors, separated by a semicolon. `dc:language` and `cp:keywords` were empty; the language is recorded on the text of each slide instead. The project's author and keyword were not written to the file.
-- **Its reveal.js presentation and its page**: a `<meta name="author">` for each author, `<meta name="dcterms.date">`, and the title as `<title>`. The page linked to the license's deed; the presentation did not.
+- **Its PowerPoint file**: `dc:title` contained the deck's title, `dc:creator` its two authors, separated by a semicolon, and `dc:language` the deck's language, which was the project's. `cp:keywords` was empty: the deck set no keywords, and the project's author and keyword were not written to the file.
+- **Its reveal.js presentation and its page**: a `<meta name="author">` for each author, `<meta name="dcterms.date">`, and the title as `<title>`. Both contained a `<link rel="license">` element with the address of the license's deed.
 
 A PowerPoint deck remediated as a `source` target retains its existing properties, and is given a title if it has none ([The copy](slides.md#the-copy)).
 
