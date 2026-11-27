@@ -242,7 +242,8 @@ def pdf(path):
                 if isinstance(here, pikepdf.Dictionary):
                     _pdf_dictionary(here, found, here is obj and obj.is_indirect
                                     and obj.objgen == root.objgen)
-                    children = here.values()
+                    # keys(), not values(), which pikepdf 9 lacks
+                    children = [here[key] for key in here.keys()]
                 elif isinstance(here, pikepdf.Array):
                     children = list(here)
                 else:
