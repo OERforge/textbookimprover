@@ -1877,6 +1877,62 @@ def case_author_byline(work):
     ]
 
 
+def case_inputs_traced(work):
+    """The inventory of inputs held to what a run read (util/check-inputs.py,
+    under strace): a project of two built parts, one unpacked from a zip in
+    upstream/, a part of files, a sidecar, a footer and a stylesheet kept
+    in files, and three targets. Its first run, which unpacks the zip, and
+    its second, which reads what it unpacked, each read no file in the
+    project the inventory doesn't list, and every file it lists as a
+    source, a sidecar, a setting, or a named file. Skipped without
+    strace."""
+    if not shutil.which("strace"):
+        return [("strace, which the check runs the conversion under", lambda: print(
+            "  skip  strace not installed; the inventory isn't held to a trace") or True)]
+
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    write("project.yaml", "project:\n  identifier: org.example.traced\n  title: Traced\n"
+          "  contents: [one, two]\n  parts:\n    book: {kind: book}\n"
+          "    data: {kind: files}\n    ext: {kind: book, from: upstream/ext.zip}\n")
+    write("conversion.yaml", "defaults:\n  footer: footer.md\ntargets:\n  html:\n"
+          "    format: html\n    html:\n      css: templates/site.css\n  epub:\n"
+          "    format: epub3\n  word:\n    format: docx\n  ext:\n    format: html\n"
+          "    part: ext\n")
+    write("footer.md", "Made for the trace.\n")
+    write("templates/site.css", "body { color: #222; }\n")
+    write("src/book/one.md", "# One\n\n![A box](box.png)\n\nText.\n")
+    write("src/book/two.md", "# Two\n\nMore.\n")
+    write("src/data/table.csv", "a,b\n1,2\n")
+    write("sidecars/book/image-alt.csv", "\ufeffimage,alt\n")
+    shutil.copy(os.path.join(FIXTURES, "media-a.docx"), os.path.join(work, "src", "book",
+                                                                    "three.docx"))
+    from PIL import Image
+    Image.new("RGB", (40, 30), (200, 10, 10)).save(os.path.join(work, "src", "book", "box.png"))
+    os.makedirs(os.path.join(work, "upstream"))
+    with zipfile.ZipFile(os.path.join(work, "upstream", "ext.zip"), "w") as archive:
+        archive.writestr("ext.md", "# Ext\n\nFrom a zip.\n")
+
+    def traced():
+        return subprocess.run(["python3", os.path.join(ROOT, "util", "check-inputs.py"), "-d",
+                               work, "--", "--no-sandbox", "--quiet"],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    first, second = traced(), traced()
+    return [
+        ("the first run, which unpacks the zip, reads nothing the inventory doesn't list, "
+         "and each file it lists",
+         lambda: first.returncode == 0 and "The inventory and the run agree" in first.stdout
+         or fail(first.stdout[-1500:] + first.stderr[-1500:])),
+        ("the second, which reads what was unpacked, the same, the files part not read",
+         lambda: second.returncode == 0 and "The inventory and the run agree" in second.stdout
+         and "as expected of its role: src/data/table.csv" in second.stdout
+         or fail(second.stdout[-1500:] + second.stderr[-1500:])),
+    ]
+
+
 def case_isbn_hyphens(work):
     """An ISBN's hyphens checked against the ISBN agency's ranges before
     anything is converted, by the suites' own range message: hyphens
@@ -14174,6 +14230,7 @@ CASES = [
     ("a colophon, the book's credits and how a copy was made", case_colophon),
     ("an ISBN's hyphens checked against its agency's ranges", case_isbn_hyphens),
     ("a page's author in each target's metadata, its byline shown or not", case_author_byline),
+    ("every file a run reads, in the inventory of inputs", case_inputs_traced),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),
@@ -14291,7 +14348,8 @@ SLOW = {"where the book is named", "an HTML source", "two files, one page",
         "the LaTeX a book supplies reads only what its part may",
         "the book's facts in the PDF's XMP", "a picture's metadata taken out of the outputs",
         "a colophon, the book's credits and how a copy was made",
-        "a target built again only when what it's built from changed"}
+        "a target built again only when what it's built from changed",
+        "every file a run reads, in the inventory of inputs"}
 
 
 def run_cases(cases):

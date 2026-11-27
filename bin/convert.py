@@ -682,34 +682,13 @@ class Target:
 # --------------------------------------------------------------------------
 
 def target_named_files(target, base, schema, latex_book=False):
-    """Each file a target's settings name and its build reads, as the run
-    resolves it: its path settings (a stylesheet, a template, a reference
-    document) in the sections it reads, a header or footer that names a
-    file, and latex.macros. One the settings may not name, or that isn't
-    there, is counted by its path, as missing."""
-    import stamps
-    values = stamps.named_settings(schema, target.resolved.settings, target.format)
-    for key in ("header", "footer"):
-        named = pagefooter.named_file(target[key], base)
-        if named:
-            values.append(named)
-    if target.format in ("pdf", "latex") or latex_book:
-        macros = str(target["latex.macros"] or "").strip()
-        if macros:
-            values.append(macros)
-    found = []
-    for value in values:
-        # One the settings may not name isn't read, here or by the build,
-        # which stops at it; its value is in the settings digest.
-        if os.path.isabs(value):
-            if P(base).inside(value):
-                found.append(value)
-            continue
-        try:
-            found.append(P(base).named(value, PART))
-        except projectpaths.Refused:
-            continue
-    return found
+    """Each file a target's settings name and its build reads, as the
+    inventory of inputs gives it (lib/inputs.py), which the stamp counts
+    by: its path settings in the sections it reads, a header or footer
+    that names a file, and latex.macros. One the settings may not name,
+    or that isn't there, is counted by its path, as missing."""
+    import inputs
+    return inputs.named_files(base, target.resolved, target.format, PART, schema, latex_book)
 
 
 def stamp_targets(base, targets, latex_book=False):

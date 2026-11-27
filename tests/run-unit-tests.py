@@ -1972,6 +1972,85 @@ def check_isbn_ranges():
     ]
 
 
+def check_inputs():
+    """lib/inputs.py's inventory, and util/check-inputs.py's reading of a
+    trace: each role (the settings files, a part's sources but a backup
+    and a dot file, a files part, the sidecars, a file a setting names, a
+    named file that isn't there marked missing, upstream/'s files), the
+    stamps' named files the inventory's; and from a trace, a read before
+    any write an input, a read after the run wrote the file not, output/
+    and what's outside the project left out, a call strace split across
+    two lines joined, and a listed file unread a disagreement unless the
+    run wrote it or its role is upstream or files."""
+    import inputs
+    check = load(os.path.join(ROOT, "util", "check-inputs.py"), "checkinputs")
+    root = scratch("inputs-")
+
+    def write(name, text=""):
+        path = os.path.join(root, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    write("project.yaml", "project:\n  identifier: org.example.inputs\n  title: Inputs\n"
+          "  parts:\n    book: {kind: book}\n    data: {kind: files}\n")
+    write("conversion.yaml", "defaults:\n  footer: footer.md\ntargets:\n  html:\n"
+          "    format: html\n    html:\n      css: site.css\n  pdf:\n    format: pdf\n")
+    for name in ("footer.md", "site.css", "src/book/one.md", "src/book/pic.png",
+                 "src/book/one.md~", "src/book/.hidden", "src/data/table.csv",
+                 "sidecars/book/image-alt.csv", "upstream/book.zip", "notes.txt"):
+        write(name, "x\n")
+    entries = {e.path: e for e in inputs.inventory(root)}
+    roles = {path: (e.role, e.part, e.missing) for path, e in entries.items()}
+    trace = os.path.join(root, "trace.txt")
+    real = os.path.realpath(root)
+    with open(trace, "w", encoding="utf-8") as fh:
+        fh.write(
+            f'7 openat(AT_FDCWD<{real}>, "project.yaml", O_RDONLY|O_CLOEXEC) = 3<x>\n'
+            f'7 openat(AT_FDCWD<{real}/src/book>, "one.md", O_RDONLY <unfinished ...>\n'
+            f'8 openat(AT_FDCWD<{real}>, "output/x.json", O_RDONLY) = 4<x>\n'
+            f'7 <... openat resumed>) = 5<x>\n'
+            f'8 openat(AT_FDCWD<{real}>, "src/book/pic.png", O_WRONLY|O_CREAT|O_TRUNC, 0644) = 6<x>\n'
+            f'8 openat(AT_FDCWD<{real}>, "src/book/pic.png", O_RDONLY) = 6<x>\n'
+            f'8 openat(AT_FDCWD<{real}>, "notes.txt", O_RDONLY) = 6<x>\n'
+            f'8 openat(AT_FDCWD</etc>, "passwd", O_RDONLY) = 6<x>\n'
+            f'8 openat(AT_FDCWD<{real}>, "src/book", O_RDONLY|O_DIRECTORY) = 6<x>\n'
+            f'8 openat(AT_FDCWD<{real}>, "footer.md", O_RDONLY) = -1 ENOENT (No such file)\n')
+    read, written = check.project_reads(trace, root)
+    listed = [e for e in entries.values()]
+    unlisted, unread, expected = check.compare(read, written, listed)
+    schema, _ = inputs.schemas()
+    named = sorted({os.path.relpath(p, root) for _, resolved, part in inputs.targets(root)
+                    for p in inputs.named_files(root, resolved, resolved["format"], part, schema)})
+    return [
+        ("each role, a backup and a dot file left out",
+         lambda: roles == {
+             "conversion.yaml": ("settings", None, False),
+             "project.yaml": ("settings", None, False),
+             "footer.md": ("named", "book", False),
+             "site.css": ("named", "book", False),
+             "latex-conversion-macros.tex": ("named", "book", True),
+             "src/book/one.md": ("source", "book", False),
+             "src/book/pic.png": ("source", "book", False),
+             "src/data/table.csv": ("files", "data", False),
+             "sidecars/book/image-alt.csv": ("sidecar", "book", False),
+             "upstream/book.zip": ("upstream", None, False)} or fail(repr(roles))),
+        ("the named files the stamps count, the inventory's",
+         lambda: named == ["footer.md", "latex-conversion-macros.tex", "site.css"]
+         or fail(repr(named))),
+        ("a trace's reads: before any write, in the project, outside output/, a split call "
+         "joined, a folder and a failed open not reads",
+         lambda: read == {"project.yaml", "src/book/one.md", "notes.txt"}
+         and written == {"src/book/pic.png"} or fail(repr((read, written)))),
+        ("a read not listed, and a listed file unread, disagreements; one the run wrote, an "
+         "upstream file, and a files part's not",
+         lambda: unlisted == ["notes.txt"]
+         and unread == ["conversion.yaml", "footer.md", "sidecars/book/image-alt.csv",
+                        "site.css"]
+         and expected == ["src/data/table.csv", "upstream/book.zip"]
+         or fail(repr((unlisted, unread, expected)))),
+    ]
+
+
 def check_release():
     """The release's settings (project.published, copyright, work_type, and
     coverage.time) as a run resolves them: a date the calendar has, a date
@@ -14834,6 +14913,7 @@ GROUPS = [
     ("lib/people.py, the people and organizations a book's settings name", check_people),
     ("lib/identifiers.py, a book's DOI, ISBNs, and address", check_book_identifiers),
     ("lib/isbnranges.py, an ISBN's hyphens by its agency's ranges", check_isbn_ranges),
+    ("lib/inputs.py, the inventory of inputs, and a trace read against it", check_inputs),
     ("lib/licenses.py, a book's license and copyright line", check_licenses),
     ("lib/education.py, a book's subjects, readers' ages, and time", check_education),
     ("a book's release: its date, copyright, type of work, and period", check_release),
