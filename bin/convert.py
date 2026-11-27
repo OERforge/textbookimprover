@@ -120,6 +120,7 @@ try:
     from sidecars import math_keep_rows
     import texreads
     import sandbox
+    import isbnranges
     import limits
     import filekinds
     import wcag
@@ -1091,6 +1092,37 @@ def old_places(base):
             found += [f"{where}.{section}" for section in ("sidecars", "reports")
                       if block.get(section) is not None]
     return found
+
+
+def isbn_hyphens(base):
+    """The hyphens of the project's ISBNs checked against the ISBN
+    agency's ranges, outside the sandbox, where the range message can be
+    read from its cache or fetched (lib/isbnranges.py): a warning said for
+    each that can't be checked, and the run stopped for each whose hyphens
+    are elsewhere. A setting that isn't an ISBN is the settings check's to
+    report."""
+    import yaml
+    found = []
+    # project.yaml's, and those of a project: block in conversion.yaml.
+    for path in (P(base).project_file(), P(base).config_file()):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = oerconfig.safe_load(fh) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        project = data.get("project") if isinstance(data, dict) else None
+        given = project.get("isbn") if isinstance(project, dict) else None
+        if isinstance(given, dict):
+            found += [(f"project.isbn.{key}", value) for key, value in given.items()
+                      if (f"project.isbn.{key}", value) not in found]
+    errors, warnings = isbnranges.check(found)
+    for line in warnings:
+        say(f"WARNING: {line}")
+    if errors:
+        for line in errors:
+            say(f"ERROR: {line}")
+        die("Stopping: an ISBN's hyphens aren't where its agency puts them, and a colophon "
+            "would show them so. Nothing was converted.")
 
 
 def part_setting(base, part, key):
@@ -8536,6 +8568,10 @@ def main():
         say(pdfcheck.WCAG_ALONE)
     if wcag.choices_given(args) and not args.wcag and not again:
         say(wcag.CHOICES_ALONE)
+    # A range message's file named from where the run was started.
+    ranges = os.environ.get(isbnranges.VARIABLE, "")
+    if ranges.strip() and ranges.strip().lower() != "off":
+        os.environ[isbnranges.VARIABLE] = os.path.abspath(ranges)
     if args.dir is not None:
         try:
             os.chdir(args.dir)
@@ -8590,6 +8626,10 @@ def main():
             "are written to output/reports/<part>/. Take the setting out, and move a "
             "sidecar it named to sidecars/<part>/ under its standard name. Nothing was "
             "converted.")
+    # Before the parts' runs and the sandbox, once: the ISBN agency's
+    # ranges are in a cache outside the project, or fetched.
+    if not (args.locked or again or args.src_status):
+        isbn_hyphens(base)
     if not args.locked:
         # output/ is the run's own, and one run at a time writes it.
         projectpaths.claim_output(base)

@@ -136,8 +136,9 @@ keys:
       or spaces between its parts as the ISBN agency gives them
       (978-0-306-40615-7: the prefix, the registration group, the
       registrant, the publication, and the check digit); a colophon shows
-      it hyphenated as written, and hyphens anywhere else are refused. The
-      EPUB records its own, epub, as an identifier typed ISBN-13, and the
+      it hyphenated as written, and hyphens anywhere else are refused.
+      Hyphens are also checked against the ISBN agency's ranges, which a
+      run fetches into a cache where it needs them. The EPUB records its own, epub, as an identifier typed ISBN-13, and the
       PDF its own, pdf, in its XMP, each as its 13 digits; the others are
       kept for the formats TextbookImprover doesn't make, and for the
       book's records.

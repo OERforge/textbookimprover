@@ -68,6 +68,10 @@ import laidout  # noqa: E402
 # is, before the laying out and after.
 started, place, beside = laidout.started, laidout.place, laidout.beside
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
+# The suites' own range message, so that no run fetches the ISBN agency's
+# (lib/isbnranges.py).
+RANGES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "isbn-ranges.xml")
+os.environ["TEXTBOOKIMPROVER_ISBN_RANGES"] = RANGES
 
 MULTI = """\
 targets:
@@ -1810,6 +1814,49 @@ def case_colophon(work):
          and "\\backmatter" not in tex or fail(tex[-600:])),
     ]
     return checks
+
+
+def case_isbn_hyphens(work):
+    """An ISBN's hyphens checked against the ISBN agency's ranges before
+    anything is converted, by the suites' own range message: hyphens
+    elsewhere stop the run, saying where they go; a message that can't be
+    read is a warning, and the run goes on; and an ISBN without hyphens
+    needs none."""
+    def write(name, text):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def run(isbn, ranges=RANGES):
+        write("project.yaml", "project:\n  identifier: org.example.isbn\n  title: Hyphens\n"
+              f"  isbn: {{epub: '{isbn}', paperback: 0-306-40615-2}}\n")
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                               "--check-only"], cwd=work, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL,
+                              env=dict(os.environ, TEXTBOOKIMPROVER_ISBN_RANGES=ranges))
+    write("src/book/one.md", "# One\n\nText.\n")
+    right, wrong, unread, bare = (
+        (done, done.stdout + done.stderr) for done in (
+            run("978-0-306-40615-7"), run("978-03-06-40615-7"),
+            run("978-0-306-40615-7", ranges=os.path.join(work, "none.xml")),
+            run("9780306406157", ranges=os.path.join(work, "none.xml"))))
+    return [
+        ("hyphens where the ranges put them pass, without a word of them",
+         lambda: right[0].returncode == 0 and "ISBN Agency" not in right[1] or fail(right[1])),
+        ("hyphens elsewhere stop the run, naming the setting and where they go",
+         lambda: wrong[0].returncode != 0 and "ERROR: project.isbn.epub" in wrong[1]
+         and "put them: 978-0-306-40615-7." in wrong[1] and "Nothing was converted" in wrong[1]
+         or fail(wrong[1])),
+        ("a range message that can't be read a warning naming it and the settings, the run "
+         "going on",
+         lambda: unread[0].returncode == 0
+         and "WARNING: TEXTBOOKIMPROVER_ISBN_RANGES names none.xml" in unread[1]
+         and "project.isbn.epub, project.isbn.paperback weren't" in unread[1] or fail(unread[1])),
+        ("an ISBN without hyphens beside one with them, the one with them alone named",
+         lambda: bare[0].returncode == 0 and "of project.isbn.paperback weren't" in bare[1]
+         or fail(bare[1])),
+    ]
 
 
 def case_xmp_pdf(work):
@@ -14064,6 +14111,7 @@ CASES = [
     ("what the part's files can do besides be read, listed", case_active_content),
     ("a license page by page", case_page_licenses),
     ("a colophon, the book's credits and how a copy was made", case_colophon),
+    ("an ISBN's hyphens checked against its agency's ranges", case_isbn_hyphens),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),

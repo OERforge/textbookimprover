@@ -111,6 +111,12 @@ set -u
 # it's run by itself.
 unset PANDOC_DATA_DIRS
 
+# No run fetches the ISBN agency's range message: the suites read their
+# own, whose ranges are invented (lib/isbnranges.py). The convert and EPUB
+# suites set it too, for when they're run by themselves.
+TEXTBOOKIMPROVER_ISBN_RANGES="$(cd "$(dirname "$0")" && pwd)/fixtures/isbn-ranges.xml"
+export TEXTBOOKIMPROVER_ISBN_RANGES
+
 usage () {
   echo "usage: bash tests/run-all.sh [-j N]   (N things at once; default half the processors)"
 }

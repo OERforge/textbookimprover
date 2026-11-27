@@ -1822,6 +1822,156 @@ def check_book_identifiers():
     ]
 
 
+def check_isbn_ranges():
+    """lib/isbnranges.py: an ISBN's parts by the ISBN agency's range
+    message (the suites' own, its ranges invented), a setting's hyphens
+    elsewhere an error saying where they go, an ISBN-10's in its own form,
+    one in a range the message doesn't define and a message that can't be
+    had warnings, and nothing checked with the variable off or with no
+    hyphens; the cache fetched where it's missing, and again where it's a
+    day old and doesn't define a range, a fetch that fails leaving it; a
+    fetch kept only when it reads as a range message, and a redirect away
+    from https refused; and a message declaring an entity, with another
+    root, a rule that isn't one, or over 16 MB refused."""
+    import http.server
+    import threading
+    import isbnranges
+    fixture = os.path.join(HERE, "fixtures", "isbn-ranges.xml")
+    with open(fixture, "rb") as fh:
+        data = fh.read()
+    ranges = isbnranges.load(fixture)
+    split = [ranges.split(d) for d in ("9780306406157", "9781234567897", "9781402894626",
+                                       "9780999999998", "9796000000000",
+                                       "9780200000000", "9780699999991", "9786001234569")]
+    settings = [("isbn.a", "978-0-306-40615-7"), ("isbn.b", "978-03-06-40615-7"),
+                ("isbn.c", "0-306-40615-2"), ("isbn.d", "03-06-40615-2"),
+                ("isbn.e", 9780306406157), ("isbn.f", "9780306406157"),
+                ("isbn.g", "978-0-306-40615-8"), ("isbn.h", "978-0-999-99999-8")]
+    errors, warnings = isbnranges.check(settings, variable=fixture)
+    off = isbnranges.check(settings, variable="off")
+    bare = isbnranges.check(settings[4:6], variable="", fetcher=lambda p: 1 / 0)
+    unread = isbnranges.check(settings[:1], variable="/nonexistent/RangeMessage.xml")
+    calls = []
+
+    def fetcher(path, fails=False):
+        calls.append(path)
+        if fails:
+            raise OSError(101, "Network is unreachable")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return isbnranges.parse(data)
+
+    with tempfile.TemporaryDirectory() as folder:
+        cache = os.path.join(folder, "isbn", "RangeMessage.xml")
+        first = isbnranges.check(settings[:1], variable="", path=cache, fetcher=fetcher)
+        again = isbnranges.check(settings[:1], variable="", path=cache, fetcher=fetcher)
+        undefined = settings[7:]
+        fresh = isbnranges.check(undefined, variable="", path=cache, fetcher=fetcher)
+        os.utime(cache, (time.time() - 2 * 86400,) * 2)
+        stale = isbnranges.check(undefined, variable="", path=cache, fetcher=fetcher)
+        os.utime(cache, (time.time() - 2 * 86400,) * 2)
+        failed = isbnranges.check(undefined, variable="", path=cache,
+                                  fetcher=lambda p: fetcher(p, fails=True))
+        kept, fetches = os.path.isfile(cache), list(calls)
+        os.remove(cache)
+        none = isbnranges.check(settings[:1], variable="", path=cache,
+                                fetcher=lambda p: fetcher(p, fails=True))
+        # A fetch from a server here: the message kept, then a page that
+        # isn't one refused, the copy as it was.
+        answers = [data, b"<html><body>Not found</body></html>"]
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = answers.pop(0)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        address = f"http://127.0.0.1:{server.server_port}/export_rangemessage.xml"
+        saved = {k: os.environ.pop(k) for k in list(os.environ)
+                 if k.lower() in ("http_proxy", "https_proxy", "all_proxy")}
+        try:
+            fetched = isbnranges.fetch(cache, url=address)
+            try:
+                isbnranges.fetch(cache, url=address)
+                junk = ""
+            except ValueError as exc:
+                junk = str(exc)
+        finally:
+            os.environ.update(saved)
+            server.shutdown()
+            server.server_close()
+        with open(cache, "rb") as fh:
+            after = fh.read()
+        leftovers = [n for n in os.listdir(os.path.dirname(cache)) if n != "RangeMessage.xml"]
+
+    class Request:
+        full_url = isbnranges.URL
+    try:
+        isbnranges._HttpsOnly().redirect_request(Request(), None, 302, "Found", {},
+                                                 "http://www.isbn-international.org/x.xml")
+        redirect = ""
+    except ValueError as exc:
+        redirect = str(exc)
+    refused = []
+    head = data.split(b"<ISBNRangeMessage>")[0]
+    for bad in (data.replace(b"]>", b'<!ENTITY a "aaaaaaaaaa">\n]>', 1),
+                data.replace(b"<ISBNRangeMessage>", b"<Other>").replace(
+                    b"</ISBNRangeMessage>", b"</Other>"),
+                data.replace(b"<Length>3</Length>", b"<Length>x</Length>", 1),
+                head + b" " * isbnranges.LIMIT):
+        try:
+            isbnranges.parse(bad)
+            refused.append("")
+        except ValueError as exc:
+            refused.append(str(exc))
+    return [
+        ("an ISBN's parts by the range message, at a range's ends, and after a group of three "
+         "digits, and none where it defines no range",
+         lambda: split == [["978", "0", "306", "40615", "7"], ["978", "1", "234567", "89", "7"],
+                           ["978", "1", "4028", "9462", "6"], None, None,
+                           ["978", "0", "200", "00000", "0"], ["978", "0", "699", "99999", "1"],
+                           ["978", "600", "12", "3456", "9"]]
+         or fail(repr(split))),
+        ("hyphens elsewhere an error saying where they go, an ISBN-10's in its own form, and "
+         "a range not defined a warning; no hyphens, and not an ISBN, the settings check's",
+         lambda: len(errors) == 2 and "isbn.b" in errors[0] and ": 978-0-306-40615-7." in errors[0]
+         and "isbn.d" in errors[1] and ": 0-306-40615-2." in errors[1]
+         and len(warnings) == 1 and "isbn.h" in warnings[0] and "isn't in a range" in warnings[0]
+         or fail(repr((errors, warnings)))),
+        ("nothing checked or fetched with the variable off, or with no ISBN hyphenated",
+         lambda: off == ([], []) and bare == ([], []) or fail(repr((off, bare)))),
+        ("a file the variable names that can't be read a warning naming it",
+         lambda: unread[0] == [] and len(unread[1]) == 1
+         and "/nonexistent/RangeMessage.xml" in unread[1][0] or fail(repr(unread))),
+        ("the cache fetched where it's missing, read where it's there, fetched again a day old "
+         "where it defines no range an ISBN is in, and kept where that fetch fails",
+         lambda: first == again == fresh[:1] + ([],) and len(fresh[1]) == 1
+         and stale[0] == [] and len(stale[1]) == 1 and failed == stale and kept
+         and fetches == [cache] * 3 or fail(repr((first, again, fresh, stale, failed, fetches)))),
+        ("no cache and a fetch that fails a warning saying how to fetch it",
+         lambda: none[0] == [] and len(none[1]) == 1 and "Network is unreachable" in none[1][0]
+         and "util/fetch-isbn-ranges.py" in none[1][0] or fail(repr(none))),
+        ("a fetch kept where it reads as a range message, and a page that doesn't refused, the "
+         "copy left as it was",
+         lambda: fetched.split("9780306406157") == split[0] and "ISBNRangeMessage" in junk
+         and after == data and not leftovers or fail(repr((junk, leftovers)))),
+        ("a redirect from https to http refused",
+         lambda: "isn't https" in redirect or fail(repr(redirect))),
+        ("a message declaring an entity, with another root, a rule's length not a digit, or "
+         "over 16 MB refused",
+         lambda: "entity" in refused[0] and "root" in refused[1] and "rule" in refused[2]
+         and "16 MB" in refused[3] or fail(repr(refused))),
+    ]
+
+
 def check_release():
     """The release's settings (project.published, copyright, work_type, and
     coverage.time) as a run resolves them: a date the calendar has, a date
@@ -14683,6 +14833,7 @@ GROUPS = [
     ("lib/sandbox.py, the sandbox a run converts in", check_sandbox),
     ("lib/people.py, the people and organizations a book's settings name", check_people),
     ("lib/identifiers.py, a book's DOI, ISBNs, and address", check_book_identifiers),
+    ("lib/isbnranges.py, an ISBN's hyphens by its agency's ranges", check_isbn_ranges),
     ("lib/licenses.py, a book's license and copyright line", check_licenses),
     ("lib/education.py, a book's subjects, readers' ages, and time", check_education),
     ("a book's release: its date, copyright, type of work, and period", check_release),

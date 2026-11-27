@@ -61,6 +61,9 @@ ROOT = os.path.dirname(HERE)
 BIN = os.path.join(ROOT, "bin")
 FIXTURES = os.path.join(HERE, "fixtures")
 NEEDED = ["metadata", "tables", "tables-b", "media-a", "math"]
+# The suites' own range message, so that no run fetches the ISBN agency's
+# (lib/isbnranges.py).
+os.environ["TEXTBOOKIMPROVER_ISBN_RANGES"] = os.path.join(HERE, "fixtures", "isbn-ranges.xml")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 import laidout  # noqa: E402
