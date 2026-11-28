@@ -28,6 +28,10 @@ ROLES
             unpacks into src/<part>/ when that folder is empty, and a
             deck's original that util/swap-in-pptx.py replaced
 
+The project's manifest, ti-archive.yaml at its top, isn't an input
+either, though a run reads it: it's what the inputs are compared with
+(lib/projectarchive.py).
+
 A file whose name the stamps pass over (a dot name, a backup, an
 autosave, a Windows thumbnail or download mark) is in no role: a run
 doesn't read it. A file a setting names that isn't there is listed with
@@ -160,13 +164,15 @@ def _relative(path, root):
     return os.path.relpath(os.path.abspath(path), os.path.abspath(root)).replace(os.sep, "/")
 
 
-def inventory(root, latex_books=()):
+def inventory(root, latex_books=(), leave_out=()):
     """Every input of the project at root, as Entry(path, role, part,
     missing), each path from the project's folder with / between its
     names, sorted by path. latex_books names the parts whose every target
     is a LaTeX book's, whose builds read latex.macros (convert.py knows
     which; a caller that doesn't passes none, and a LaTeX book's macros
-    file is listed where a pdf or latex target names it)."""
+    file is listed where a pdf or latex target names it). leave_out names
+    roles not to list, files or upstream, whose files then aren't read:
+    the stamps' list reads each file it lists."""
     root = os.path.abspath(root)
     project = projectpaths.of(root)
     schema, project_schema = schemas()
@@ -181,6 +187,8 @@ def inventory(root, latex_books=()):
     kinds = parts(root)
     for part, kind in kinds.items():
         role = "files" if kind == "files" else "source"
+        if role in leave_out:
+            continue
         for path, _ in stamps.tree_entries(project.top("src", part), root=root):
             add(f"src/{part}/{path}", role, part)
         if kind != "files":
@@ -191,7 +199,8 @@ def inventory(root, latex_books=()):
                                 latex_book=part in latex_books):
             path = _relative(full, root)
             add(path, "named", part, missing=not os.path.isfile(full))
-    for path, _ in stamps.tree_entries(project.top("upstream"), root=root):
+    for path, _ in [] if "upstream" in leave_out else \
+            stamps.tree_entries(project.top("upstream"), root=root):
         first = path.split("/", 1)[0]
         add(f"upstream/{path}", "upstream",
             first if "/" in path and first in kinds else None)

@@ -76,7 +76,10 @@ keys:
       and the colophon shows it after the title. Quote it: unquoted 1.10
       is read as the number 1.1. packaging.yaml's version, where this is
       empty, is the cartridge's, with a warning to move it here, and
-      where neither is set the cartridge says 1.0.
+      where neither is set the cartridge says 1.0. Where the project has
+      a manifest (ti-archive.yaml), a run whose inputs differ from those
+      it records under this identifier and version stops, so that two
+      sets of files can't go out under one name and number.
 
   kind:
     type: enum

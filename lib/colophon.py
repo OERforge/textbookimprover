@@ -11,7 +11,9 @@ it, who paid for it, and the credit someone reusing it should give. The
 production statement names TextbookImprover's version and commit,
 Pandoc's version, and the day of the run's moment in UTC, as ISO 8601
 writes it (SOURCE_DATE_EPOCH, so that a build made again under it says
-the same), in a div of class
+the same), and, where the project has a manifest, that the inputs are
+its release's, by their digest, or that the build is a draft (--draft),
+in a div of class
 oer-colophon, which a comparison of two builds can set apart; a PDF's
 adds the TeX distribution and the faces its pages are set in, which
 LaTeX finds as it sets them (FACES) and names on its next run.
@@ -410,12 +412,33 @@ FACES = r"""\ifdefined\directlua
 def this_run():
     """(software, pandoc, moment) as this run knows them: TextbookImprover's
     version, commit, and changes (the run's one answer, tiversion's
-    one_commit), Pandoc's version, and the run's moment."""
+    one_commit), with what the check against the project's manifest
+    found (projectarchive.run_inputs); Pandoc's version; and the run's
+    moment."""
     import pandocversion
+    import projectarchive
     import tiversion
     commit, changed = tiversion.one_commit()
-    return ({"version": tiversion.VERSION, "commit": commit, "changed": changed},
+    return ({"version": tiversion.VERSION, "commit": commit, "changed": changed,
+             "inputs": projectarchive.run_inputs()},
             pandocversion.version(), moment_now())
+
+
+def from_inputs(software):
+    """What the production statement says of the inputs, or None: a
+    release's, its inputs digest shortened, where they're those the
+    project's manifest records; a draft, where the run was told it is
+    one."""
+    said = software.get("inputs")
+    if not said:
+        return None
+    state, digest = said
+    short = digest[:len("sha256:") + 12]
+    if state == "release":
+        return para(f"Built from the inputs of the release its manifest records, {short}.")
+    if state == "draft":
+        return para(f"A draft, not a release, built from the inputs {short}.")
+    return None
 
 
 def blocks(project, software, pandoc, moment, latex=False):
@@ -424,6 +447,9 @@ def blocks(project, software, pandoc, moment, latex=False):
     TeX and faces (latex, FACES in the preamble). In a div marked English
     where the book's language is another."""
     production = [made_with(software, pandoc, moment)]
+    inputs = from_inputs(software)
+    if inputs:
+        production.append(inputs)
     if latex:
         production.append({"t": "Para", "c": [{"t": "RawInline",
                                                 "c": ["latex", "\\OERColophonSet"]}]})

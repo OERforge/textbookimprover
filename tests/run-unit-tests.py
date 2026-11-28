@@ -2867,6 +2867,184 @@ def check_tiversion():
     ]
 
 
+def check_projectarchive():
+    """lib/projectarchive.py: a digest the SHA-256 of a BagIt manifest's
+    lines, sorted by their paths' bytes, % CR and LF encoded; a text
+    file's text hash without its byte-order mark and with LF line ends,
+    across the reads it's made in, and a files part's as stored only; the
+    manifest written quoted and read back; a manifest refused for an
+    alias, its size, a link, a path out of the folder or not printable
+    or not NFC, one listed twice, a hash that isn't one, a role there
+    isn't, and a digest not its list's; the check's states and messages,
+    a recorded name made printable; and what a run tells the programs it
+    starts read only in its form."""
+    import unicodedata
+    import projectarchive
+
+    def write(root, name, data):
+        path = os.path.join(root, *name.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+    work = scratch("archive-")
+    lf, crlf = os.path.join(work, "lf"), os.path.join(work, "crlf")
+    for root, end, mark in ((lf, b"\n", b""), (crlf, b"\r\n", b"\xef\xbb\xbf")):
+        write(root, "project.yaml", b"project:" + end + b"  identifier: org.example.a" + end
+              + b"  version: '1.0'" + end + b"  parts:" + end + b"    book: {kind: book}"
+              + end + b"    data: {kind: files}" + end)
+        write(root, "src/book/one.md", mark + b"# One" + end + end + b"Text." + end)
+        write(root, "src/book/100% p.png", b"\x89PNG")
+        write(root, "src/data/t.csv", b"a,b\r\n")
+    old_chunk = projectarchive.CHUNK
+    projectarchive.CHUNK = 5
+    try:
+        a, b = projectarchive.manifest(lf), projectarchive.manifest(crlf)
+    finally:
+        projectarchive.CHUNK = old_chunk
+    by_path = {f["path"]: f for f in a["files"]}
+    one = by_path["src/book/one.md"]
+    lines = sorted(((f["text"] if f["role"] != "files" and "text" in f else f["sha256"])
+                    + "  " + f["path"].replace("%", "%25") + "\n").encode("utf-8")
+                   for f in a["files"] if f["role"] in ("settings", "source"))
+    by_hand = "sha256:" + hashlib.sha256(b"".join(
+        sorted(lines, key=lambda line: line.split(b"  ", 1)[1]))).hexdigest()
+    projectarchive.write(lf, a)
+    with open(os.path.join(lf, projectarchive.NAME), encoding="utf-8") as fh:
+        written = fh.read()
+    back = projectarchive.read(lf)
+
+    def refused(change, text=None):
+        made = json.loads(json.dumps(a))
+        change(made)
+        try:
+            made["digests"] = projectarchive.digests(made["files"])
+        except KeyError:
+            pass
+        root = os.path.join(work, "bad")
+        shutil.rmtree(root, ignore_errors=True)
+        os.makedirs(root)
+        projectarchive.write(root, made)
+        if text is not None:
+            with open(os.path.join(root, projectarchive.NAME), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        try:
+            projectarchive.read(root)
+        except projectarchive.Problem as problem:
+            return str(problem)
+        return "read"
+
+    def path_to(path):
+        return lambda m: m["files"][0].update(path=path)
+    linked = os.path.join(work, "linked")
+    os.makedirs(linked)
+    os.symlink(os.path.join(lf, projectarchive.NAME), os.path.join(linked, projectarchive.NAME))
+    try:
+        projectarchive.read(linked)
+        link_said = "read"
+    except projectarchive.Problem as problem:
+        link_said = str(problem)
+    old_longest = projectarchive.LONGEST
+    projectarchive.LONGEST = 100
+    try:
+        projectarchive.read(lf)
+        big_said = "read"
+    except projectarchive.Problem as problem:
+        big_said = str(problem)
+    finally:
+        projectarchive.LONGEST = old_longest
+    damaged_digest = refused(lambda m: None, text=written.replace(
+        a["digests"]["inputs"], "sha256:" + "0" * 64))
+    alias = refused(lambda m: None, text="format: &f textbookimprover-archive/1\nbook: *f\n")
+    nested = refused(lambda m: None, text="[" * 50000 + "]" * 50000)
+
+    def changed(edit):
+        made = json.loads(json.dumps(a))
+        edit(made)
+        made["digests"] = projectarchive.digests(made["files"])
+        return made
+    def by_path_of(m):
+        return {f["path"]: f for f in m["files"]}
+    edited = changed(lambda m: by_path_of(m)["src/book/one.md"].update(text="1" * 64))
+    many = changed(lambda m: m["files"].extend(
+        {"path": f"src/book/{name}.md", "sha256": "3" * 64, "text": "3" * 64,
+         "role": "source", "part": "book"} for name in ("a\x1bnew", "b", "c", "d")))
+    revised = dict(edited, project=dict(edited["project"], version="1.1"))
+    adapted = dict(edited, project=dict(edited["project"], identifier="org.example.b"))
+    default = dict(a, project=dict(a["project"], identifier="book"))
+    data_changed = changed(lambda m: by_path_of(m)["src/data/t.csv"].update(sha256="4" * 64))
+    states = [projectarchive.check(None, a).state, projectarchive.check(a, b).state,
+              projectarchive.check(a, edited).state, projectarchive.check(a, edited, True).state,
+              projectarchive.check(a, revised).state, projectarchive.check(a, adapted).state,
+              projectarchive.check(a, default).state, projectarchive.check(a, default, True).state,
+              projectarchive.check(a, default, carries=False).state,
+              projectarchive.check(a, data_changed).state]
+    stop = projectarchive.check(a, many).stop or ""
+    environ = {}
+    projectarchive.announce("release", a["digests"]["inputs"], environ)
+    told = projectarchive.run_inputs(environ)
+    bad_told = [projectarchive.run_inputs({projectarchive.RUN_INPUTS: value}) for value in (
+        "release sha256:xyz", "pretend " + a["digests"]["inputs"], "release", "")]
+    decomposed = unicodedata.normalize("NFD", "src/book/café.md")
+    return [
+        ("a digest the SHA-256 of BagIt's lines, sorted by path, % written %25",
+         lambda: a["digests"]["inputs"] == by_hand or fail(a["digests"]["inputs"] + " " + by_hand)),
+        ("a path's CR, LF, and % encoded as BagIt writes them",
+         lambda: projectarchive.bag_path("a%b\rc\nd") == "a%25b%0Dc%0Ad"
+         or fail(projectarchive.bag_path("a%b\rc\nd"))),
+        ("a text file's text hash without its byte-order mark, LF line ends, read in pieces",
+         lambda: one["text"] == hashlib.sha256(b"# One\n\nText.\n").hexdigest()
+         and one["sha256"] == one["text"]
+         and {f["path"]: f for f in b["files"]}["src/book/one.md"]["text"] == one["text"]
+         and {f["path"]: f for f in b["files"]}["src/book/one.md"]["sha256"] != one["sha256"]
+         or fail(repr((one, b["files"])))),
+        ("a picture and a files part's file hashed as stored only, the files part apart",
+         lambda: "text" not in by_path["src/book/100% p.png"]
+         and "text" not in by_path["src/data/t.csv"]
+         and by_path["src/data/t.csv"]["role"] == "files"
+         and a["digests"]["files"] == b["digests"]["files"]
+         and a["digests"]["inputs"] == b["digests"]["inputs"]
+         and a["digests"]["archive"] != b["digests"]["archive"] or fail(repr(a["digests"]))),
+        ("the manifest written with every value quoted, and read back as written",
+         lambda: '"format": "textbookimprover-archive/1"' in written
+         and '"size": "' in written and back == json.loads(json.dumps(a))
+         or fail(written[:600])),
+        ("a manifest refused for an alias, its size, its depth, and a link",
+         lambda: "anchor or alias" in alias and "larger than" in big_said
+         and "nested deeper" in nested and "a link" in link_said
+         or fail(repr((alias, big_said, nested, link_said)))),
+        ("a path out of the folder, full, not printable, or not NFC refused",
+         lambda: all("isn't one from the project's folder" in refused(path_to(p))
+                     for p in ("../x", "src/../../x", "/etc/passwd", "src//x", "src/\x1b[2Jx",
+                               decomposed, "src\\x"))
+         or fail(repr([refused(path_to(p)) for p in ("../x", "/etc/passwd", decomposed)]))),
+        ("a file listed twice, a hash that isn't one, a role there isn't, and no sha256 refused",
+         lambda: "listed twice" in refused(lambda m: m["files"].append(dict(m["files"][0])))
+         and "64 hexadecimal" in refused(lambda m: m["files"][0].update(sha256="nope"))
+         and "64 hexadecimal" in refused(lambda m: m["files"][0].update(text=["x"]))
+         and "role isn't" in refused(lambda m: m["files"][0].update(role="output"))
+         and "no sha256" in refused(lambda m: m["files"][0].pop("sha256"))
+         or fail(refused(lambda m: m["files"][0].update(role="output")))),
+        ("a digest that isn't its own list's refused, and the format and book checked",
+         lambda: "isn't that of its own list" in damaged_digest
+         and "format isn't" in refused(lambda m: m.update(format="other/1"))
+         and "book isn't" in refused(lambda m: m.update(book="..")) or fail(damaged_digest)),
+        ("the check: none, a release (line ends alone), a stop, a draft, a revision, an "
+         "adaptation, the default identifier stopped unless a draft or carried by no target, "
+         "and a changed files part a stop",
+         lambda: states == ["none", "release", "changed", "draft", "revision", "adaptation",
+                            "changed", "draft", "release", "changed"] or fail(repr(states))),
+        ("the stop names three files, then how many more, made printable, and the ways out",
+         lambda: "(4 file(s): src/book/a\\x1bnew.md, src/book/b.md, src/book/c.md, and 1 "
+         "more; all of them in output/reports/archive-changes.csv)" in stop
+         and "\x1b" not in stop
+         and "raise project.version" in stop and "--draft" in stop
+         and "project.adapters" in stop or fail(stop)),
+        ("what a run tells the programs it starts read only in its form",
+         lambda: told == ("release", a["digests"]["inputs"]) and bad_told == [None] * 4
+         or fail(repr((told, bad_told)))),
+    ]
+
+
 def check_colophon():
     """lib/colophon.py: the credits from the project's settings, each in
     its place and words (the version after the title, the people by their roles, ORCID and ROR links, a
@@ -14924,6 +15102,8 @@ GROUPS = [
     ("lib/activecontent.py, what a file can do besides be read", check_activecontent),
     ("lib/limits.py, what each program a run starts may use", check_limits),
     ("a JVM a run starts given the run's temporary folder", check_java_temp),
+    ("lib/projectarchive.py, a project's manifest and the identity check",
+     check_projectarchive),
     ("lib/colophon.py, a book's credits and how a copy was made", check_colophon),
     ("what a file is by its first bytes, and whether its name says so", check_filekinds),
     ("a key the book alone sets, in a section a target sets too", check_book_level_keys),

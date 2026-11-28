@@ -9,7 +9,10 @@ sandbox, leaves what only it knows in output/work/record/<part>.json
 (write_part): which targets it built and which were up to date, the
 sandbox it ran in, and the limits it had. The run that holds the
 project's lock, outside the sandbox, puts those together with what it
-asks itself (write): the moment, the command line, the project, this copy
+asks itself (write): the moment, the command line, the project, its
+inputs (the inputs digest lib/projectarchive.py makes, the files parts'
+too where there's a manifest, what the check against it found, and
+whether the build is a draft), this copy
 of TextbookImprover, Python and its packages, the parser that read saved
 web pages (html5lib, or lxml standing in), the programs a target is
 built with, Pandoc's data folders, the platform, the variables that stand
@@ -42,8 +45,7 @@ And the versions of the checkers the output check ran, which change the
 reports and not the outputs; and a digest of the software alone, to
 compare two runs by (software_digest).
 
-Not in it yet, of what the archive plan's record holds: a deck's PDF's
-and a drawing's LaTeX.
+Not in it yet: a deck's PDF's and a drawing's LaTeX.
 
 Copyright 2026 Robert Szarka
 
@@ -461,7 +463,35 @@ def _html_parser():
     return htmlparse.BACKEND or "none"
 
 
-def values(base, argv, moment, moment_from, status, checks="full"):
+def _inputs(base, inputs):
+    """The inputs' digests and what the check against the manifest found:
+    inputs as convert.py's identity check gives it, (state, inputs
+    digest, files digest, draft), or the inputs digest alone, made here,
+    where it made none, which reads no files part's file."""
+    import oerconfig
+    import projectarchive
+    if inputs is None:
+        try:
+            inputs = ("none", projectarchive.input_digest(base), None, False)
+        except (OSError, ValueError, oerconfig.ConfigError) as exc:
+            return {"digest": f"not made: {exc}"}
+    state, digest_, files, draft = inputs
+    said = {"digest": digest_}
+    if files:
+        said["files digest"] = files
+    said.update({"manifest": MANIFEST_STATES.get(state, state), "draft": bool(draft)})
+    return said
+
+
+# What the identity check found (projectarchive.check), as the record says
+# it: none, where the project has no manifest.
+MANIFEST_STATES = {"none": "none", "release": "the release it records",
+                   "revision": "a revision of the release it records",
+                   "adaptation": "an adaptation of the release it records",
+                   "draft": "changed under the identifier and version it records"}
+
+
+def values(base, argv, moment, moment_from, status, checks="full", inputs=None):
     """What the record says, every value a string."""
     import stamps
     import tiversion
@@ -482,6 +512,7 @@ def values(base, argv, moment, moment_from, status, checks="full"):
             "command": _command(base, argv),
         },
         "project": _project(base),
+        "inputs": _inputs(base, inputs),
         "textbookimprover": tiversion.describe(),
         "python": {"version": sys.version.split()[0],
                    "implementation": platform.python_implementation()},
@@ -532,12 +563,12 @@ def software_digest(made):
     return hashlib.sha256(json.dumps(part, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def write(base, argv, moment, moment_from, status, checks="full"):
+def write(base, argv, moment, moment_from, status, checks="full", inputs=None):
     """Write output/ti-build.yaml whole, then put it in place."""
     import yaml
     path = os.path.join(projectpaths.of(base).run_output(), NAME)
     text = ("# How this run of TextbookImprover was made (lib/buildrecord.py).\n"
-            + yaml.safe_dump(values(base, argv, moment, moment_from, status, checks),
+            + yaml.safe_dump(values(base, argv, moment, moment_from, status, checks, inputs),
                              default_style='"', sort_keys=False, allow_unicode=True,
                              width=100))
     _write_new(path, text)

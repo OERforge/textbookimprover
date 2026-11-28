@@ -1964,10 +1964,10 @@ def case_inputs_traced(work):
     under strace): a project of two built parts, one unpacked from a zip in
     upstream/, a part of files, a sidecar, a footer and a stylesheet kept
     in files, and three targets. Its first run, which unpacks the zip, and
-    its second, which reads what it unpacked, each read no file in the
-    project the inventory doesn't list, and every file it lists as a
-    source, a sidecar, a setting, or a named file. Skipped without
-    strace."""
+    its second, which reads what it unpacked, and a third with a manifest,
+    which it reads and isn't an input, each read no file in the project
+    the inventory doesn't list, and every file it lists as a source, a
+    sidecar, a setting, or a named file. Skipped without strace."""
     if not shutil.which("strace"):
         return [("strace, which the check runs the conversion under", lambda: print(
             "  skip  strace not installed; the inventory isn't held to a trace") or True)]
@@ -2004,6 +2004,10 @@ def case_inputs_traced(work):
                                work, "--", "--no-sandbox", "--quiet"],
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
     first, second = traced(), traced()
+    # With a manifest, which the run reads and compares every input with.
+    subprocess.run(["python3", os.path.join(ROOT, "util", "write-manifest.py"), "-d", work],
+                   capture_output=True, stdin=subprocess.DEVNULL)
+    third = traced()
     return [
         ("the first run, which unpacks the zip, reads nothing the inventory doesn't list, "
          "and each file it lists",
@@ -2013,6 +2017,176 @@ def case_inputs_traced(work):
          lambda: second.returncode == 0 and "The inventory and the run agree" in second.stdout
          and "as expected of its role: src/data/table.csv" in second.stdout
          or fail(second.stdout[-1500:] + second.stderr[-1500:])),
+        ("the third, with a manifest that the run reads, which is no input, the same",
+         lambda: os.path.isfile(os.path.join(work, "ti-archive.yaml"))
+         and third.returncode == 0 and "The inventory and the run agree" in third.stdout
+         or fail(third.stdout[-1500:] + third.stderr[-1500:])),
+    ]
+
+
+def case_identity_check(work):
+    """The identity check against the project's manifest, ti-archive.yaml
+    (lib/projectarchive.py), which util/write-manifest.py writes: without
+    one, a run builds and its record has the inputs' digest; with one,
+    the same inputs build as its release, the colophon saying so, and so
+    do the same files with other line ends and a byte-order mark; a
+    changed source or a changed file of a files part stops the run before
+    anything is built, naming it and listing it in archive-changes.csv,
+    and --draft builds, the record and the colophon saying it's a draft; a
+    raised version builds as a revision, a new identifier as an
+    adaptation, each with a note; the default identifier stops, and
+    builds with --draft; a manifest that's a link, has an alias, or whose
+    digest isn't its list's stops the run, saying why; and
+    write-manifest.py refuses the default identifier and other inputs
+    under a recorded version."""
+    import yaml
+
+    def write(name, text, mode="w"):
+        path = os.path.join(work, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, mode, **({} if "b" in mode else {"encoding": "utf-8"})) as fh:
+            fh.write(text)
+
+    def project(identifier="org.example.same", version="1.0"):
+        write("project.yaml", f"project:\n  identifier: {identifier}\n  title: Same\n"
+              f"  version: '{version}'\n  contents: [one, {{generate: colophon}}]\n"
+              "  parts:\n    book: {kind: book}\n    data: {kind: files}\n")
+
+    def run(*extra):
+        done = subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                               "--quick", "--quiet", *extra], cwd=work, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL)
+        return done, done.stdout + done.stderr
+
+    def manifest(*extra):
+        done = subprocess.run(["python3", os.path.join(ROOT, "util", "write-manifest.py"),
+                               "-d", work, *extra], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL)
+        return done, done.stdout + done.stderr
+
+    def record():
+        try:
+            with open(os.path.join(work, "output", "ti-build.yaml"), encoding="utf-8") as fh:
+                return yaml.safe_load(fh).get("inputs") or {}
+        except (OSError, AttributeError):
+            return {}
+
+    def colophon():
+        page = os.path.join(work, "output", "html", "colophon.html")
+        if not os.path.isfile(page):
+            return ""
+        with open(page, encoding="utf-8") as fh:
+            return " ".join(fh.read().split())
+
+    def changes():
+        path = os.path.join(work, "output", "reports", "archive-changes.csv")
+        if not os.path.isfile(path):
+            return []
+        with open(path, encoding="utf-8-sig") as fh:
+            return fh.read().splitlines()
+    project()
+    write("conversion.yaml", "targets:\n  html:\n    format: html\n")
+    write("src/book/one.md", "# One\n\nText.\n")
+    write("src/data/table.csv", "a,b\n1,2\n")
+    write("sidecars/book/image-alt.csv", "image,alt\n")
+    unrecorded = run()
+    unrecorded_record = record()
+    first_manifest = manifest()
+    release = run()
+    release_record, release_colophon = record(), colophon()
+    write("src/book/one.md", b"\xef\xbb\xbf# One\r\n\r\nText.\r\n", "wb")
+    line_ends = run()
+    write("src/book/one.md", "# One\n\nText, changed.\n")
+    built_at = os.stat(os.path.join(work, "output", "html", "one.html")).st_mtime_ns
+    stopped = run()
+    stopped_changes = changes()
+    unbuilt = os.stat(os.path.join(work, "output", "html", "one.html")).st_mtime_ns == built_at
+    draft = run("--draft")
+    draft_record, draft_colophon = record(), colophon()
+    refused_manifest = manifest()
+    project(version="1.1")
+    revision = run()
+    project(identifier="org.example.other")
+    adaptation = run()
+    project(identifier="book")
+    unnamed = run()
+    unnamed_draft = run("--draft")
+    refused_default = manifest()
+    project()
+    write("src/book/one.md", "# One\n\nText.\n")
+    write("src/data/table.csv", "a,b\r\n1,2\r\n")
+    data_stopped = run()
+    data_changes = changes()
+    write("src/data/table.csv", "a,b\n1,2\n")
+    archive = os.path.join(work, "ti-archive.yaml")
+    with open(archive, encoding="utf-8") as fh:
+        kept = fh.read()
+    write("ti-archive.yaml", kept.replace('"inputs": "sha256:', '"inputs": "sha256:0', 1))
+    damaged = run()
+    write("ti-archive.yaml", '"format": &f "textbookimprover-archive/1"\n"book": *f\n')
+    aliased = run()
+    os.remove(archive)
+    write("elsewhere.yaml", kept)
+    os.symlink(os.path.join(work, "elsewhere.yaml"), archive)
+    linked = run()
+    return [
+        ("without a manifest, a build, its record giving the inputs' digest",
+         lambda: unrecorded[0].returncode == 0
+         and unrecorded_record.get("digest", "").startswith("sha256:")
+         and unrecorded_record.get("manifest") == "none"
+         and unrecorded_record.get("draft") == "no"
+         or fail(unrecorded[1][-1500:] + repr(unrecorded_record))),
+        ("write-manifest.py records the inputs under the identifier and version",
+         lambda: first_manifest[0].returncode == 0 and "org.example.same version 1.0"
+         in first_manifest[1] and os.path.isfile(archive) or fail(first_manifest[1])),
+        ("the same inputs built as its release, the record and the colophon saying so",
+         lambda: release[0].returncode == 0 and "NOTE: ti-archive.yaml" not in release[1]
+         and release_record.get("manifest") == "the release it records"
+         and release_record.get("digest") == unrecorded_record.get("digest")
+         and "Built from the inputs of the release its manifest records, "
+         + release_record.get("digest", "")[:19] + "." in release_colophon
+         and "Same</em>, version 1.0" in release_colophon
+         or fail(release[1][-1500:] + repr(release_record) + release_colophon[-1500:])),
+        ("other line ends and a byte-order mark the same release",
+         lambda: line_ends[0].returncode == 0 and "Nothing was built" not in line_ends[1]
+         or fail(line_ends[1][-1500:])),
+        ("a changed source a stop before anything is built, named, and listed",
+         lambda: stopped[0].returncode != 0
+         and "The book's inputs have changed since org.example.same version 1.0 was "
+         "recorded in ti-archive.yaml (1 file(s): src/book/one.md;" in stopped[1]
+         and "Nothing was built." in stopped[1] and unbuilt
+         and stopped_changes == ["path,change", "src/book/one.md,changed"]
+         or fail(stopped[1][-1500:] + repr(stopped_changes))),
+        ("--draft builds, the record and the colophon saying it's a draft",
+         lambda: draft[0].returncode == 0 and "so this build is a draft" in draft[1]
+         and draft_record.get("draft") == "yes"
+         and draft_record.get("manifest") == "changed under the identifier and version it "
+         "records" and "A draft, not a release, built from the inputs" in draft_colophon
+         or fail(draft[1][-1500:] + repr(draft_record) + draft_colophon[-1500:])),
+        ("write-manifest.py refuses other inputs under the recorded version",
+         lambda: refused_manifest[0].returncode != 0
+         and "records other inputs under org.example.same version 1.0" in refused_manifest[1]
+         or fail(refused_manifest[1])),
+        ("a raised version a revision, a new identifier an adaptation, each built with a note",
+         lambda: revision[0].returncode == 0 and "this is version 1.1, so it's built as a "
+         "revision of it" in revision[1] and adaptation[0].returncode == 0
+         and "this is org.example.other version 1.0, so it's built as an adaptation of it"
+         in adaptation[1] or fail(revision[1][-1500:] + adaptation[1][-1500:])),
+        ("the default identifier a stop, built with --draft, and refused a manifest",
+         lambda: unnamed[0].returncode != 0 and "its identifier is the default, book"
+         in unnamed[1] and unnamed_draft[0].returncode == 0
+         and refused_default[0].returncode != 0 and "default, book" in refused_default[1]
+         or fail(unnamed[1][-1500:] + unnamed_draft[1][-1500:] + refused_default[1])),
+        ("a files part's file with other line ends a stop, compared as stored",
+         lambda: data_stopped[0].returncode != 0 and "src/data/table.csv" in data_stopped[1]
+         and data_changes == ["path,change", "src/data/table.csv,changed"]
+         or fail(data_stopped[1][-1500:] + repr(data_changes))),
+        ("a manifest whose digest isn't its list's, with an alias, or a link a stop",
+         lambda: all(done.returncode != 0 and "can't be read as its manifest" in said
+                     and "Nothing was built." in said for done, said in (damaged, aliased, linked))
+         and "isn't that of its own list" in damaged[1] and "anchor or alias" in aliased[1]
+         and "it's a link" in linked[1]
+         or fail(damaged[1][-800:] + aliased[1][-800:] + linked[1][-800:])),
     ]
 
 
@@ -14315,6 +14489,7 @@ CASES = [
     ("a page's author in each target's metadata, its byline shown or not", case_author_byline),
     ("every file a run reads, in the inventory of inputs", case_inputs_traced),
     ("contents that name none of a book part's pages, a stop", case_contents_name_no_page),
+    ("the identity check against the project's manifest", case_identity_check),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),

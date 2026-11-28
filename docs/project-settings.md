@@ -10,7 +10,7 @@ A name for this book that no other book anywhere will use. It is what an LMS mat
 
 **`version`**—`string`; default `""` (empty)
 
-This release of the book, as its readers should see it: "1.2", say, which the colophon shows as "version 1.2". The identifier names the book for life, and the version names a release of it, so a corrected book keeps its identifier and raises its version, and a re-import updates the course in place. A cartridge records it in its description and names its wrapper module with it (packaging.yaml's module_title), and the colophon shows it after the title. Quote it: unquoted 1.10 is read as the number 1.1. packaging.yaml's version, where this is empty, is the cartridge's, with a warning to move it here, and where neither is set the cartridge says 1.0.
+This release of the book, as its readers should see it: "1.2", say, which the colophon shows as "version 1.2". The identifier names the book for life, and the version names a release of it, so a corrected book keeps its identifier and raises its version, and a re-import updates the course in place. A cartridge records it in its description and names its wrapper module with it (packaging.yaml's module_title), and the colophon shows it after the title. Quote it: unquoted 1.10 is read as the number 1.1. packaging.yaml's version, where this is empty, is the cartridge's, with a warning to move it here, and where neither is set the cartridge says 1.0. Where the project has a manifest (ti-archive.yaml), a run whose inputs differ from those it records under this identifier and version stops, so that two sets of files can't go out under one name and number.
 
 **`kind`**—one of `book`, `slides`; default `book`
 

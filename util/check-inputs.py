@@ -13,7 +13,8 @@ What follows -- is passed to convert.py. The run is the project's own
 run, in its sandbox where it has one, and writes output/ as any run does.
 The inventory's upstream files and a files part's are listed as not read
 without failing, since a run reads an upstream file only to unpack it and
-never builds a files part. Linux only, with strace installed; the
+never builds a files part. The project's manifest, ti-archive.yaml,
+which a run reads to compare the inputs with, isn't one. Linux only, with strace installed; the
 tracing costs about as long again as the run.
 
 Exits 0 when the two agree, 1 when they don't, and 2 when the run
@@ -46,6 +47,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 import inputs  # noqa: E402
+import projectarchive  # noqa: E402
 
 CALL = re.compile(r'^(\d+)\s+(\w+)\((.*)\)\s+=\s+(-?\d+)(.*)$')
 UNFINISHED = re.compile(r'^(\d+)\s+(\w+)\((.*) <unfinished \.\.\.>$')
@@ -56,6 +58,8 @@ WRITES = ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC")
 # Not failures when unread: a run unpacks an upstream file only into an
 # empty folder, and builds no files part.
 UNREAD_EXPECTED = ("upstream", "files")
+# Read and not inputs: the manifest a run compares the inputs with.
+READ_NOT_INPUTS = (projectarchive.NAME,)
 
 
 def _unescape(text):
@@ -130,7 +134,7 @@ def compare(read, written, entries):
     read of it, as unpacking an upstream file writes a part's sources, was
     the run's to make this time, and not read as an input."""
     listed = {entry.path: entry for entry in entries}
-    unlisted = sorted(read - set(listed))
+    unlisted = sorted(read - set(listed) - set(READ_NOT_INPUTS))
     unread = sorted(path for path, entry in listed.items()
                     if path not in read and path not in written and not entry.missing
                     and entry.role not in UNREAD_EXPECTED)

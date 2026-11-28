@@ -708,6 +708,8 @@ def stamp_targets(base, targets, latex_book=False):
     # packaging.yaml's project: block, which conversion holds the book's
     # names to, and reads for them where project.yaml isn't there.
     packaged = oerconfig.inline_project(P(base).packaging_file()) or {}
+    import projectarchive
+    said_inputs = projectarchive.run_inputs()
     for target in targets:
         extra = {"derived": target.derived, "packaging_project": packaged,
                  "environment": stamps.environment_values(target.format)}
@@ -737,7 +739,11 @@ def stamp_targets(base, targets, latex_book=False):
                 **({"--sandbox-env": {name: hashlib.sha256(
                     os.environ.get(name, "").encode("utf-8")).hexdigest()[:16]
                     for name in sorted(SANDBOX_ENV)}} if SANDBOX_ENV else {}),
-                **({"--sandbox-read": sorted(SANDBOX_READ)} if SANDBOX_READ else {}))),
+                **({"--sandbox-read": sorted(SANDBOX_READ)} if SANDBOX_READ else {}),
+                # What the colophon says of the inputs: a release's digest,
+                # or a draft (lib/projectarchive.py).
+                **({"inputs": " ".join(said_inputs)} if said_inputs
+                   and said_inputs[0] in ("release", "draft") else {}))),
             allowed=allowed)
         target.stamp_path = P(base).stamp_file(stamps.stamp_name("target", target.name))
 
@@ -1465,6 +1471,57 @@ def unpack_upstream(base, part, check_only=False, status=False):
             "them). The run reads the folder as it is.")
 
 
+def identity_check(base, parts, draft=False):
+    """The identity check: where a manifest (ti-archive.yaml) is at the
+    project's top, the project's inputs compared with those it records,
+    which stops the run where they differ under its identifier and
+    version, or where the identifier is the default and a target carries
+    it, unless draft. A part whose folder is empty is unpacked from its
+    upstream file first, as its run would. What was found is kept for the
+    build record (RUN_INPUTS) and set for the programs the run starts,
+    for the colophon (projectarchive.announce)."""
+    import inputs
+    import projectarchive
+    global RUN_INPUTS
+    os.environ.pop(projectarchive.RUN_INPUTS, None)
+    try:
+        kept = projectarchive.read(base)
+    except projectarchive.Problem as exc:
+        die(f"{projectarchive.NAME} at the project's top can't be read as its manifest: "
+            f"{exc}. TextbookImprover writes it when a project is packed, and it's what a "
+            "run compares the book's inputs with; take it out of the project's folder to "
+            "build without the comparison. Nothing was built.")
+    if kept is None and not draft:
+        return
+    for part in parts:
+        unpack_upstream(base, part)
+    try:
+        now = projectarchive.manifest(base)
+        carries = any(str(resolved["format"]) in ("epub", "html")
+                      for _, resolved, _ in inputs.targets(base))
+    except oerconfig.ConfigError:
+        # The settings stop the run once a part reads them, saying why.
+        return
+    said = projectarchive.check(kept, now, draft, carries)
+    try:
+        report = projectarchive.write_changes(base, said.changes)
+    except OSError as exc:
+        report = None
+        say(f"NOTE: {projectarchive.CHANGES} wasn't written: {exc}.")
+    if said.stop:
+        die(said.stop)
+    if said.note:
+        say(said.note)
+    elif draft:
+        say("--draft: this build is a draft, not a release; the build record and the "
+            "colophon say so.")
+    if report and said.state != "changed":
+        say(f"The files that differ from the manifest's are listed in "
+            f"{projectpaths.placed(report)}.")
+    RUN_INPUTS = (said.state, now["digests"]["inputs"], now["digests"]["files"], draft)
+    projectarchive.announce("draft" if draft else said.state, now["digests"]["inputs"])
+
+
 def unpacked_elsewhere(base):
     """What to say of a part with nothing to convert whose folder, or the
     project's upstream/, holds a file a run unpacks: such a file is read
@@ -1993,6 +2050,9 @@ MOMENT = (None, None)
 # and which of the checkers its output check ran (buildrecord._checkers).
 RECORD_BASE = None
 RECORD_CHECKS = "full"
+# What the identity check found, (state, inputs digest, files digest,
+# draft), for the build record; None where it made none (identity_check).
+RUN_INPUTS = None
 # A slides run of decks written in Markdown: each .md a deck, read and
 # filtered as a page is, and written by the formats a deck has; or of
 # PowerPoint decks converted for a target of another format than source,
@@ -8497,6 +8557,11 @@ def main():
                              "side; by default as many as fit in three quarters of the "
                              "machine's memory, at 4 GB a build and 2 GB a conversion, up to "
                              "the processors and four")
+    parser.add_argument("--draft", action="store_true",
+                        help="build where the project's manifest (ti-archive.yaml) would "
+                             "stop the run, its inputs changed under the release it "
+                             "records, and mark the build a draft, not a release, in the "
+                             "build record and the colophon")
     parser.add_argument("--rebuild", action="store_true",
                         help="build every target and package, whatever its stamp says "
                              "(as make -B does), keeping the caches in output/work/")
@@ -8672,6 +8737,11 @@ def main():
         buildrecord.clear_fragments(base)
         RECORD_BASE = base
         RECORD_CHECKS = "quick" if args.quick else "wcag" if args.wcag else "full"
+    # The release the project's manifest records, compared with its inputs
+    # before any part is read (lib/projectarchive.py), by the run that
+    # holds the lock.
+    if not (args.locked or args.check_only or args.src_status):
+        identity_check(base, parts, args.draft)
     wanted = [name for name in parts if name in targets_parts(base, DEFAULT_PART)]
     if args.part:
         if args.part not in parts:
@@ -9596,7 +9666,7 @@ def write_record(code):
     import buildrecord
     try:
         path = buildrecord.write(RECORD_BASE, sys.argv[1:], MOMENT[0], MOMENT[1], code or 0,
-                                 RECORD_CHECKS)
+                                 RECORD_CHECKS, inputs=RUN_INPUTS)
         say(f"Build record: {projectpaths.placed(path)}.")
     except (OSError, ValueError) as exc:
         say(f"NOTE: the build record wasn't written: {exc}.")
