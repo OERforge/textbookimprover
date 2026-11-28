@@ -53,7 +53,7 @@ project:
 
 Each target is made from one part: the one its `part:` names in `conversion.yaml`, or the part called `book`. A run builds every part that has a target, one after another, and `--part NAME` builds one.
 
-`project.contents` and `project.numbering` are the book's. A part may give its own `identifier`, `title`, `contents`, and `numbering` in its block, which a run of that part uses in the project's place: a student's and an instructor's version kept as two book parts are then two courses to an LMS. A second book part with no identifier of its own gets a warning.
+`project.contents` and `project.numbering` are the book's. A part may give its own `identifier`, `title`, `contents`, and `numbering` in its block, which a run of that part uses in the project's place: a student's and an instructor's version kept as two book parts are then two courses to an LMS. A second book part with no identifier of its own gets a warning. A second book part with no `contents` of its own takes the project's, which suits an instructor's copy of the student's pages; where its pages have other names, the project's `contents` name none of them, and the run of that part stops, naming `project.parts.<part>.contents` as the place to give its own, or `contents: []` for the order a book with none is given.
 
 ## What a run writes
 

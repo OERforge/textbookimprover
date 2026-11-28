@@ -1877,6 +1877,74 @@ def case_author_byline(work):
     ]
 
 
+def case_contents_name_no_page(work):
+    """A book part whose contents name none of its pages stops the run
+    before any target is built: a book's own contents, and a second book
+    part's taken from the project, which name the first book's pages (its
+    cartridge had been built with no page, and only warnings). A part
+    given contents: [] is built in the order a book with none is given,
+    and a second book with the first's page names is built from the
+    project's contents, as before."""
+    def write(root, name, text):
+        path = os.path.join(root, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def run(root, *arguments):
+        return subprocess.run(["python3", os.path.join(BIN, "convert.py"), "--no-sandbox",
+                               "--quick", "--quiet", *arguments], cwd=root,
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    lone = os.path.join(work, "lone")
+    write(lone, "project.yaml", "project:\n  identifier: org.example.lone\n"
+          "  title: Lone\n  contents: [missing]\n")
+    write(lone, "src/book/one.md", "# One\n\nText.\n")
+    alone = run(lone)
+
+    def two_books(name, ext_block, ext_page):
+        root = os.path.join(work, name)
+        write(root, "project.yaml", "project:\n  identifier: org.example.two\n"
+              "  title: Two\n  contents: [one]\n  parts:\n    book: {kind: book}\n"
+              f"    ext: {ext_block}\n")
+        write(root, "conversion.yaml", "targets:\n  html:\n    format: html\n"
+              "  exthtml:\n    format: html\n    part: ext\n")
+        write(root, "src/book/one.md", "# One\n\nText.\n")
+        write(root, f"src/ext/{ext_page}.md", "# Other\n\nMore.\n")
+        return root, run(root)
+    taken, inherited = two_books("taken", "{kind: book, identifier: org.example.ext}", "other")
+    given, own_order = two_books("given", "{kind: book, identifier: org.example.ext, "
+                                 "contents: []}", "other")
+    same, same_names = two_books("same", "{kind: book, identifier: org.example.ext}", "one")
+
+    def pages(root):
+        manifest = os.path.join(root, "output", "packages", "cartridge-ext",
+                                "imsmanifest.xml")
+        if not os.path.exists(manifest):
+            return None
+        with open(manifest, encoding="utf-8") as fh:
+            return fh.read().count('type="webcontent"')
+    said = alone.stdout + alone.stderr
+    said_two = inherited.stdout + inherited.stderr
+    return [
+        ("a book whose contents name none of its pages stops, naming them, nothing built",
+         lambda: alone.returncode == 1 and "project.contents names none of the book's "
+         "pages (one)" in said and "Nothing was built." in said
+         and not os.path.exists(os.path.join(lone, "output", "html", "one.html"))
+         or fail(said[-1500:])),
+        ("a second book taking the project's contents, none of them its pages, stops, "
+         "saying where they came from",
+         lambda: inherited.returncode == 1 and "The part ext has no contents of its own"
+         in said_two and "project.parts.ext.contents" in said_two
+         and pages(taken) is None or fail(said_two[-1500:])),
+        ("given contents: [], it's built with its pages in the order a book with none gets",
+         lambda: own_order.returncode == 0 and pages(given) == 1
+         or fail((own_order.stdout + own_order.stderr)[-1500:])),
+        ("a second book with the first's page names built from the project's contents",
+         lambda: same_names.returncode == 0 and pages(same) == 1
+         or fail((same_names.stdout + same_names.stderr)[-1500:])),
+    ]
+
+
 def case_inputs_traced(work):
     """The inventory of inputs held to what a run read (util/check-inputs.py,
     under strace): a project of two built parts, one unpacked from a zip in
@@ -1897,7 +1965,8 @@ def case_inputs_traced(work):
             fh.write(text)
     write("project.yaml", "project:\n  identifier: org.example.traced\n  title: Traced\n"
           "  contents: [one, two]\n  parts:\n    book: {kind: book}\n"
-          "    data: {kind: files}\n    ext: {kind: book, from: upstream/ext.zip}\n")
+          "    data: {kind: files}\n    ext: {kind: book, from: upstream/ext.zip,\n"
+          "      identifier: org.example.traced-ext, contents: [ext]}\n")
     write("conversion.yaml", "defaults:\n  footer: footer.md\ntargets:\n  html:\n"
           "    format: html\n    html:\n      css: templates/site.css\n  epub:\n"
           "    format: epub3\n  word:\n    format: docx\n  ext:\n    format: html\n"
@@ -14231,6 +14300,7 @@ CASES = [
     ("an ISBN's hyphens checked against its agency's ranges", case_isbn_hyphens),
     ("a page's author in each target's metadata, its byline shown or not", case_author_byline),
     ("every file a run reads, in the inventory of inputs", case_inputs_traced),
+    ("contents that name none of a book part's pages, a stop", case_contents_name_no_page),
     ("the book's facts in the PDF's XMP", case_xmp_pdf),
     ("a target built again only when what it's built from changed", case_stamps),
     ("a part reads only its own sources", case_reads),

@@ -7724,6 +7724,38 @@ def book_tree(project, pages, numbered=None):
     return tree, titles, api
 
 
+def contents_name_a_page(base, project, pages):
+    """Stop a run whose contents name none of the part's pages, before
+    any target is built: every target would hold the generated pages
+    alone, and a cartridge none. A second book part with no contents of
+    its own takes the project's, which name the first book's pages, so
+    the message says where they came from and how to give it its own."""
+    contents = project.get("contents") or []
+    if not contents or not pages:
+        return
+    tree = unsaid_tree(project, pages)[0]
+    generated = {entry[1] for entry in generated_pages(tree)}
+    if any(stem not in generated and stem != "notes" for stem in flatten_pages(tree)):
+        return
+    stems = sorted(os.path.basename(p)[:-len(INTERMEDIATE)] for p in pages)
+    shown = ", ".join(stems[:5]) + (f", and {len(stems) - 5} more" if len(stems) > 5 else "")
+    own = PART and part_setting(base, PART, "contents") is not None
+    if own:
+        where = f"project.parts.{PART}.contents names"
+        fix = "Name the part's pages there"
+    elif PART and PART != DEFAULT_PART:
+        where = (f"The part {PART} has no contents of its own, so it takes the "
+                 "project's, and project.contents names")
+        fix = (f"Give the part its own under project.parts.{PART}.contents, or "
+               f"contents: [] there for the order a book with none is given")
+    else:
+        where = "project.contents names"
+        fix = "Name the book's pages there"
+    whose = "this part's" if PART and PART != DEFAULT_PART else "the book's"
+    die(f"{where} none of {whose} pages ({shown}), so every target would "
+        f"hold no page of it and its cartridge none. {fix}. Nothing was built.")
+
+
 def unsaid_tree(project, pages):
     """book_tree's structure, saying nothing and writing nothing: (tree,
     titles, api, the problems it found, whether contents named a source
@@ -9133,6 +9165,9 @@ def main():
                         os.path.basename(path)[:-len(INTERMEDIATE)]])
                 pages_by_dir[target.pages_dir] += written_hand
         hand_stems = set(hand)
+        if not DECK_RUN:
+            for pages in pages_by_dir.values():
+                contents_name_a_page(base, project, pages)
 
         # ---- 4.62 each license entry's sentence, at the end of its pages ----
         credited = set()

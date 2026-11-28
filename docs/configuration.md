@@ -248,6 +248,8 @@ project:
         - 1-1-definitions-of-statistics-probability-and-key-terms
 ```
 
+A page `contents` names that isn't among the part's pages is named in a warning and left out. Contents that name none of the part's pages stop the run before any target is built, since every target would hold no page of the book and its cartridge none; the message names the pages there are. A second book part with no `contents` of its own takes the project's ([Parts](layout.md#parts)), and so stops in the same way when its pages have other names.
+
 A group is a container only. In Common Cartridge an item pointing at a page should be a leaf, so a unit with its own introduction lists that page as its first child rather than pointing at it directly. Three levels of nesting are supported; deeper is accepted with a warning, since LMS support for deep hierarchies is uneven.
 
 A group or page can carry a `role`: `front`, `main` (the default), `appendix`, or `back`. It says what part of the book the entry is, which a group's pages inherit. With `numbering: true` on the project, the book counts the way a printed one does: main groups and top-level pages 1, 2, 3 and their pages 1.1, 1.2; appendices A, B and A.1; front and back matter unnumbered, a chapter's own opening page taking the chapter's number. The numbers show in the EPUB's table of contents and headings, the cartridge organization, the generated contents page, and each page's own heading and `<title>`; a target can say `numbering: on` or `off` for itself. A Markdown book written for a Pandoc PDF build declares its parts already, with `\frontmatter`, `\mainmatter`, `\appendix`, `\backmatter`, and `{.appendix}` on a heading, and the guess reads those, so the sample comes out with the roles in place.
