@@ -3,8 +3,8 @@ colophon.py -- the page generate: colophon in a book's contents makes: its
 credits and rights, from the project's settings, and its production
 statement, how this copy was made, from what the run knows of itself.
 
-The credits are what a copyright page would hold: the title and the
-subtitle, the people by their roles, each name linked to its ORCID iD,
+The credits are what a copyright page would hold: the title, the
+subtitle, and the version, the people by their roles, each name linked to its ORCID iD,
 the publisher and the series, the copyright line and the license by name
 and deed, the ISBNs (hyphenated as their settings give them), the DOI, the book's address, where to write about
 it, who paid for it, and the credit someone reusing it should give. The
@@ -186,9 +186,11 @@ def credits(project):
     out = []
     title = licenses.one_line(project.get("title"))
     subtitle = licenses.one_line(project.get("subtitle"))
+    version = licenses.one_line(project.get("version"))
     if title:
         out.append(para([{"t": "Emph", "c": words(title + (": " + subtitle if subtitle
-                                                           else ""))}]))
+                                                           else ""))}],
+                        *([", version " + version] if version else [])))
     for key, label in (("authors", "By"), ("adapters", "Adapted by"),
                        ("editors", "Edited by")):
         if named(project.get(key)):

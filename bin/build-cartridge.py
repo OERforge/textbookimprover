@@ -528,6 +528,27 @@ def keyword_note(project, settings):
     return None
 
 
+def book_version(project, settings):
+    """The cartridge's version: project.version, or packaging.yaml's where
+    the project has none, as a package's was before, or 1.0."""
+    return (str(project.get("version") or "").strip()
+            or str(settings.get("version") or "").strip() or "1.0")
+
+
+def version_note(project, settings):
+    """The warning for a package's version: where it belongs now, or that
+    the project's replaces it."""
+    own = str(project.get("version") or "").strip()
+    packaged = str(settings.get("version") or "").strip()
+    if packaged and not own:
+        return ("packaging.yaml's version is the cartridge's, as before; it's the book's "
+                "now, project.version, which the colophon takes too: move it there.")
+    if packaged and own and packaged != own:
+        return (f"packaging.yaml's version, {packaged}, isn't used: the cartridge takes the "
+                f"book's, project.version, {own}. Take it out of packaging.yaml.")
+    return None
+
+
 def legacy_view(resolved, target):
     """Project the resolved configuration into the v0.1 shape.
 
@@ -543,7 +564,7 @@ def legacy_view(resolved, target):
             "title": project["title"],
             "description": project["description"],
             "language": project["language"],
-            "version": settings["version"],
+            "version": book_version(project, settings),
             "modified": settings["modified"],
             # The project's keywords, or where it has none a package's
             # own, as they were before the project took them (book_keywords).
@@ -1327,9 +1348,10 @@ def main():
             sys.exit(str(exc))
         for warning in resolved.warnings:
             print(f"WARNING: {warning}", file=sys.stderr)
-        note = keyword_note(resolved.project, resolved.settings)
-        if note:
-            print(f"WARNING: {note}", file=sys.stderr)
+        for note in (keyword_note(resolved.project, resolved.settings),
+                     version_note(resolved.project, resolved.settings)):
+            if note:
+                print(f"WARNING: {note}", file=sys.stderr)
         config = legacy_view(resolved, target)
 
         # Two packages of the same format both derive the same

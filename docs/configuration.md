@@ -44,6 +44,8 @@ Two have no useful default: `project.identifier` and `project.title`. With neith
 
 `identifier` is worth care. Brightspace matches on it when re-importing, so changing it duplicates a course rather than updating it. Keep it stable across rebuilds, and change it only when the book is genuinely a different book.
 
+`version` names a release of the book, where the identifier names the book: a corrected book keeps its identifier and raises its version, so a re-import still updates the course in place. A cartridge records it in its description and in its wrapper module's name (`packaging.yaml`'s `module_title`), and the colophon shows it after the title. It was a package's setting in `packaging.yaml`, which a cartridge still takes where the project has none, with a warning to move it, and passes over, with a warning, where the project has one; with neither, the cartridge says 1.0, as it did.
+
 ### The book's people
 
 This section and the four after it are the book's facts, said once in `project.yaml` for every output. [Metadata](metadata.md) follows each of them into the outputs, format by format, with what a page's own source adds and what's taken out.

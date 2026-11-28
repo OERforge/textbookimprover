@@ -952,8 +952,9 @@ def case_identified_cartridge(work):
     the cartridge's manifest: the title with the subtitle after a colon,
     the DOI and the address identifiers in their catalogs, the series what
     it's part of, the rights of a Creative Commons license, the project's
-    keywords; a package's own keywords taken
-    where the project has none, with a warning to move them; and the
+    keywords and version; a package's own keywords and version taken
+    where the project has none, with a warning to move them, and its
+    version passed over for the project's with a warning; and the
     manifest valid against Common Cartridge 1.1."""
     import importlib.util
     import xml.etree.ElementTree as ET
@@ -980,12 +981,13 @@ def case_identified_cartridge(work):
         return done, ET.parse(manifest).getroot()
     write("conversion.yaml", "targets:\n  html:\n    format: html\n")
     write("packaging.yaml", "targets:\n  cartridge:\n    format: common-cartridge\n"
-          "    keywords: [old, words]\n")
+          "    keywords: [old, words]\n    version: '0.9'\n")
     write("src/book/one.md", "# One\n\nText.\n")
     done, root = build("  subtitle: An Open Textbook\n  doi: doi:10.5281/zenodo.1234567\n"
                        "  url: https://example.edu/ids/\n"
                        "  series: {name: Shepherd Open Textbooks, position: '3'}\n"
                        "  keywords: [economics]\n  copyright: © 2026 Robert Szarka\n"
+                       "  version: '1.2'\n"
                        "  license: CC-BY-4.0\n  coverage: {place: United States, time: 1865 to 1900}\n"
                        "  education:\n    level: Undergraduate, lower division\n"
                        "    context: higher education\n    subjects:\n"
@@ -1017,6 +1019,10 @@ def case_identified_cartridge(work):
     spec.loader.exec_module(validator)
     valid = validator.validate_with_schema(manifest) if root is not None else (False, [])
     fallback, old_root = build("")
+
+    def described(at):
+        found = at.find(".//l:general/l:description/l:string", ns) if at is not None else None
+        return found.text if found is not None else ""
     old_words = [k.findtext("l:string", "", ns) for k in old_root.iterfind(".//l:keyword", ns)] \
         if old_root is not None else []
     return [
@@ -1062,6 +1068,14 @@ def case_identified_cartridge(work):
         ("a package's own keywords where the project has none, with a warning to move them",
          lambda: old_words == ["old", "words"] and "project.keywords" in fallback.stdout
          + fallback.stderr or fail(repr(old_words) + fallback.stderr[-600:])),
+        ("the project's version, the package's passed over with a warning to take it out",
+         lambda: described(root).endswith("(version 1.2)")
+         and "packaging.yaml's version, 0.9, isn't used" in done.stdout + done.stderr
+         or fail(described(root) + done.stderr[-600:])),
+        ("a package's own version where the project has none, with a warning to move it",
+         lambda: described(old_root).endswith("(version 0.9)")
+         and "move it there" in fallback.stdout + fallback.stderr
+         or fail(described(old_root) + fallback.stderr[-600:])),
     ]
 
 

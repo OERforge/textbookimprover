@@ -153,10 +153,13 @@ keys:
 
   version:
     type: string
-    default: "1.0"
+    default: ""
     description: >
-      Version recorded in the package metadata. Quote it: unquoted 1.10
-      is read as the number 1.1.
+      Version recorded in the package metadata, where the book's own,
+      project.version, is unset; the run says to move it there, where the
+      colophon and the identity check take it too. With neither, the
+      package says 1.0. Quote it: unquoted 1.10 is read as the number
+      1.1.
 
   modified:
     type: date

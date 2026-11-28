@@ -44,9 +44,9 @@ The directory name to use. Left empty it's derived from the book's title and ide
 
 Directory holding the files to package, for the case where they were not produced by a conversion target listed in includes.
 
-**`version`**—`string`; default `1.0`
+**`version`**—`string`; default `""` (empty)
 
-Version recorded in the package metadata. Quote it: unquoted 1.10 is read as the number 1.1.
+Version recorded in the package metadata, where the book's own, project.version, is unset; the run says to move it there, where the colophon and the identity check take it too. With neither, the package says 1.0. Quote it: unquoted 1.10 is read as the number 1.1.
 
 **`modified`**—`date`; default `""` (empty)
 

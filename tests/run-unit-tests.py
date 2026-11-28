@@ -2869,7 +2869,7 @@ def check_tiversion():
 
 def check_colophon():
     """lib/colophon.py: the credits from the project's settings, each in
-    its place and words (the people by their roles, ORCID and ROR links, a
+    its place and words (the version after the title, the people by their roles, ORCID and ROR links, a
     role's term plural for two, the series, the copyright line and the
     license by name and deed, except where otherwise noted, the ISBNs, the
     DOI, the address, the contact, the funders, and the credit to give);
@@ -2908,7 +2908,7 @@ def check_colophon():
             return node["c"][1]
         return ""
     project = {
-        "title": "Principles <b>& Co", "subtitle": "A Primer",
+        "title": "Principles <b>& Co", "subtitle": "A Primer", "version": "1.2",
         "authors": [{"name": "Ann Lee", "orcid": "0000-0002-1825-0097"}, "Bo Chen", "Cy Dee"],
         "adapters": ["Rob Szarka"], "editors": ["Ed Itor"],
         "contributors": [{"name": "Ed Fox", "role": "ill"}, {"name": "Fay Gu",
@@ -2935,7 +2935,7 @@ def check_colophon():
     other = [text(b) for b in colophon.blocks(
         {"title": "Book", "license": "MIT"}, dict(software, commit="none"), (), 0)]
     expected = [
-        "*Principles <b>& Co: A Primer*",
+        "*Principles <b>& Co: A Primer*, version 1.2",
         "By [Ann Lee](https://orcid.org/0000-0002-1825-0097), Bo Chen, and Cy Dee.",
         "Adapted by Rob Szarka.", "Edited by Ed Itor.",
         "Illustrators: Ed Fox and Fay Gu.", "Author of introduction, etc.: Gil Ho.",

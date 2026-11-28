@@ -1,3 +1,4 @@
-# A key that is another file's setting says whose: the package's version
-# belongs in packaging.yaml, not in a conversion's defaults.
-error: "version is a packaging.yaml setting, under defaults: or a package"
+# A key that is another file's setting says whose: the book's version
+# belongs in project.yaml, and a package's in packaging.yaml, not in a
+# conversion's defaults.
+error: "version is a project setting, under project:, and a packaging.yaml setting, under defaults: or a package"
